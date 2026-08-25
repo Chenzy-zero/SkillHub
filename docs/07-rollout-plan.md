@@ -1,291 +1,398 @@
 # SkillHub 安全管理分阶段上线计划
 
+> 版本：v0.2
+
 ## 1. 上线原则
 
-不要在第一版就把所有公司 Gerrit 提交都绑定到尚未稳定的安全扫描服务。
+当前阶段不追求一次性覆盖所有 Skill 来源和 Runtime 场景。
 
-推荐采用“**先看见 → 再治理 → 再阻断 → 最后强制可信源**”的渐进策略。
+优先顺序：
+
+```text
+先把 Gerrit 中已有 Skill 看清楚
+ -> 再把版本和内容识别做准确
+ -> 再接自动扫描与 CM 审核
+ -> 再进入 SkillHub 正式纳管
+ -> 最后再考虑更强的运行时和外部来源治理
+```
+
+核心目标是先建立一个稳定、可追溯、不会漏 Skill 变更的内部治理闭环。
 
 ---
 
-## Phase 0 — 规范确认
+## Phase 0 — 规范与模型确认
 
 ### 目标
 
-先统一什么是 Skill、什么需要审查、谁负责审批。
+统一 Skill 在系统中的定义。
 
-### 工作
+### 必须确认
 
-- Skill Package 规范；
-- 风险分级；
-- 安全 Checklist；
-- 数据模型；
-- 纳管仓库/branch；
-- 角色/RACI；
-- 例外流程。
+- `SKILL.md` 是识别锚点；
+- Skill Root = `SKILL.md` 所在目录；
+- Skill Package 文件边界；
+- Skill Source key；
+- Canonical Skill；
+- Source Revision；
+- SHA-256 Content Version；
+- Scan/Review/SkillHub 状态分离。
 
-### 门槛
+### 退出条件
 
-未完成这些内容前，不建议开发复杂平台流程。
+以下设计没有重大歧义：
+
+```text
+Source 如何识别
+Revision 如何产生
+Digest 如何计算
+相同 Digest 如何复用
+Source 如何关联到 Canonical Skill
+```
 
 ---
 
-## Phase 1 — 可见性：全量发现但不阻断
+## Phase 1 — iflytek SkillHub 测试环境
+
+### 目标
+
+先搞清楚平台能提供什么，不急着把所有治理逻辑塞进 SkillHub。
+
+### 工作
+
+- 搭建 iflytek SkillHub；
+- 验证用户/RBAC；
+- 验证 Skill 创建、Draft、Publish、Offline；
+- 验证版本模型；
+- 验证 API/CLI；
+- 验证自带 Scanner；
+- 验证审计；
+- 确定公司系统与 SkillHub 的映射方式。
+
+### 关键决策
+
+确认采用：
+
+```text
+模式 A：Approved 后才 Register/Publish
+```
+
+还是：
+
+```text
+模式 B：发现后创建 Draft，Approved 后 Publish
+```
+
+### 退出条件
+
+- SkillHub 基础功能可用；
+- API 清单明确；
+- Draft/Publish 状态语义明确；
+- Scanner 输出可读取；
+- 同步失败有处理方案。
+
+---
+
+## Phase 2 — Gerrit 可见性：Baseline + 增量发现
 
 ### 目标
 
 回答：
 
-- 公司到底有多少 Skill？
-- 在哪些仓库？
-- 谁维护？
-- 哪些带脚本/网络/高权限？
+- 公司 Gerrit 到底有多少 Skill Source；
+- 分布在哪些仓库和路径；
+- 每个 Source 当前是什么 commit；
+- 哪些 Skill Root 正在发生变化。
 
 ### 工作
 
-- Gerrit baseline；
-- Gerrit 增量事件；
-- inventory；
-- digest；
-- 基础自动扫描；
-- Dashboard。
+- Baseline 全量扫描；
+- Gerrit 服务端 Hook/Event；
+- Changed Files Resolver；
+- Skill Root Resolver；
+- Skill Source；
+- Source Revision；
+- Rename/Delete/Move；
+- Reconciliation。
 
 ### 策略
 
 ```text
-发现风险 -> 告警/待办
-不阻断 Gerrit 合入
+发现问题 -> 记录/告警
+不阻塞 Gerrit 合入
 ```
 
 ### 退出条件
 
-- 纳管仓库覆盖率达到目标；
-- 误识别率可接受；
-- 事件丢失有 reconciliation；
-- Scanner 稳定运行。
+- Baseline 可重复执行；
+- A/M/D/R/C 用例全部通过；
+- scripts-only change 可识别；
+- 多 Skill commit 可识别；
+- 事件重复幂等；
+- 对账差异可以修复。
 
 ---
 
-## Phase 2 — SkillHub 上架强门禁
+## Phase 3 — Content Version 与自动安全扫描
 
 ### 目标
 
-所有通过公司官方 SkillHub 分发的 Skill 都必须已审查。
+把“commit 版本”升级为“来源版本 + 内容版本”。
 
 ### 工作
 
-- SkillHub 基础平台上线；
-- 自动 Scanner；
-- 人工 Review Queue；
-- policy engine；
-- Approved digest；
-- publish gate；
-- revoke/offline。
+- Skill Package Snapshot；
+- Manifest；
+- SHA-256 Digest；
+- Content Version 去重；
+- Scan Queue；
+- Scanner Adapter；
+- iflytek 自带 Scanner 或首个公司 Scanner；
+- Finding 标准化；
+- 定时补扫。
 
 ### 策略
 
 ```text
-Gerrit 可继续合入
-但未 Approved 的 Skill 不能上架到生产 SkillHub
+新 Revision -> 计算 Digest
+新 Digest -> 扫描
+已有 Digest -> 检查是否可复用扫描结论
 ```
 
-### 优势
+### 退出条件
 
-风险较小，且可以很快形成“可信发布中心”。
+- Digest 在不同节点计算一致；
+- 内容变化必然产生新 digest；
+- 相同内容不会重复创建 Content Version；
+- Scanner 超时/失败可重试；
+- 实时与定时扫描不会重复失控。
 
 ---
 
-## Phase 3 — 高风险 Gerrit 合入门禁
+## Phase 4 — CM Review 与 SkillHub 纳管
 
 ### 目标
 
-对 L2/L3 Skill，在进入正式 branch 前完成安全审查。
+形成真正的安全闭环。
 
 ### 工作
 
-- Gerrit Check/Label；
-- Submit Requirement；
-- Review 状态回写；
-- Scanner SLA；
-- 故障应急通道。
+- CM Review Queue；
+- Scan Findings 展示；
+- Revision diff；
+- Content Version 审核；
+- Approve/Reject；
+- Canonical Skill 关联；
+- SkillHub Sync Worker；
+- Draft/Publish；
+- 审计。
 
-### 策略
+### 推荐流程
 
 ```text
-L0/L1：可保持异步/快速通道
-L2/L3：未通过安全审查不得合入指定 branch
+Gerrit发现
+ -> Source Revision
+ -> Content Version
+ -> Scanner
+ -> CM Review
+ -> APPROVED
+ -> SkillHub
 ```
 
-### 注意
+### 关键规则
 
-必须先保证：
+- Review 状态与 SkillHub 状态分离；
+- 相同 digest 可按有效策略复用安全结论；
+- SkillHub API 失败不覆盖安全审核事实；
+- 未 APPROVED 的 Content Version 不得误标正式 Published。
 
-- Scanner 高可用；
-- Review SLA；
-- 平台故障处理；
-- 紧急例外审批。
+### 退出条件
 
-否则容易影响研发效率。
+- 一个 SkillHub Published 版本可以完整追溯到 Gerrit Source/Revision/Digest；
+- CM 可查看 Scanner Evidence；
+- SkillHub 同步支持重试；
+- Review Backlog 可监控。
 
 ---
 
-## Phase 4 — Runtime 可信源强制
+## Phase 5 — 灰度运行和制度化
 
 ### 目标
 
-阻止“SkillHub 审批完整，但用户仍直接从公网/本地加载未审 Skill”的旁路。
+先在代表性仓库稳定运行，再扩大覆盖。
 
-### 工作
+### 试点建议
 
-- 公司统一 CLI；
-- Agent 默认 Registry；
-- 安装时 digest 校验；
-- revoke 查询；
-- 本地 Skill 目录盘点；
-- 终端管控；
-- 关键环境公网 Registry 禁止策略。
+优先选择同时包含：
 
-### 策略
+- 纯 Markdown Skill；
+- 脚本型 Skill；
+- 多 Skill 仓库；
+- 多次修改；
+- rename/move；
+- 相同 Skill 多引用来源。
 
-正式环境：
+### 灰度步骤
+
+#### 阶段 1：只记录
 
 ```text
-Unknown source -> Block
-Unapproved digest -> Block
-Revoked digest -> Block
-Approved internal SkillHub digest -> Allow
+发现 -> 扫描 -> Review 待办
 ```
 
----
+不影响开发流程。
 
-## Phase 5 — 高成熟安全能力
+#### 阶段 2：SkillHub 发布门禁
 
-增强项：
+```text
+未 APPROVED -> 不允许正式 SkillHub Publish
+```
 
-- Published Skill 数字签名；
-- Sigstore/企业签名体系；
-- 动态沙箱执行评估；
-- SBOM；
-- 供应链 Provenance；
-- 自动定期复审；
-- Scanner 多引擎一致性；
-- 规则平台；
-- 威胁情报联动；
-- Skill 使用影响分析。
+#### 阶段 3：根据实践决定是否增加 Gerrit Gate
+
+只在 Scanner SLA、审核 SLA、故障处理成熟后评估。
+
+不建议第一阶段直接对所有 Gerrit 提交 Fail Closed。
 
 ---
 
-## 2. 试点建议
+## 2. 历史 Skill 迁移策略
 
-第一批不要全公司上线。
+### 第一步：只建立 Source/Revision/Digest
 
-选择一个：
+Baseline 阶段先把资产看全，不要求同步阻塞完成全部审核。
 
-- 有 20~100 个 Skill；
-- 包含纯 Prompt 和脚本型 Skill；
-- 有 Gerrit 使用经验；
-- 有 CM/安全人员可配合；
-- 对研发效率影响可观察。
+### 第二步：批量自动扫描
 
-的团队进行试点。
+按队列处理历史 Content Version。
 
----
+相同 digest 只需扫描一次。
 
-## 3. 历史 Skill 迁移策略
+### 第三步：CM 分批审核
 
-### 批次 A — L2/L3
+建议优先级：
 
-优先处理高风险：
+1. 带脚本；
+2. 带网络/MCP/凭据操作；
+3. DevOps/CI/CD/发布类；
+4. 普通只读 Skill；
+5. 纯 Markdown Skill。
 
-- 部署；
-- CI/CD；
-- 数据库；
-- Shell；
-- 网络；
-- 凭据。
+### 第四步：SkillHub 纳管
 
-### 批次 B — L1
-
-项目分析、只读工具等。
-
-### 批次 C — L0
-
-纯文档 Prompt/模板，可批量快速扫描与审批。
+通过审核后进入 SkillHub 正式管理。
 
 ---
 
-## 4. 上线检查表
+## 3. 上线检查表
 
-### 平台
+### Skill 识别
 
-- [ ] 备份恢复验证
-- [ ] SSO/RBAC 验证
-- [ ] 管理员不可绕过审批
-- [ ] 审计日志可查询
-- [ ] Scanner 超时/失败可观察
-- [ ] Queue/DB 监控
-- [ ] 撤销功能验证
+- [ ] `SKILL.md` Root 规则确认
+- [ ] Skill Package 范围确认
+- [ ] repository + path + name Source key 确认
+- [ ] branch 语义确认
+- [ ] nested SKILL.md 规则确认
 
 ### Gerrit
 
 - [ ] Baseline 完成
-- [ ] Add/Modify/Delete/Rename/Copy 测试
-- [ ] scripts-only change 测试
-- [ ] 多 Skill commit 测试
+- [ ] Add 测试
+- [ ] Modify 测试
+- [ ] scripts-only 测试
+- [ ] Delete 测试
+- [ ] Rename/Move 测试
+- [ ] Copy 测试
+- [ ] 一个 commit 多 Skill 测试
 - [ ] 重复事件幂等
-- [ ] 漏事件 reconciliation
+- [ ] Reconciliation
 
-### 安全
+### Digest
 
-- [ ] Prompt Injection 样例可检测
-- [ ] Secret Exfiltration 样例可检测
-- [ ] `curl | sh` 样例可阻断
-- [ ] symlink/path traversal 防护
-- [ ] 外部 Skill 固定 revision
-- [ ] 审批 digest 防漂移
+- [ ] SHA-256
+- [ ] 路径排序稳定
+- [ ] 文件 mode 规则确认
+- [ ] LFS 规则确认
+- [ ] symlink 规则确认
+- [ ] 不同节点一致性测试
+- [ ] 相同内容去重测试
 
-### Runtime
+### Scanner
 
-- [ ] 官方 CLI 只使用内网 Registry
-- [ ] Unapproved Skill 安装阻断
-- [ ] Revoked Skill 安装阻断
-- [ ] digest 校验
+- [ ] 新 digest 自动扫描
+- [ ] 已有 digest 复用逻辑
+- [ ] Scanner version 入库
+- [ ] Policy version 入库
+- [ ] Timeout/Retry
+- [ ] 定时补扫
+- [ ] Findings 可追溯
+
+### CM Review
+
+- [ ] 待审队列
+- [ ] Revision 信息
+- [ ] Digest 信息
+- [ ] Diff
+- [ ] Findings
+- [ ] Approve/Reject
+- [ ] 历史记录
+- [ ] Canonical Link/Unlink
+
+### SkillHub
+
+- [ ] 测试环境可用
+- [ ] Draft/Publish 语义确认
+- [ ] API 权限确认
+- [ ] Scanner 能力确认
+- [ ] Sync Retry
+- [ ] Review 与 Sync 状态分离
+- [ ] Published 可追到 Digest/Revision
 
 ---
 
-## 5. 关键上线指标
+## 4. 第一阶段指标
 
-建议阶段目标：
+建议监控：
 
-- Gerrit Skill 发现覆盖率 ≥ 95%，稳定后提升至接近 100%；
-- SkillHub 发布 Skill 审查覆盖率 = 100%；
-- L2/L3 人工审核覆盖率 = 100%；
-- Critical 未接受风险 Finding 上架数 = 0；
-- 已撤销 Skill 通过官方渠道再次安装成功数 = 0；
-- Gerrit 事件补偿后 inventory 差异持续为 0；
-- Review 超期率可监控并持续下降。
+- Gerrit 纳管仓库覆盖率；
+- Skill Source 数量；
+- Canonical Skill 数量；
+- Source Revision 数量；
+- Content Version 数量；
+- Digest 去重复用率；
+- 未扫描 Content Version 数；
+- Scan Failed 数；
+- CM Review Backlog；
+- Approved 数；
+- SkillHub Published 数；
+- SkillHub Sync Failed 数；
+- Reconciliation mismatch 数。
 
 ---
 
-## 6. 建议的决策点
+## 5. 后续阶段路线图
 
-### Gate 1
+等 Gerrit 内部治理稳定后，再评估：
 
-POC 后决定：
+### Phase 6 — 更强风险策略
 
-- iflytek/skillhub；
-- Nacos Skill Registry；
-- 开源 + 自研扩展；
-- 极端情况下完整自研。
+- L0/L1/L2/L3；
+- 自动放行；
+- Security Escalation；
+- Policy Engine；
+- 多 Scanner 交叉验证。
 
-### Gate 2
+### Phase 7 — 外部 Skill 引入
 
-Phase 1 运行稳定后决定是否启用 SkillHub Publish Block。
+- GitHub/公网 Skill；
+- Import Quarantine；
+- 来源固定；
+- License / 供应链治理。
 
-### Gate 3
+### Phase 8 — Runtime 可信源
 
-Publish Block 运行稳定、审核 SLA 达标后，决定是否对 L2/L3 启用 Gerrit Submit Block。
+- 内网 SkillHub 默认源；
+- Digest/签名验证；
+- Runtime 拦截；
+- 本地旁路检测。
 
-### Gate 4
-
-客户端接入成熟后，再逐步启用 Runtime 强制可信源。
+这些不应阻塞当前 Gerrit 内部 Skill 治理 MVP。
