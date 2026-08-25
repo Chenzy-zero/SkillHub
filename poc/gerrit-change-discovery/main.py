@@ -62,8 +62,19 @@ def main():
 
     g = config.get("gerrit", {})
     env_name = g.get("http_password_env", "GERRIT_HTTP_PASSWORD")
-    if g.get("username") and not os.environ.get(env_name):
-        logger.warning("环境变量 %s 未设置；REST 请求将按匿名方式尝试", env_name)
+    has_direct_password = bool(g.get("http_password"))
+    has_env_password = bool(os.environ.get(env_name))
+
+    if g.get("username") and not (has_direct_password or has_env_password):
+        logger.warning(
+            "未配置 Gerrit HTTP Password：请在 config.json 的 gerrit.http_password 中填写，"
+            "或设置环境变量 %s；REST 请求将按匿名方式尝试",
+            env_name,
+        )
+    elif has_direct_password:
+        logger.info("REST 认证: 使用 config.json 中配置的 Gerrit HTTP Password")
+    else:
+        logger.info("REST 认证: 使用环境变量 %s", env_name)
 
     try:
         client = GerritClient.from_config(config, logger)
@@ -96,7 +107,6 @@ def main():
         digest_enabled = bool(config.get("calculate_digest", True)) and not args.no_digest
         if digest_enabled and affected:
             logger.info("[5/6] 获取当前 Patchset Git 对象并仅计算受影响 Skill Root Digest...")
-            repo_dir = None
             try:
                 repo_dir, resolved = clone_or_fetch_project(
                     config, project, revision_sha, revision_ref, logger
