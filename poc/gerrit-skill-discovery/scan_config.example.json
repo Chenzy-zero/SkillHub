@@ -1,0 +1,22 @@
+{
+  "workspace": "./workspace",
+  "output_dir": "./output",
+  "refresh_existing": true,
+  "continue_on_error": true,
+  "include_manifest": false,
+  "repositories": [
+    {
+      "enabled": true,
+      "name": "Skill-CM",
+      "url": "ssh://username@gerrit.company.com:29418/Skill-CM",
+      "revision": "HEAD"
+    },
+    {
+      "enabled": false,
+      "name": "Another-Skill-Repo",
+      "url": "ssh://username@gerrit.company.com:29418/team/another-skill-repo",
+      "revision": "HEAD",
+      "local_dir": "another-skill-repo"
+    }
+  ]
+}
