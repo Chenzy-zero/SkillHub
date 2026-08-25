@@ -31,8 +31,7 @@
     ├── 05-task-breakdown.md
     ├── 06-data-model.md
     ├── 07-rollout-plan.md
-    └── images/
-        └── current-skill-review-flow.png
+    └── 08-current-flow-reproduction.md
 ```
 
 ## 当前阶段
