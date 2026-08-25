@@ -2,6 +2,7 @@
   "gerrit": {
     "base_url": "https://gerrit.company.com",
     "username": "your_username",
+    "http_password": "your_gerrit_http_password",
     "http_password_env": "GERRIT_HTTP_PASSWORD",
     "verify_ssl": true,
     "ssh_username": "your_username",
