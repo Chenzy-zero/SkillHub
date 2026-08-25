@@ -1,0 +1,15 @@
+{
+  "gerrit": {
+    "base_url": "https://gerrit.company.com",
+    "username": "your_username",
+    "http_password_env": "GERRIT_HTTP_PASSWORD",
+    "verify_ssl": true,
+    "ssh_username": "your_username",
+    "ssh_url_template": "ssh://{username}@gerrit.company.com:29418/{project}"
+  },
+  "workspace": "./workspace",
+  "output_dir": "./output",
+  "inventory_file": "../gerrit-skill-discovery/output/skill_inventory.json",
+  "calculate_digest": true,
+  "git_fetch_timeout_seconds": 120
+}
