@@ -1,408 +1,433 @@
 # 《SKILL 安全管理策略》初稿
 
-> 状态：Draft v0.1
->
-> 适用对象：公司内部创建、引入、维护、发布、安装或运行的 Agent Skill / SKILL.md 资产。
+> 状态：Draft v0.2  
+> 当前阶段：Gerrit 内部 Skill 治理  
+> 基线日期：2026-08-25
 
 ## 1. 目的
 
-建立公司统一的 Skill 安全治理机制，降低未经审查 Skill 带来的 Prompt Injection、数据泄露、恶意脚本、供应链攻击、越权工具调用、凭据泄露及生产环境误操作风险，确保所有生产使用 Skill 具备明确来源、版本、审查记录和可撤销能力。
+建立公司内部 Skill 的统一识别、版本追溯、安全扫描、审核和 SkillHub 纳管机制，确保已经进入公司代码仓库的 Skill：
 
-## 2. 适用范围
+- 能被自动发现；
+- 有明确来源和版本；
+- Skill 内容变化能够被识别；
+- 有可追溯的自动扫描与审核记录；
+- 未通过安全审核的版本不能作为正式可信版本发布到 SkillHub。
 
-适用于：
+## 2. 第一阶段适用范围
 
-- 公司 Gerrit/GitLab/GitHub 等代码仓库中的 Skill；
-- 公司员工自行创建的 Skill；
-- 从互联网、开源社区、供应商或合作方引入的 Skill；
-- 由 AI Agent 自动生成或修改的 Skill；
-- 通过 CLI、MCP、IDE、Agent Runtime 等方式安装的 Skill；
-- 包含 `SKILL.md` 及其 scripts/references/assets/配置/依赖的完整 Skill Package。
+第一阶段仅纳管：
 
-## 3. 术语
+- 公司 Gerrit 代码仓库中存在 `SKILL.md` 的 Skill；
+- `SKILL.md` 所在目录及其受管控子文件；
+- 上述 Skill 的仓库来源、提交版本、内容版本、安全扫描、审核和 SkillHub 同步状态。
 
-- **Skill**：以 `SKILL.md` 为核心的 Agent 能力包。
-- **SkillHub**：公司统一 Skill Registry 和可信分发中心。
-- **Skill Root**：包含 `SKILL.md` 的 Skill 根目录。
-- **Skill Digest**：对规范化 Skill Package 内容计算的摘要，用于唯一绑定审批内容。
-- **Review**：安全人工审查。
-- **Scanner**：静态、依赖、Prompt、行为或 LLM 语义安全扫描器。
-- **Published Version**：已通过策略门禁并上架的不可变版本。
-- **Revoked**：因漏洞、误发布或策略变化被吊销的版本。
+第一阶段暂不纳管：
 
-## 4. 威胁模型
+- 开发者本地未进入 Gerrit 的 Skill；
+- 公网 SkillHub / GitHub 上尚未进入公司代码仓库的 Skill；
+- Runtime 侧强制可信源；
+- 终端侧旁路检测；
+- 外部 Skill 引入审批流程。
 
-需要重点防范：
+以上内容属于后续扩展范围，不属于当前策略首版的强制控制对象。
 
-1. Skill 中包含指令诱导 Agent 忽略系统规则；
-2. Skill 读取并泄露 Token、SSH Key、环境变量、Cookie 等敏感信息；
-3. Skill 脚本下载并执行外部 payload；
-4. Skill 依赖恶意或被接管的软件包；
-5. Skill 通过 MCP/工具获得超出业务需要的权限；
-6. Skill 描述与实际行为不一致；
-7. 已审查 Skill 在后续 commit 中被加入恶意内容；
-8. 外部 Skill 通过 `latest/main` 自动更新绕过重新审查；
-9. 管理员、CLI 或 API 旁路跳过安全审核；
-10. 用户绕过 SkillHub 直接把外部 Skill 复制到本地 Runtime；
-11. 恶意压缩包、符号链接、路径穿越等导入攻击；
-12. 扫描器误报/漏报导致错误放行。
+## 3. 术语定义
 
-## 5. 管理原则
+### 3.1 Skill Root
 
-### 5.1 统一注册
+`SKILL.md` 所在目录。
 
-生产或受控研发环境中使用的 Skill 必须：
+### 3.2 Skill Package
 
-- 来自公司 SkillHub；或
-- 已在 SkillHub 中登记并具备有效 `APPROVED/PUBLISHED` 状态。
+Skill Root 下纳入公司策略管理的完整目录内容，包括但不限于：
 
-### 5.2 默认不信任
+- `SKILL.md`；
+- scripts；
+- references；
+- assets；
+- 配置文件；
+- 依赖声明；
+- 其他随 Skill 一起使用的文件。
 
-外部来源、个人本地目录、历史仓库未登记 Skill 默认状态为 `UNTRUSTED/DISCOVERED`。
+`SKILL.md` 是 Skill 的识别锚点，但安全管理对象是完整 Skill Package。
 
-### 5.3 审批绑定内容而不是名字
+### 3.3 Canonical Skill
 
-审批必须绑定：
+逻辑上的同一个 Skill 能力。一个 Canonical Skill 可以存在多个代码仓库引用来源。
+
+### 3.4 Skill Source
+
+Skill 在一个具体代码来源中的存在形式。
+
+第一阶段使用：
 
 ```text
-skill_id + skill_digest + policy_version
+repository + skill_path + skill_name
 ```
 
-不得仅以 Skill 名称、路径或 commit id 作为“已审查”的依据。
+识别一个 Skill Source。
 
-### 5.4 发布版本不可变
+### 3.5 Source Revision
 
-已发布版本不得原地修改。任何修改必须创建新版本或新 digest。
+某个 Skill Source 在一次具体 Git commit/revision 下的版本快照。
 
-### 5.5 纵深防御
+### 3.6 Content Version / Skill Digest
 
-至少包含：
+对完整 Skill Package 做规范化后计算 SHA-256 得到 `skill_digest`，用于标识真实内容版本。
+
+### 3.7 Scanner
+
+对 Skill Package 进行自动安全检测的工具，可以是公司接入的扫描器，也可以是 SkillHub 自带扫描能力。
+
+### 3.8 Review
+
+CM 或指定 Reviewer 基于扫描结果、策略和必要人工确认形成的治理审核结论。
+
+## 4. 核心管理原则
+
+### 4.1 `SKILL.md` 定义边界，不限定变更触发文件
+
+系统通过 `SKILL.md` 确定 Skill Root。
+
+但 Skill Root 内任何受管控文件变化，都应被视为该 Skill 的一次潜在内容变更，而不是只关注 `SKILL.md` 是否变化。
+
+### 4.2 Gerrit 服务端统一发现
+
+Skill 检查必须由 Git/Gerrit 服务端统一触发，避免依赖开发者客户端环境。
+
+服务端应识别：
+
+- Add；
+- Modify；
+- Delete；
+- Rename；
+- Copy。
+
+### 4.3 来源身份与逻辑身份分离
+
+`repository + path + name` 只用于识别一个 Skill Source，不直接作为全局 Skill 唯一身份。
+
+如果仓库、路径或名称任一不一致，先作为独立 Source 登记，后续再判断是否属于同一个 Canonical Skill。
+
+多个 Source 合并时只做逻辑关联，不删除来源记录和历史。
+
+### 4.4 Git 版本与内容版本分离
+
+必须同时记录：
+
+- commit/revision：用于 Git 来源追溯；
+- SHA-256 digest：用于内容版本和安全审核。
+
+核心规则：
+
+> **Commit/Revision 是来源版本，Digest 是内容版本。**
+
+同一个 digest 可能对应多个 commit，也可能对应多个 Skill Source。
+
+### 4.5 安全审核绑定内容版本
+
+扫描和审核结论应优先绑定：
 
 ```text
-来源控制
-  + 包格式校验
-  + 自动扫描
-  + 人工复核
-  + 发布门禁
-  + 安装来源限制
-  + 运行时最小权限
-  + 审计与撤销
+skill_digest + policy_version + scanner_version
 ```
 
-## 6. 角色与职责
+不得仅依据 Skill 名称、路径或 commitid 判定“已经安全审核”。
 
-| 角色 | 主要职责 |
-| --- | --- |
-| Skill Author | 创建/修改 Skill、填写元数据、修复扫描问题 |
-| Skill Owner | 对 Skill 业务用途、维护责任和风险承担负责 |
-| CM | 资产登记、版本治理、审核流程运营、状态维护 |
-| Security Reviewer | 对中高风险 Skill 完成人工安全审查 |
-| SkillHub Admin | 平台配置与运维，不应默认拥有安全审批豁免 |
-| Auditor | 查看审计、历史、审批证据，不直接修改 Skill |
-| Runtime Admin | 配置 Agent/CLI 可信 Registry 和运行时策略 |
+### 4.6 自动扫描优先，CM 负责治理流程
 
-高风险/特权 Skill 建议实行双人审批或至少“Author 与最终审批人分离”。
+CM 主要负责：
 
-## 7. Skill 风险分级
+- 确认 Skill 被正确识别；
+- 确认扫描任务执行完成；
+- 查看和处理扫描结果；
+- 维护待审核状态；
+- 执行通过、驳回、整改或升级复核流程；
+- 管理 SkillHub 纳管状态。
 
-### L0 — 低风险
+自动扫描工具负责提供安全风险判断依据。
 
-特征：
+对于高风险、扫描工具无法判断或策略例外的情况，可升级相关安全人员或专家处理。
 
-- 纯 Markdown；
-- 不执行脚本；
-- 不读写敏感文件；
-- 不访问网络；
-- 不调用高权限工具。
+### 4.7 SkillHub 是正式发布管理平台
 
-策略：自动扫描通过后可进入快速审核流程。
+发现新 Skill 后，首先进入公司治理数据库进行登记、扫描和审核。
 
-### L1 — 中风险
-
-特征：
-
-- 读取普通项目文件；
-- 使用只读 MCP；
-- 生成模板、报告；
-- 对仓库执行非破坏性分析。
-
-策略：自动扫描 + 人工抽检或指定 Owner 审批。
-
-### L2 — 高风险
-
-特征：
-
-- Shell/Python/PowerShell/Node 等脚本；
-- 写文件；
-- 访问网络；
-- 调用 Git、CI/CD、数据库；
-- 修改配置；
-- 使用可产生副作用的 MCP。
-
-策略：必须人工安全审查。
-
-### L3 — 特权
-
-特征：
-
-- 访问生产环境；
-- 读取或使用凭据；
-- 部署/删除/权限变更；
-- 账号管理；
-- 跨系统写操作；
-- 对大量资产产生不可逆影响。
-
-策略：双人审批/安全负责人批准、强审计、最小权限、定期复审。
-
-## 8. 来源与准入
-
-### 8.1 内部 Skill
-
-来源必须能追溯到公司 SCM：
-
-- repository；
-- branch；
-- path；
-- author；
-- Change-Id/commit；
-- digest。
-
-### 8.2 外部 Skill
-
-禁止生产 Runtime 直接从公网安装。
-
-标准流程：
+推荐正式流程：
 
 ```text
-外部源
- -> 固定 tag/commit/digest
- -> 导入 Quarantine
- -> License/来源检查
+Gerrit发现
+ -> 登记
+ -> 计算Digest
  -> 自动扫描
- -> 人工审查（按风险）
- -> 内网重打包/镜像
- -> SkillHub 发布
+ -> CM/策略审核
+ -> APPROVED
+ -> SkillHub纳管/发布
 ```
 
-不得跟随 `main/latest` 自动升级。
+如果 SkillHub 支持 Draft 状态，可在审核前创建 Draft 记录，但未通过公司安全策略前不得正式发布。
 
-## 9. 注册要求
+## 5. Skill 识别策略
 
-每个 Skill 至少记录：
+### 5.1 Baseline 全量发现
 
-- skill_id；
-- name；
-- namespace；
-- owner/team；
-- description；
-- source_type；
+系统上线前必须对纳管 Gerrit 仓库执行一次全量查找：
+
+```text
+仓库/正式分支
+ -> 查找 SKILL.md
+ -> 确定 Skill Root
+ -> 获取 name
+ -> 创建 Skill Source
+ -> 创建当前 Source Revision
+ -> 计算 skill_digest
+ -> 进入扫描队列
+```
+
+### 5.2 增量发现
+
+每次 Gerrit 服务端事件：
+
+1. 获取 changed files；
+2. 解析 A/M/D/R/C；
+3. 对 old path/new path 定位受影响 Skill Root；
+4. 识别 Skill Source；
+5. 创建 Source Revision；
+6. 获取完整 Skill Package；
+7. 计算 SHA-256 digest；
+8. 根据 digest 决定创建新 Content Version 或关联已有版本；
+9. 触发扫描或复用已有扫描结果。
+
+## 6. Skill Source 合并策略
+
+### 6.1 初始登记
+
+当以下任一字段不一致时，先认为是不同 Source：
+
 - repository；
-- branch；
 - skill_path；
-- source revision；
+- skill_name。
+
+### 6.2 后续关联
+
+多个 Source 可以关联到同一个 Canonical Skill。
+
+关联时必须：
+
+- 保留所有 Source；
+- 保留所有 Revision；
+- 保存关联操作人和时间；
+- 支持取消错误关联；
+- 不仅依赖名称自动合并。
+
+可作为后续辅助判断的信号：
+
+- digest 相同；
+- `SKILL.md` name/description 一致；
+- 来源仓库存在引用/复制关系；
+- Owner/团队确认。
+
+## 7. 版本管理策略
+
+### 7.1 Source Revision
+
+同一 Skill Source 的每个不同 commit/revision 均保留为独立 Source Revision。
+
+即使两个 Revision 的 Skill 内容相同，也不能删除 Revision 历史。
+
+### 7.2 Content Version
+
+当两个 Revision 的 `skill_digest` 相同时，可关联到同一个 Content Version。
+
+例如：
+
+```text
+commit A -> digest X
+commit B -> digest Y
+commit C -> digest Y
+```
+
+Source Revision 有 3 个，Content Version 只有 X、Y 两个。
+
+### 7.3 Hash 算法
+
+统一使用 SHA-256，不使用 MD5 作为安全版本或完整性标识。
+
+## 8. 自动安全扫描策略
+
+扫描可以通过以下方式触发：
+
+- Gerrit 服务端发现新 digest 后立即触发；
+- 定时批量扫描未完成或需重新评估的 Skill；
+- SkillHub 自带安全扫描；
+- 公司后续接入的其他 Scanner。
+
+扫描结果至少记录：
+
+- scanner_name；
+- scanner_version；
+- policy_version；
 - skill_digest；
-- risk_level；
-- lifecycle_status；
-- created_at / updated_at。
-
-## 10. 包格式要求
-
-第一阶段建议：
-
-- 必须有 `SKILL.md`；
-- frontmatter 满足 Agent Skills 规范；
-- 限制单文件和包总体大小；
-- 限制文件数；
-- 禁止绝对路径和路径穿越；
-- 禁止指向 Skill Root 外部的 symlink；
-- 默认禁止 Git submodule；
-- LFS 文件必须取回真实内容后审查；
-- 可执行二进制默认禁止，确需使用走例外审批；
-- 允许扩展名采用白名单策略。
-
-## 11. 自动扫描要求
-
-自动扫描至少覆盖：
-
-### 11.1 Schema / Metadata
-
-- `SKILL.md` 存在性；
-- YAML frontmatter；
-- name/description；
-- 目录边界；
-- 文件类型；
-- 文件大小；
-- 编码/Unicode 异常。
-
-### 11.2 Prompt 风险
-
-- Prompt Injection；
-- System Prompt 泄露诱导；
-- 凭据读取；
-- 数据外传；
-- 安全控制绕过；
-- Agent Memory/Config 污染；
-- MCP Tool Poisoning；
-- 过度自主执行。
-
-### 11.3 代码风险
-
-- exec/eval；
-- subprocess/shell；
-- curl/wget 下载执行；
-- 网络连接；
-- 文件删除；
-- 权限修改；
-- 环境变量/密钥读取；
-- 反序列化；
-- 混淆/编码 payload。
-
-### 11.4 供应链风险
-
-- 依赖固定版本；
-- CVE；
-- 不存在/可疑包；
-- 外部 URL；
-- 安装脚本；
-- SBOM（L2/L3 推荐强制）。
-
-## 12. 人工安全审查要求
-
-人工 Reviewer 至少确认：
-
-1. Skill 的描述与真实行为一致；
-2. 所请求权限符合最小权限；
-3. 所有脚本行为可解释；
-4. 外部网络目的地合理；
-5. 不读取无关敏感数据；
-6. 不下载并执行不固定内容；
-7. 依赖来源可信；
-8. 未发现 Prompt/Tool 注入；
-9. 扫描器发现均已处理或有风险接受；
-10. 高风险操作有显式确认/保护机制。
-
-## 13. 审核结论
-
-可用状态：
-
-- `APPROVED`
-- `REJECTED`
-- `APPROVED_WITH_EXCEPTION`
-
-风险接受必须记录：
-
-- exception_id；
-- 风险描述；
-- 影响；
-- 责任人；
-- 批准人；
-- 到期时间；
-- 补偿控制。
-
-## 14. 发布要求
-
-只有满足以下条件才允许发布：
-
-- digest 与审批记录一致；
-- 自动扫描通过策略；
-- 所需人工审批已完成；
-- 依赖/许可证满足要求；
-- 版本号合法；
-- 无未关闭 Critical/High finding（除非正式风险接受）；
-- 未被 revoke；
-- 发布入口经过统一 Policy Engine。
-
-## 15. 重新审查触发条件
-
-以下情况至少重新自动扫描：
-
-- Skill Package 任意内容 digest 变化；
-- 扫描规则/策略发生重大升级；
-- Scanner 新增关键检测能力；
-- 发现影响该 Skill 的新漏洞；
-- 依赖版本变化；
-- 外部来源版本变化。
-
-以下情况必须重新人工审查：
-
-- `SKILL.md` 核心行为改变；
-- 新增/修改脚本；
-- 新增网络访问；
-- 新增工具/MCP；
-- 权限扩大；
-- 风险级别上升；
-- Critical/High finding；
-- L3 定期复审到期。
-
-## 16. 下架与吊销
-
-发现下列情况时可立即 `REVOKED/OFFLINE`：
-
-- 恶意行为；
-- 高危漏洞；
-- 凭据泄露；
-- 来源被接管；
-- 依赖供应链事件；
-- 误发布；
-- Owner 无法继续维护且风险不可接受。
-
-Runtime 应定期同步撤销列表，至少在安装/更新时阻止被吊销 digest。
-
-## 17. 运行时来源控制
-
-仅建设 SkillHub 不足以形成强安全策略。
-
-应配套：
-
-- 公司统一 Agent/CLI 配置；
-- 默认 Registry 指向内网 SkillHub；
-- 禁止或告警公网 Registry；
-- 安装时校验 digest；
-- 高成熟阶段增加公司签名验证；
-- 定期扫描本地 Agent Skill 目录，识别未登记来源；
-- 关键环境通过终端策略限制旁路安装。
-
-## 18. 审计与证据留存
-
-至少记录：
-
-- Skill 创建/修改/导入；
-- revision/digest；
-- scanner/version；
-- policy/version；
+- 扫描开始/结束时间；
+- status；
+- risk_level / risk_score；
 - findings；
-- Reviewer；
-- 审核意见；
-- 上架/下架/撤销；
-- 风险接受；
-- 安装/下载（按公司隐私和审计政策）；
-- 管理员操作。
+- 原始报告引用。
 
-建议审核证据保留周期与公司软件供应链/研发审计标准对齐。
+同一 digest 已有有效扫描结果时，可以按策略复用；以下场景应重新扫描：
 
-## 19. KPI / SLA 建议
+- Scanner 版本升级；
+- Policy 版本升级；
+- 原扫描失败或超时；
+- 公司要求周期性复扫。
 
-- 已发现 Skill 登记覆盖率；
-- 已审查 Skill 比例；
-- 未审查生产 Skill 数量；
-- Critical/High finding 数量；
-- 平均审查时长；
-- Skill 变更后重新扫描时延；
-- 被撤销版本安装阻断率；
-- 外部 Skill 未经内网镜像的旁路发现数；
-- 审核超期数量；
-- Scanner 可用率。
+## 9. 第一阶段审查内容
 
-## 20. 首版落地边界
+至少关注：
 
-第一阶段先做到：
+1. `SKILL.md` 格式与指令内容；
+2. Prompt Injection / Tool Poisoning；
+3. 脚本执行能力；
+4. Shell/Python/JS/PowerShell 等危险调用；
+5. 网络访问；
+6. 文件读写；
+7. 凭据和环境变量访问；
+8. MCP / Tool 调用；
+9. 外部 URL；
+10. 依赖和安装脚本；
+11. 动态下载执行；
+12. 混淆或隐藏 payload；
+13. Skill 描述与实际行为是否一致；
+14. 敏感信息和公司内部数据泄露风险。
 
-1. 全量发现 Gerrit Skill；
-2. 统一登记；
-3. 内容变化自动变 `STALE`；
-4. 自动扫描；
-5. CM/安全人工审核；
-6. SkillHub 上架；
-7. 生产只安装已批准版本。
+## 10. 审核状态
 
-签名、沙箱动态执行、复杂 SBOM、端点强制策略可分后续阶段逐步增强。
+不建议只保存“是否经过安全审查：是/否”。
+
+### Scan Status
+
+```text
+NOT_SCANNED
+PENDING
+RUNNING
+PASSED
+FAILED
+ERROR
+```
+
+### Review Status
+
+```text
+NOT_REVIEWED
+PENDING
+APPROVED
+REJECTED
+EXCEPTION
+STALE
+```
+
+### SkillHub Status
+
+```text
+NOT_SYNCED
+DRAFT
+PUBLISHED
+OFFLINE
+REVOKED
+```
+
+前端可保留简化的“已审/未审”展示，但事实数据必须保留完整状态。
+
+## 11. SkillHub 上架要求
+
+Skill 正式进入 SkillHub 发布状态前至少满足：
+
+- Source Revision 已登记；
+- 当前 Skill Package digest 已计算；
+- 必要自动扫描已经成功执行；
+- 当前 digest 的审核状态满足公司策略；
+- 无阻断级未处理风险；
+- SkillHub 上传/发布操作可审计。
+
+SkillHub 自带扫描可以作为额外安全检查，但不能替代公司侧版本和审核记录。
+
+## 12. 变更与重新审核
+
+### 新 commit，digest 不变
+
+- 创建新的 Source Revision；
+- 关联已有 Content Version；
+- 可复用当前有效安全结论；
+- 不重复创建内容版本。
+
+### 新 commit，digest 变化
+
+- 创建新的 Source Revision；
+- 创建新的 Content Version；
+- 自动触发扫描；
+- 新内容不得直接继承旧 digest 的审核通过状态。
+
+### Scanner/Policy 变化
+
+即使 digest 不变，也可以触发重新扫描或重新评估。
+
+## 13. 删除、移动和重命名
+
+### 删除
+
+删除 `SKILL.md` 或整个 Skill Root 时：
+
+- Source Revision 仍保留历史；
+- Skill Source 标记为 inactive/deleted；
+- 不删除历史扫描和审核记录。
+
+### Rename/Move
+
+由于 `repository + path + name` 变化，首版可以产生新 Source，同时将旧 Source 标记为已迁移/结束。
+
+后续通过 Canonical Skill 关联两者，避免丢失迁移历史。
+
+## 14. 审计要求
+
+至少保留：
+
+- Skill Source 创建；
+- Source Revision 创建；
+- digest 创建/复用；
+- Canonical Skill 关联/取消关联；
+- 扫描开始/完成/失败；
+- 审核通过/驳回/例外；
+- SkillHub 同步、发布、下架；
+- 管理员手工修改状态。
+
+系统必须能够回答：
+
+> 某个 SkillHub 已发布 Skill 来自哪个仓库、哪个目录、哪个 commit，对应哪个 digest，由哪个扫描器在什么策略版本下扫描，最终由谁批准。
+
+## 15. 第一阶段不强制的能力
+
+以下能力暂不作为 v0.2 强制要求：
+
+- 外部 Skill 来源控制；
+- Agent Runtime 强制内网 Registry；
+- 数字签名；
+- 动态沙箱执行；
+- SBOM 强制；
+- 复杂风险分级；
+- 自动阻断所有 Gerrit 合入。
+
+这些能力应在 Gerrit 内部 Skill 治理闭环稳定后再逐步扩展。
+
+## 16. 第一阶段成功标准
+
+1. 纳管 Gerrit 仓库可完成历史 Skill 全量盘点；
+2. 新增/修改/删除/重命名 Skill 能稳定识别；
+3. `SKILL.md` 未变化但 Skill Root 内其他文件变化仍可发现；
+4. 所有 Source Revision 可追溯；
+5. 所有内容版本均有 SHA-256 digest；
+6. 同 digest 可以识别为同一 Content Version；
+7. 自动扫描结果可入库并关联 digest；
+8. CM 可以基于扫描结果完成审核；
+9. Approved Skill 可以进入 iflytek SkillHub；
+10. 未 Approved 的内容不能被误标记为正式可信版本。
