@@ -58,7 +58,8 @@ class GerritClient:
     @staticmethod
     def _parse_json(raw):
         text = raw.decode("utf-8", "replace")
-        if text.startswith(")]}')"):
+        # Gerrit JSON uses an XSSI guard line: )]}'
+        if text.startswith(")]}'"):
             text = text.split("\n", 1)[1] if "\n" in text else ""
         return json.loads(text)
 
