@@ -1,310 +1,392 @@
 # SkillHub 安全管理需求拆分
 
-## 1. 需求目标
+> 版本：v0.2  
+> 第一阶段范围：Gerrit 内部 Skill 发现、版本、安全扫描、CM 审核与 iflytek SkillHub 纳管
 
-建设公司级 Skill 安全治理能力，覆盖“发现、注册、扫描、审核、发布、分发、运行、变更、撤销、审计”全生命周期。
+## 1. 总体目标
+
+建设公司 Gerrit 内 Skill 安全治理闭环：
+
+```text
+发现 -> Source 登记 -> Revision 追溯 -> Digest 内容版本 -> 自动扫描 -> CM审核 -> SkillHub纳管 -> 审计
+```
 
 ---
 
 ## R1. Skill 统一资产模型
 
-### R1.1 Skill 标识
+### R1.1 Canonical Skill
 
-系统必须为每个 Skill 提供稳定 `skill_id`，不能只依赖名称。
+系统必须支持逻辑 Skill 身份，用于关联多个引用来源。
 
-### R1.2 来源绑定
+### R1.2 Skill Source
 
-必须记录：
+首版以：
 
-- SCM 类型；
-- repository；
-- branch；
-- path；
-- Gerrit Change-Id / revision；
-- owner/team。
+```text
+repository + skill_path + skill_name
+```
 
-### R1.3 内容身份
+识别一个 Skill Source。
 
-必须对完整 Skill Package 计算 `skill_digest`。
+任一字段不一致时先独立登记，不在自动发现阶段强制合并。
+
+### R1.3 Source Revision
+
+同一 Source 的不同 commit/revision 必须保留为独立来源版本。
+
+### R1.4 Content Version
+
+完整 Skill Package 必须计算 SHA-256 `skill_digest`，形成内容版本。
+
+### R1.5 多 Source 关联
+
+多个 Skill Source 可后续关联到一个 Canonical Skill，且：
+
+- 不删除原 Source；
+- 不改写 Revision 历史；
+- 关联/拆分操作可审计。
 
 ### 验收标准
 
-- 同名不同仓库 Skill 可区分；
-- 同一内容在不同 commit 可识别为相同 digest；
-- 任一包内文件变化导致 digest 变化。
+- 同名不同仓库/路径可以独立登记；
+- 同一 Source 不同 commit 均可追溯；
+- 不同 commit 相同内容可识别为相同 digest；
+- 不同 Source 相同内容可识别为相同 Content Version；
+- Canonical 合并不丢失来源历史。
 
 ---
 
-## R2. SkillHub 平台选型与 POC
+## R2. iflytek SkillHub 搭建与适配
 
-### 范围
+### R2.1 平台部署
 
-至少 POC：
+完成 iflytek SkillHub 测试环境部署。
 
-- iflytek/skillhub；
-- Nacos 3.2+ Skill Registry。
+### R2.2 能力验证
 
-### 验证项
+至少验证：
 
-- 私有部署；
-- SSO/RBAC；
-- 注册/审核/上架；
-- 版本；
+- Skill 创建/注册；
+- Draft / 审核 / Publish 能力；
+- 版本管理；
+- API/CLI；
+- RBAC；
 - 审计；
-- CLI/API；
-- Scanner 插件；
-- Gerrit 接入；
-- HA/备份；
-- 二开成本。
+- 自带安全扫描；
+- 上架/下架；
+- 数据库与备份方式。
+
+### R2.3 公司治理对接
+
+明确：
+
+- 何时创建 SkillHub Draft；
+- 何时允许 Publish；
+- 如何映射 Canonical Skill / Source / Content Version；
+- 如何同步审核状态；
+- SkillHub 自带扫描结果如何入库或引用；
+- SkillHub 不可用时如何重试。
 
 ### 验收标准
 
-输出量化打分表和推荐结论。
+输出 iflytek SkillHub 集成方案和接口清单。
 
 ---
 
-## R3. Gerrit Skill 自动发现
+## R3. Gerrit 服务端 Skill 自动发现
 
-### R3.1 服务端事件
+### R3.1 统一服务端触发
 
-系统应消费 Gerrit 服务端事件，不依赖开发者本地 Hook。
+系统必须由 Gerrit 服务端 Hook/Event/Plugin 触发检查，不依赖开发者客户端 Hook。
 
-### R3.2 变更文件识别
+### R3.2 Changed Files
 
-支持：A/M/D/R/C。
+支持：
+
+- Add；
+- Modify；
+- Delete；
+- Rename；
+- Copy。
 
 ### R3.3 Skill Root Resolver
 
-任何 Skill Root 内文件变化都能映射到对应 Skill。
+以 `SKILL.md` 所在目录为 Skill Root。
+
+Skill Root 内任意受管控文件变化均应映射到该 Skill。
 
 ### 验收标准
 
 以下场景全部正确识别：
 
-- 新增 SKILL.md；
-- 只改 scripts；
-- 删除 Skill；
-- rename Skill；
-- 一个 commit 改多个 Skill。
+- 新增 `SKILL.md`；
+- 只修改 scripts、不修改 `SKILL.md`；
+- 修改 references/config；
+- 删除 `SKILL.md`；
+- Skill 目录 rename/move；
+- 一个 commit 修改多个 Skill；
+- Copy 一个已有 Skill。
 
 ---
 
-## R4. Gerrit 历史基线盘点
+## R4. Gerrit Baseline 全量盘点
 
 ### 需求
 
-在增量监听上线前，对纳管仓库执行全量 `SKILL.md` 发现。
+系统上线前对纳管仓库和 branch 执行全量 `SKILL.md` 搜索。
+
+每个发现项生成：
+
+- Skill Source；
+- 当前 Source Revision；
+- Content Version；
+- 待扫描任务。
 
 ### 验收标准
 
-- 可输出仓库 Skill 清单；
-- 可重新运行且结果幂等；
-- 与后续增量 inventory 对齐。
+- 可输出完整 Skill Source 清单；
+- 重复执行结果幂等；
+- Baseline 与增量流程使用同一数据模型；
+- 支持后续 reconciliation 对账。
 
 ---
 
-## R5. 自动安全扫描
+## R5. SHA-256 Digest / Content Version
 
-### R5.1 Scanner Adapter
+### R5.1 Digest 计算
 
-必须支持多个扫描器。
+对完整 Skill Package 计算 SHA-256。
 
-首批候选：
+### R5.2 规范化规则
 
-- Cisco AI Skill Scanner；
-- NVIDIA SkillSpector。
+必须定义：
 
-### R5.2 标准化 Finding
+- 文件排序；
+- 相对路径；
+- 文件内容；
+- file mode；
+- 换行符；
+- symlink；
+- LFS；
+- submodule；
+- 忽略文件规则。
 
-扫描结果必须转换为统一 schema。
+### R5.3 去重
 
-### R5.3 内网模式
-
-核心静态扫描应支持离线/纯内网运行。
+相同 digest 关联已有 Content Version，不重复创建内容版本。
 
 ### 验收标准
 
-- 同一 Skill 可同时运行多个扫描器；
-- 扫描结果可统一展示；
-- Critical/High 可触发阻断策略。
+- 同一 Git tree 在不同执行节点得到一致 digest；
+- 任一纳管文件真实内容变化导致 digest 变化；
+- 不使用 MD5 作为安全完整性标识。
 
 ---
 
-## R6. 人工安全审查工作流
+## R6. 自动安全扫描
+
+### R6.1 扫描触发
+
+支持：
+
+- Gerrit 新 Content Version 实时触发；
+- 定时批量扫描；
+- SkillHub 内置 Scanner 结果接入；
+- 后续第三方/自研 Scanner Adapter。
+
+### R6.2 扫描结果
+
+至少记录：
+
+- content_version；
+- scanner_name；
+- scanner_version；
+- policy_version；
+- status；
+- findings；
+- risk level / score；
+- raw report。
+
+### R6.3 幂等
+
+同一：
+
+```text
+content_version + scanner + scanner_version + policy_version + scan_mode
+```
+
+不得重复创建等价扫描任务。
+
+### R6.4 扫描范围
+
+至少覆盖：
+
+- Prompt/Instruction 风险；
+- 脚本危险行为；
+- 文件/网络访问；
+- 凭据访问；
+- MCP/Tool；
+- 外部 URL；
+- 依赖与安装脚本；
+- 敏感信息；
+- 动态下载/执行；
+- 混淆代码。
+
+---
+
+## R7. CM 审核工作流
 
 ### 功能
 
-- 待审队列；
-- 分配 Reviewer；
-- Skill diff；
+- 待审核列表；
+- Source/Revision/Digest 信息；
 - Scanner Findings；
+- 与上一个 Revision diff；
+- 与上一个 Approved Content Version diff；
 - Approve；
 - Reject；
-- Risk Acceptance；
-- 审核意见；
+- Request Changes；
+- Exception/Escalate 预留；
 - 审核历史。
 
+### 规则
+
+CM 审核结论以 Content Version 为主要对象。
+
+高风险、扫描无法判断或例外问题可以升级安全人员/专家。
+
 ### 验收标准
 
-审批必须绑定当前 digest；审核过程中 Skill 发生变化时旧审批无法提交。
+能够回答：当前 Source 最新 Revision 对应的 digest 是否已经通过有效审核。
 
 ---
 
-## R7. 版本与 Digest 管理
+## R8. 安全结论复用
 
 ### 需求
 
-- 不可变版本；
-- 当前版本；
-- 历史版本；
-- 上一个 Approved digest；
-- diff；
-- rollback 元数据。
+当新 Revision 的 digest 已存在时，系统应检查是否可以复用已有扫描/审核结论。
+
+复用条件至少考虑：
+
+- digest 相同；
+- scanner/version 有效；
+- policy_version 有效；
+- 原结论未失效/撤销；
+- 无强制复扫规则。
 
 ### 验收标准
 
-已发布版本无法原地覆盖。
+相同内容不会因为 cherry-pick 或多个引用来源产生无意义重复人工审核。
 
 ---
 
-## R8. 上架、下架、撤销
+## R9. SkillHub 同步与发布
 
-### 状态
+### R9.1 状态分离
 
-至少支持：
+安全 Review 状态和 SkillHub Sync 状态必须独立。
 
-- DRAFT/DISCOVERED；
-- REVIEWING；
-- APPROVED；
-- PUBLISHED；
-- OFFLINE；
-- REVOKED；
-- STALE。
+### R9.2 Publish Gate
+
+未满足公司安全审核策略的 Content Version 不得被标记为正式 Published。
+
+### R9.3 Draft
+
+若 iflytek SkillHub 支持 Draft，可提前同步资产，但 Draft 不等同于安全通过。
 
 ### 验收标准
 
-被 REVOKED 的 digest 不能继续通过官方 CLI 安装。
+- APPROVED 后可自动/人工触发 SkillHub 同步；
+- SkillHub API 失败可重试；
+- 同步失败不覆盖审核历史；
+- SkillHub 发布记录可追溯到 Source Revision 和 digest。
 
 ---
 
-## R9. 内网分发与客户端来源限制
+## R10. Rename / Move / Delete 生命周期
 
-### 需求
+### Rename / Move
 
-- 公司统一 Registry 地址；
-- CLI/Agent 只从内部 Registry 获取 Skill；
-- 安装时验证 digest；
-- 可查询 Skill 审批状态；
-- 可获取撤销列表。
+路径变化导致 Source key 变化时：
 
-### 后续增强
+- 新路径创建新 Source；
+- 旧 Source 标记 MOVED/INACTIVE；
+- 保存迁移关系；
+- 可后续关联同一 Canonical Skill。
 
-- 数字签名；
-- 终端侧旁路检测；
-- 强制可信源策略。
+### Delete
+
+删除后：
+
+- Source 标记 DELETED/INACTIVE；
+- 历史 Revision/Scan/Review 不删除；
+- 已发布 SkillHub 版本是否下架由治理策略决定。
 
 ---
 
-## R10. 外部 Skill 隔离导入
+## R11. 状态模型
 
-### 流程
+至少分离：
+
+### Scan Status
 
 ```text
-URL/Git/ZIP
- -> Quarantine
- -> 固定 source revision
- -> License 检查
- -> 文件校验
- -> 扫描
- -> 审核
- -> 内网发布
+NOT_SCANNED / PENDING / RUNNING / PASSED / FAILED / ERROR / TIMEOUT
 ```
+
+### Review Status
+
+```text
+NOT_REVIEWED / PENDING / APPROVED / REJECTED / EXCEPTION / STALE
+```
+
+### SkillHub Status
+
+```text
+NOT_SYNCED / DRAFT / PUBLISHED / OFFLINE / REVOKED / ERROR
+```
+
+不得仅使用 Boolean “是否安全审查”。
+
+---
+
+## R12. 审计
+
+必须记录：
+
+- Source 创建/结束；
+- Revision 创建；
+- Content Version 创建/复用；
+- Canonical 关联/拆分；
+- Scan 任务；
+- Review；
+- SkillHub 同步/发布/下架；
+- 管理员手工操作。
 
 ### 验收标准
 
-禁止运行时直接追踪外部 `latest/main`。
+能够完整追踪一个 SkillHub 版本的 Gerrit 来源、安全扫描和审核链路。
 
 ---
 
-## R11. RBAC / SSO / 职责分离
-
-### 角色
-
-至少：
-
-- Author；
-- Owner；
-- Reviewer；
-- Skill Admin；
-- Auditor；
-- Platform Admin。
-
-### 关键要求
-
-管理员不能因为是平台管理员而默认绕过安全审批。
-
----
-
-## R12. 审计与报表
-
-### 审计对象
-
-- Skill 导入；
-- 内容变更；
-- 扫描；
-- 审核；
-- 发布；
-- 撤销；
-- 风险接受；
-- 管理员操作。
-
-### 报表
-
-- Skill 总数；
-- 未审查数量；
-- 风险等级分布；
-- 超期审核；
-- 高危 Findings；
-- 各团队 Skill 数；
-- 外部来源 Skill 数。
-
----
-
-## R13. 可靠性与异常处理
+## R13. 幂等、重试和对账
 
 ### 要求
 
-- 事件幂等；
-- 队列；
-- 重试；
-- 死信；
-- 对账；
-- Scanner 超时处理；
-- 平台不可用降级；
-- 告警。
+- Gerrit 事件去重；
+- Source Revision 唯一约束；
+- Content Version digest 去重；
+- Scan 任务幂等；
+- SkillHub 同步重试；
+- 定时 Reconciliation；
+- Scanner 超时/错误处理；
+- 告警和死信。
 
 ### 原则
 
-异步发现系统故障不应直接拖垮 Gerrit；正式发布门禁可以 Fail Closed。
-
----
-
-## R14. 安全策略与例外管理
-
-### 需求
-
-- policy version；
-- 风险等级规则；
-- 自动放行条件；
-- 强制人工审查条件；
-- finding severity override；
-- exception；
-- exception expiry；
-- revoke。
-
-### 验收标准
-
-能够回答：“这个 Skill 为什么在这个时间点被批准？”
+发现/扫描系统故障不应直接拖垮 Gerrit 主流程；第一阶段优先异步治理。
 
 ---
 
@@ -312,53 +394,67 @@ URL/Git/ZIP
 
 ### 性能
 
-- Gerrit Event Collector 轻量返回；
-- 普通增量检测秒级入队；
+- Gerrit 服务端触发逻辑必须轻量；
+- 大仓库不能每次提交全仓扫描；
+- 使用 changed files -> Skill Root 的增量算法；
 - 深度扫描异步执行。
 
 ### 安全
 
-- 不执行不可信 Skill 脚本；
-- 上传/解压防路径穿越；
+- 扫描阶段不直接执行不可信 Skill 脚本；
+- 服务账号最小权限；
 - 密钥不写日志；
-- 服务使用最小权限账户。
+- Skill Package 读取和解压流程防路径穿越。
 
 ### 可维护性
 
-- Scanner 插件化；
-- Policy 与平台解耦；
-- SCM Connector 可扩展；
-- 数据库 schema 版本化。
+- Scanner Adapter 可扩展；
+- SkillHub Adapter 与安全数据模型解耦；
+- Policy Version 可追溯；
+- Schema 可迁移。
 
 ### 可观测性
 
 至少监控：
 
-- event lag；
-- queue depth；
-- scan duration；
-- scan failure；
+- Gerrit event lag；
+- discovery failure；
+- scan queue depth；
+- scan duration/failure；
 - review backlog；
-- publish block；
+- SkillHub sync failure；
 - reconciliation mismatch。
 
 ---
 
-## 3. MVP 范围
+## 3. 第一阶段 MVP
 
-### 必须
+### P0
 
-- R1、R3、R4、R5、R6、R7、R8；
-- R2 完成 POC 决策；
-- R9 至少实现官方 CLI 的内网可信源；
-- R11 基础 RBAC；
-- R12 基础审计。
+- R1：资产模型；
+- R3：Gerrit 服务端发现；
+- R4：Baseline；
+- R5：Digest；
+- R6：自动扫描基础能力；
+- R7：CM Review；
+- R9：SkillHub 同步；
+- R11/R12/R13：状态、审计、幂等基础能力。
 
-### 可第二阶段
+### P1
 
+- Canonical Skill 多 Source 手工关联；
+- 安全结论智能复用；
+- SkillHub Draft 自动同步；
+- 第二扫描器；
+- 更完整 Policy Engine。
+
+### 后续阶段
+
+暂不纳入首版：
+
+- 外部 Skill 引入治理；
+- Runtime 可信源强制；
+- 终端旁路检测；
 - 数字签名；
 - 动态沙箱；
-- 端点强制；
-- 智能自动修复；
-- 复杂推荐系统；
-- 多地域部署。
+- 全公司 Gerrit Submit Block。
