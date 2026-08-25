@@ -14,7 +14,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import PurePosixPath
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List
 
 
 class GitError(RuntimeError):
@@ -83,7 +83,8 @@ def parse_ls_tree(raw):
 
 
 def list_tree(repo, revision):
-    return parse_ls_tree(git(repo, "ls-tree", "-rz", revision))
+    # -r is required; without it git ls-tree only returns the top-level tree.
+    return parse_ls_tree(git(repo, "ls-tree", "-r", "-z", revision))
 
 
 def read_blob(repo, revision, path):
@@ -108,7 +109,6 @@ def parse_skill_name(skill_md, fallback):
         warnings.append("SKILL.md frontmatter is not closed; directory name used as skill_name")
         return fallback, warnings
 
-    # POC parser: extract only a top-level `name:` scalar without adding a PyYAML dependency.
     name_re = re.compile(r"^name\s*:\s*(.*?)\s*$")
     for line in lines[1:end]:
         match = name_re.match(line)
@@ -160,7 +160,6 @@ def package_digest(repo, revision, root, entries):
         rel_path = rel_to_root(entry.path, root)
 
         if entry.obj_type == "commit" or entry.mode == "160000":
-            # Git submodule/gitlink: parent repo contains only the pinned child commit id.
             content = ("GITLINK\0" + entry.object_id).encode("ascii")
             warnings.append(
                 "submodule/gitlink detected: {}; actual child repository content is not present "
@@ -235,7 +234,6 @@ def scan_revision(repo, revision, repository_name=None):
         skill_md = read_blob(repo, revision, skill_md_path)
         skill_name, warnings = parse_skill_name(skill_md, fallback_name)
 
-        # POC behavior: if nested roots exist, the parent package still contains all descendants.
         nested = [
             candidate
             for candidate in roots
