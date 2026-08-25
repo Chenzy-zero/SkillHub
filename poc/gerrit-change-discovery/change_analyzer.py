@@ -58,6 +58,38 @@ def _action_key(item):
     )
 
 
+def _add_deleted_for_root(add, inventory, repository, root, trigger_file, status, reason):
+    existing = inventory.exact_root(repository, root)
+    if existing:
+        for src in existing:
+            add(
+                {
+                    "action": "DELETED_SKILL",
+                    "repository": repository,
+                    "skill_path": src.skill_path,
+                    "skill_name": src.skill_name,
+                    "source_key": src.source_key,
+                    "trigger_file": trigger_file,
+                    "file_status": status,
+                    "reason": reason,
+                }
+            )
+    else:
+        add(
+            {
+                "action": "DELETED_SKILL",
+                "repository": repository,
+                "old_skill_path": root,
+                "skill_name": None,
+                "source_key": None,
+                "trigger_file": trigger_file,
+                "file_status": status,
+                "reason": reason + "; source not found in inventory",
+                "warnings": ["Inventory 中未找到被删除 Skill Source"],
+            }
+        )
+
+
 def analyze_change(client, inventory, change_id, detail, files, logger=None):
     repository = detail.get("project")
     revision = detail.get("current_revision")
@@ -92,44 +124,58 @@ def analyze_change(client, inventory, change_id, detail, files, logger=None):
             continue
 
         if status == "D" and new_is_skill:
-            root = skill_root_from_skill_md(path)
-            existing = inventory.exact_root(repository, root)
-            if existing:
-                for src in existing:
-                    add(
-                        {
-                            "action": "DELETED_SKILL",
-                            "repository": repository,
-                            "skill_path": src.skill_path,
-                            "skill_name": src.skill_name,
-                            "source_key": src.source_key,
-                            "trigger_file": path,
-                            "file_status": status,
-                            "reason": "SKILL.md deleted",
-                        }
-                    )
-            else:
-                add(
-                    {
-                        "action": "DELETED_SKILL",
-                        "repository": repository,
-                        "old_skill_path": root,
-                        "skill_name": None,
-                        "source_key": None,
-                        "trigger_file": path,
-                        "file_status": status,
-                        "reason": "SKILL.md deleted but source not found in inventory",
-                        "warnings": ["Inventory 中未找到被删除 Skill Source"],
-                    }
-                )
+            _add_deleted_for_root(
+                add,
+                inventory,
+                repository,
+                skill_root_from_skill_md(path),
+                path,
+                status,
+                "SKILL.md deleted",
+            )
             continue
 
-        if status in ("R", "C") and new_is_skill:
+        # SKILL.md 被 rename 成普通文件，本质上是旧 Skill Source 失效。
+        if status == "R" and old_is_skill and not new_is_skill:
+            _add_deleted_for_root(
+                add,
+                inventory,
+                repository,
+                skill_root_from_skill_md(old_path),
+                path,
+                status,
+                "SKILL.md renamed to a non-SKILL.md file",
+            )
+            continue
+
+        # 普通文件被 rename/copy 成 SKILL.md，本质上是新增 Skill。
+        if status in ("R", "C") and new_is_skill and not old_is_skill:
             new_root = skill_root_from_skill_md(path)
-            old_root = skill_root_from_skill_md(old_path) if old_path else None
             raw = client.get_file_content(change_id, revision, path)
             skill_name, warnings = parse_skill_name(raw, _fallback_name(new_root, repository))
-            old_sources = inventory.exact_root(repository, old_root) if old_root is not None else []
+            add(
+                {
+                    "action": "NEW_SKILL",
+                    "repository": repository,
+                    "skill_path": new_root,
+                    "skill_name": skill_name,
+                    "source_key": "{}|{}|{}".format(repository, new_root, skill_name),
+                    "trigger_file": path,
+                    "old_path": old_path,
+                    "file_status": status,
+                    "reason": "non-SKILL.md file became SKILL.md",
+                    "warnings": warnings,
+                }
+            )
+            continue
+
+        # SKILL.md -> SKILL.md 的 rename/move/copy。
+        if status in ("R", "C") and new_is_skill and old_is_skill:
+            new_root = skill_root_from_skill_md(path)
+            old_root = skill_root_from_skill_md(old_path)
+            raw = client.get_file_content(change_id, revision, path)
+            skill_name, warnings = parse_skill_name(raw, _fallback_name(new_root, repository))
+            old_sources = inventory.exact_root(repository, old_root)
             action = "RENAMED_SKILL" if status == "R" else "COPIED_SKILL"
             item = {
                 "action": action,
@@ -191,7 +237,7 @@ def analyze_change(client, inventory, change_id, detail, files, logger=None):
                     item["previous_sources"] = previous
                 add(item)
 
-    # 2) 使用 Inventory 判断非 SKILL.md 文件是否落在已有 Skill Root 下。
+    # 2) 使用 Inventory 判断普通文件是否落在已有 Skill Root 下。
     for path, info in files.items():
         status = info.get("status") or "M"
         old_path = info.get("old_path")
@@ -200,7 +246,7 @@ def analyze_change(client, inventory, change_id, detail, files, logger=None):
             candidates.append((old_path, "old"))
         for candidate_path, side in candidates:
             for src in inventory.match_path(repository, candidate_path):
-                # 同一个 Root 的 SKILL.md 已在上面精确处理；但父 Skill Root 仍需要保留影响。
+                # 同一个 Root 的 SKILL.md 已在上面精确处理；父 Skill Root 仍需要保留影响。
                 if is_skill_md(candidate_path) and normalize_path(src.skill_path) == skill_root_from_skill_md(candidate_path):
                     continue
                 add(
