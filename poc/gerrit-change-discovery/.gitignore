@@ -1,0 +1,5 @@
+config.json
+workspace/
+output/
+__pycache__/
+*.pyc
