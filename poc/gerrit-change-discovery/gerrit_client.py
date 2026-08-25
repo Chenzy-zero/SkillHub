@@ -24,7 +24,11 @@ class GerritClient:
     def from_config(cls, config, logger=None):
         g = config.get("gerrit", {})
         env_name = g.get("http_password_env", "GERRIT_HTTP_PASSWORD")
-        password = os.environ.get(env_name, "")
+
+        # POC 优先读取 config.json 中直接配置的 Gerrit HTTP Password。
+        # 若未配置，再回退到环境变量，方便后续生产化时避免明文凭据。
+        password = g.get("http_password") or os.environ.get(env_name, "")
+
         return cls(
             g.get("base_url", ""),
             g.get("username"),
@@ -58,7 +62,6 @@ class GerritClient:
     @staticmethod
     def _parse_json(raw):
         text = raw.decode("utf-8", "replace")
-        # Gerrit JSON uses an XSSI guard line: )]}'
         if text.startswith(")]}'"):
             text = text.split("\n", 1)[1] if "\n" in text else ""
         return json.loads(text)
