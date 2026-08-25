@@ -4,8 +4,8 @@
 The hooks plugin invokes this program once for every created patchset. The program scans
 that commit from Gerrit's bare repository and appends discovered Skill Source / Content
 Version candidates to JSONL.
+Compatible with Python 3.8+.
 """
-from __future__ import annotations
 
 import argparse
 import json
@@ -17,12 +17,12 @@ from pathlib import Path
 from skill_scan import GitError, scan_revision
 
 
-def project_repo_path(repo_base: str, project: str) -> str:
+def project_repo_path(repo_base, project):
     candidate = Path(repo_base) / (project if project.endswith(".git") else project + ".git")
     return str(candidate)
 
 
-def main() -> int:
+def main():
     parser = argparse.ArgumentParser(description="Gerrit patchset-created -> Skill discovery POC")
     parser.add_argument(
         "--repo-base",
@@ -56,7 +56,7 @@ def main() -> int:
 
     repo = project_repo_path(args.repo_base, args.project)
     if not os.path.exists(repo):
-        print(f"repository not found: {repo}", file=sys.stderr)
+        print("repository not found: {}".format(repo), file=sys.stderr)
         return 2
 
     try:
@@ -76,7 +76,7 @@ def main() -> int:
         "unknown_args": unknown,
     }
 
-    lines: list[str] = []
+    lines = []
     if not records:
         lines.append(
             json.dumps(
@@ -99,12 +99,12 @@ def main() -> int:
     if args.output_file:
         output = Path(args.output_file)
         output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("a", encoding="utf-8") as fh:
-            fh.write(text)
+        with output.open("a", encoding="utf-8") as handle:
+            handle.write(text)
     else:
         sys.stdout.write(text)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
