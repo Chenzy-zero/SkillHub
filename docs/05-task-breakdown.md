@@ -1,410 +1,473 @@
 # SkillHub 安全管理项目任务拆分（WBS）
 
+> 版本：v0.2
+
 ## 总体里程碑
 
 | 里程碑 | 目标 | 建议周期 |
 | --- | --- | --- |
-| M0 | 规范、盘点、数据模型 | 1~2 周 |
-| M1 | 开源平台双轨 POC | 2~3 周 |
-| M2 | Gerrit 自动发现 MVP | 2~4 周 |
-| M3 | 自动安全扫描与策略引擎 | 2~4 周 |
-| M4 | 人工审核与发布门禁 | 2~4 周 |
-| M5 | 内网分发与运行时可信源 | 2~4 周 |
-| M6 | 试点、灰度、制度化 | 2~4 周 |
-
-> 周期为粗略估算，应结合公司现有 Nacos/Gerrit/IAM/基础设施实际情况修订。
+| M0 | 固化 Skill 识别、版本和数据模型 | 1 周 |
+| M1 | 搭建并验证 iflytek SkillHub | 1~2 周 |
+| M2 | Gerrit Baseline + 服务端增量发现 MVP | 2~4 周 |
+| M3 | Digest / Content Version / 自动扫描 | 2~4 周 |
+| M4 | CM Review + SkillHub 自动纳管 | 2~4 周 |
+| M5 | 对账、灰度和制度固化 | 2~3 周 |
 
 ---
 
-## M0 — 规范与盘点
+## M0 — 规范与模型固化
 
-### T0.1 定义 Skill 识别规范
+### T0.1 Skill Root / Skill Package 规范
 
-- 明确 Skill Root；
-- 明确是否允许嵌套 `SKILL.md`；
-- 明确允许文件类型；
-- 明确 LFS/submodule/symlink 规则；
-- 明确正式纳管 branch。
+确认：
 
-**输出**：Skill Package 规范 v0.1。
+- `SKILL.md` 为识别锚点；
+- `SKILL.md` 所在目录为 Skill Root；
+- Skill Root 下哪些文件进入 Skill Package；
+- 嵌套 `SKILL.md` 规则；
+- symlink/LFS/submodule/二进制规则；
+- 纳管 branch。
 
-### T0.2 定义 Skill 风险分级
+**输出**：Skill Package 规范 v0.2。
 
-- L0/L1/L2/L3；
-- 自动放行规则；
-- 人工审核规则；
-- 双人审批规则。
+### T0.2 Skill Source 标识规范
 
-**输出**：风险分级矩阵。
+首版固定：
 
-### T0.3 定义安全审核 Checklist
+```text
+repository + skill_path + skill_name
+```
 
-覆盖 Prompt、工具、脚本、网络、依赖、凭据、生产权限等。
+明确：
 
-**输出**：Review Checklist v0.1。
+- branch 是否进入唯一键；
+- `skill_name` 的读取来源；
+- name 缺失/冲突处理；
+- rename/move 的 Source 生命周期。
 
-### T0.4 定义数据模型
+### T0.3 版本模型
 
-- skill；
-- skill_version；
-- source_binding；
-- scan_result；
-- finding；
-- review_record；
-- audit_event；
-- exception。
+固化：
 
-**输出**：ER/Schema 草案。
+- Canonical Skill；
+- Skill Source；
+- Source Revision；
+- Content Version；
+- SHA-256 Digest；
+- Scan Result；
+- Review Record。
 
-### T0.5 Gerrit 全量 baseline 方案
+**输出**：ER/Schema v0.2。
 
-- 纳管仓库清单；
-- branch；
-- 扫描方式；
-- 权限账户；
-- 性能评估。
+### T0.4 Digest 规范
+
+定义：
+
+- path normalize；
+- file order；
+- SHA-256；
+- file mode；
+- 换行符；
+- ignore list；
+- LFS/symlink。
+
+**验收**：同一 Git tree 在不同环境结果一致。
 
 ---
 
-## M1 — SkillHub 开源平台 POC
+## M1 — iflytek SkillHub 搭建与接口验证
 
-### T1.1 部署 iflytek/skillhub
+### T1.1 搭建测试环境
 
-验证：
+完成：
 
-- 单机/K8s；
-- PostgreSQL/Redis/对象存储；
-- 用户和 RBAC；
-- Skill 发布；
-- 安全扫描；
-- CLI/API；
-- 审计。
+- 服务部署；
+- 数据库；
+- 基础账号/RBAC；
+- 网络/证书；
+- 备份方式确认。
 
-### T1.2 部署 Nacos 3.2+ Skill Registry
+### T1.2 验证 Skill 生命周期
 
-验证：
+重点确认：
 
-- Skill 生命周期；
-- Pipeline；
-- Namespace；
-- CLI/API/SDK；
-- 权限；
-- 审计；
-- 扫描扩展。
+- Register/Create；
+- Draft；
+- Review；
+- Publish；
+- Offline/Revoke；
+- 版本不可变性。
 
-### T1.3 准备统一测试集
+### T1.3 验证 API/CLI
 
-至少 20 个 Skill，包含安全/危险/异常/边界用例。
+整理：
 
-### T1.4 执行 POC 评分
+- Skill 创建 API；
+- 上传/版本 API；
+- 状态查询；
+- Publish/Offline；
+- Scanner API；
+- 审计接口。
 
-按：
+**输出**：SkillHub Adapter 接口清单。
 
-- 安全治理；
-- SSO/RBAC；
-- Gerrit；
-- Scanner；
-- 运维；
-- CLI/API；
-- 稳定性；
-- 二开成本。
+### T1.4 验证自带 Scanner
 
-### T1.5 形成 ADR
+确认：
 
-**输出**：`ADR-001 SkillHub 基础平台选型`。
+- 扫描触发方式；
+- 扫描结果格式；
+- 风险等级；
+- 是否能导出原始报告；
+- 是否支持重新扫描；
+- Scanner 版本如何获取。
+
+### T1.5 决定同步时机
+
+二选一并形成 ADR：
+
+**模式 A**
+
+```text
+发现 -> 公司审核 -> SkillHub Register/Publish
+```
+
+**模式 B**
+
+```text
+发现 -> SkillHub Draft -> 公司审核 -> Publish
+```
 
 ---
 
 ## M2 — Gerrit 自动发现 MVP
 
-### T2.1 Gerrit Event Collector
+### T2.1 Baseline Scanner
 
-- patchset-created；
-- ref-updated；
-- 认证；
-- event id；
-- 日志。
+- 获取纳管仓库列表；
+- 获取纳管 branch；
+- 全量搜索 `SKILL.md`；
+- 建立 Skill Root；
+- 创建 Skill Source；
+- 创建当前 Source Revision。
 
-### T2.2 Message Queue
+### T2.2 Gerrit 服务端触发
 
-- topic；
-- retry；
-- dead letter；
-- lag monitor。
+实现服务端 Hook/Event/Plugin 接入。
 
-### T2.3 Gerrit Change Resolver
+至少获取：
 
-获取：
-
-- project；
+- repository；
 - branch；
 - Change-Id；
 - patchset；
 - revision；
-- changed files；
-- old/new path。
+- parent revision。
+
+### T2.3 Changed Files Resolver
+
+支持：
+
+- A；
+- M；
+- D；
+- R；
+- C；
+- old_path/new_path。
 
 ### T2.4 Skill Root Resolver
 
-支持 A/M/D/R/C。
-
-### T2.5 Skill Package Snapshot
-
-- 读取完整目录；
-- 文件白名单；
-- 大小限制；
-- symlink 处理。
-
-### T2.6 Digest Service
-
-- 规范化；
-- SHA-256；
-- 测试稳定性。
-
-### T2.7 Inventory Service
-
-- 新建 Skill；
-- 新版本；
-- rename；
-- delete；
-- current projection。
-
-### T2.8 Baseline Scanner
-
-一次性全 Gerrit 查找 `SKILL.md` 并登记。
-
-### T2.9 Reconciliation Job
-
-定时对账，补偿漏事件。
-
----
-
-## M3 — 自动安全扫描
-
-### T3.1 Scanner Adapter 接口
-
-统一：
+实现：
 
 ```text
-scan(skill_package, policy) -> normalized_scan_result
+changed file -> 向上寻找 SKILL.md -> Skill Root
 ```
 
-### T3.2 Cisco Skill Scanner Adapter
+Delete/Rename 同时检查 parent revision old path。
 
-- CLI/API 集成；
-- JSON/SARIF 解析；
-- 超时；
-- 重试。
+### T2.5 Skill Source Resolver
 
-### T3.3 NVIDIA SkillSpector Adapter
+根据：
 
-- 静态模式；
-- 可选内网 LLM 模式；
-- 输出归一化。
+```text
+repository + skill_path + skill_name
+```
 
-### T3.4 自定义公司规则
+创建或定位 Source。
 
-首批规则：
+### T2.6 Source Revision
 
-- 禁止公网 Registry；
-- 禁止特定域名；
-- 禁止 `curl | sh`；
-- 凭据目录；
-- 高危 Shell；
-- 生产环境关键字；
-- 公司内部敏感路径。
+每个受影响 Skill 创建不可变 Revision 记录。
 
-### T3.5 Policy Engine
+### T2.7 Rename/Delete
 
-输入：
+实现：
 
-- risk level；
-- findings；
-- package metadata；
-- source；
-- policy version。
+- old Source inactive/moved/deleted；
+- 新路径创建 Source；
+- 保存 moved_from / relationship。
 
-输出：
+### T2.8 多 Skill Commit
 
-- AUTO_APPROVE；
-- REVIEW_REQUIRED；
-- BLOCK；
-- EXCEPTION_REQUIRED。
-
-### T3.6 Scanner 可观测性
-
-- duration；
-- failure；
-- timeout；
-- queue；
-- finding count。
+确保单 commit 修改多个 Skill 时逐一生成 Revision。
 
 ---
 
-## M4 — 人工审核与发布门禁
+## M3 — Content Version 与自动安全扫描
 
-### T4.1 Review Queue
+### T3.1 Skill Package Snapshot
 
-- 待审核列表；
-- owner/team；
+- 获取完整目录；
+- 生成 manifest；
+- 文件大小/类型控制；
+- 禁止扫描过程中执行脚本。
+
+### T3.2 Digest Service
+
+实现 SHA-256 Content Digest。
+
+### T3.3 Content Version 去重
+
+流程：
+
+```text
+new revision
+ -> digest
+ -> existing digest ? reuse : create
+```
+
+### T3.4 Scan Queue
+
+新 Content Version 自动生成扫描任务。
+
+### T3.5 Scanner Adapter
+
+统一接口：
+
+```text
+scan(content_version, policy) -> normalized_result
+```
+
+首版可以先接：
+
+- iflytek SkillHub 内置 Scanner；或
+- 当前公司确定的一个自动扫描器。
+
+第二扫描器作为 P1。
+
+### T3.6 标准化 Scan Result / Finding
+
+统一保存：
+
+- scanner/version；
+- policy/version；
+- status；
+- severity；
+- evidence；
+- report ref。
+
+### T3.7 Scan 幂等与复用
+
+任务 key：
+
+```text
+content_version
++ scanner
++ scanner_version
++ policy_version
++ mode
+```
+
+### T3.8 定时批量扫描
+
+支持：
+
+- 未扫描补偿；
+- Scan Failed 重试；
+- Scanner/Policy 升级后的批量重扫。
+
+---
+
+## M4 — CM Review 与 SkillHub 纳管
+
+### T4.1 CM Review Queue
+
+字段：
+
+- Skill name；
+- repository/path；
+- latest commit；
+- digest；
+- scan status；
 - risk；
-- SLA；
-- reviewer。
+- backlog age。
 
 ### T4.2 Review Detail
 
 展示：
 
-- SKILL.md；
-- scripts；
-- diff；
-- findings；
-- external URLs；
-- dependencies；
-- source metadata。
+- `SKILL.md`；
+- 目录文件；
+- current revision；
+- previous revision diff；
+- previous approved content diff；
+- Findings；
+- Scanner 原始报告；
+- 历史审核。
 
-### T4.3 审核操作
+### T4.3 Review Action
+
+支持：
 
 - Approve；
 - Reject；
-- Accept Risk；
-- Request Changes。
+- Request Changes；
+- Escalate/Exception 预留。
 
-### T4.4 Digest 并发校验
+### T4.4 安全结论复用
 
-审批提交时检查当前 digest 与被审核 digest 一致。
+当新 Revision 指向已有 Content Version：
 
-### T4.5 SkillHub Publish Gate
+- 检查扫描结果是否有效；
+- 检查 Review 是否有效；
+- 复用时记录 audit event。
 
-所有 Web/API/CLI/Admin 发布入口统一检查 Policy。
+### T4.5 Canonical Skill 手工关联
 
-### T4.6 Revoke / Offline
+后台支持：
 
-- 立即撤销；
-- 原因；
-- 审计；
-- 客户端阻断。
+- 推荐疑似相同 Source；
+- Link to Canonical；
+- Unlink；
+- 保留操作历史。
 
-### T4.7 Gerrit Check/Label（可选阶段）
+### T4.6 SkillHub Sync Worker
 
-高风险 Skill 合入前要求安全 Check。
+实现：
 
----
+```text
+APPROVED -> Sync SkillHub
+```
 
-## M5 — 内网分发与运行时可信源
+或根据 T1.5 结论实现 Draft + Publish。
 
-### T5.1 公司 CLI 配置
+### T4.7 SkillHub 状态同步
 
-- 默认 Registry；
-- Token；
-- Namespace；
-- 代理/证书。
+分离保存：
 
-### T5.2 Agent 集成
+```text
+review_status
+skillhub_status
+```
 
-验证：
+### T4.8 SkillHub 同步失败重试
 
-- Codex；
-- Claude Code；
-- Cursor；
-- Gemini CLI；
-- 公司自研 Agent。
-
-### T5.3 安装时校验
-
-- approved status；
-- digest；
-- revoked status。
-
-### T5.4 外部 Skill 导入网关
-
-- Git URL；
-- ZIP；
-- 固定 revision；
-- quarantine；
-- 自动扫描。
-
-### T5.5 本地旁路发现
-
-定期扫描本地 Skill 目录，与 SkillHub inventory 对比。
-
-### T5.6 数字签名 POC（增强项）
-
-对 Published Skill Package 生成公司签名，客户端验证。
+- retry；
+- dead letter；
+- 告警；
+- 手工重放。
 
 ---
 
-## M6 — 试点与上线
+## M5 — 对账、灰度与制度固化
 
-### T6.1 选择试点团队
+### T5.1 Reconciliation
 
-建议选择：
+定时比较：
 
-- Skill 数量中等；
-- 有 DevOps/自动化 Skill；
-- 能接受流程试点；
-- 安全风险具有代表性。
+- Gerrit 最新 Skill Source；
+- 数据库 Source；
+- current revision；
+- digest。
 
-### T6.2 导入历史 Skill
+发现差异自动补偿或生成待办。
 
-- 盘点；
-- 去重；
-- owner 认领；
-- 分级；
-- 扫描；
-- 审核。
+### T5.2 试点仓库
 
-### T6.3 灰度规则
+选择一批代表性仓库：
 
-阶段 1：告警不阻断。
+- 纯 Markdown Skill；
+- 带 scripts；
+- 多 Skill 仓库；
+- rename/delete 历史；
+- 多引用来源。
 
-阶段 2：SkillHub 上架阻断。
+### T5.3 历史 Skill 批量扫描
 
-阶段 3：L2/L3 Gerrit 合入阻断。
+Baseline 资产进入批量扫描与 CM Review。
 
-阶段 4：Runtime 可信源强制。
+### T5.4 指标
 
-### T6.4 制度发布
+建立：
 
-正式发布：
+- Source 总数；
+- Canonical Skill 数；
+- Content Version 数；
+- 未扫描数；
+- 待审核数；
+- SkillHub 未同步数；
+- Reconciliation 差异数；
+- 平均扫描时长；
+- 平均审核时长。
+
+### T5.5 正式策略文件
+
+发布：
 
 - 《SKILL 安全管理策略》；
-- 《Skill 开发规范》；
-- 《Skill 安全审查 Checklist》；
-- 《外部 Skill 引入流程》；
-- 《Skill 漏洞应急处置流程》。
-
-### T6.5 KPI Dashboard
-
-- 覆盖率；
-- 审核积压；
-- 风险分布；
-- 旁路数量；
-- 漏洞处理时长。
+- Skill Package 规范；
+- CM 审查 Checklist；
+- SkillHub 纳管流程；
+- 异常/应急处理 SOP。
 
 ---
 
-## 任务优先级建议
+## 必测场景
+
+- [ ] Baseline 发现已有 Skill
+- [ ] 新增 `SKILL.md`
+- [ ] 只修改 `scripts/a.py`
+- [ ] 只修改 references
+- [ ] 一个 commit 修改多个 Skill
+- [ ] Skill Rename
+- [ ] Skill Move
+- [ ] 删除 `SKILL.md`
+- [ ] Copy 一个 Skill
+- [ ] 同 Source 新 commit 但 digest 不变
+- [ ] 不同 Source digest 相同
+- [ ] 重复 Gerrit Event
+- [ ] 实时扫描与定时扫描同时触发
+- [ ] Scanner Timeout
+- [ ] SkillHub API 失败
+- [ ] Canonical Skill 关联后再拆分
+
+---
+
+## 当前优先级
 
 ### P0
 
-- T0.1/T0.2/T0.4；
-- T1.1/T1.2/T1.4；
+- T0.1~T0.4；
+- T1.1~T1.5；
 - T2.1~T2.8；
-- T3.1/T3.2/T3.5；
-- T4.1~T4.6。
+- T3.1~T3.5；
+- T4.1~T4.3；
+- T4.6；
+- T5.1。
 
 ### P1
 
-- 第二扫描器；
-- Gerrit Label；
-- 外部导入网关；
-- Runtime digest 校验；
-- reconciliation。
+- 第二 Scanner；
+- Scan/Review 复用优化；
+- Canonical 推荐合并；
+- SkillHub Draft 自动同步；
+- Dashboard。
 
-### P2
+### 后续
 
+- 外部 Skill 引入治理；
+- Runtime 可信源；
+- Gerrit Submit Block；
 - 数字签名；
 - 动态沙箱；
-- 自动修复；
-- 高级推荐/搜索。
+- 终端旁路检测。
