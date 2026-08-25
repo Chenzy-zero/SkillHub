@@ -1,0 +1,16 @@
+{
+  "skills": [
+    {
+      "repository": "team/Skill-CM",
+      "skill_name": "jira-query",
+      "skill_path": "tools/jira-query",
+      "source_key": "team/Skill-CM|tools/jira-query|jira-query"
+    },
+    {
+      "repository": "team/Skill-CM",
+      "skill_name": "sonar-check",
+      "skill_path": "tools/sonar-check",
+      "source_key": "team/Skill-CM|tools/sonar-check|sonar-check"
+    }
+  ]
+}
