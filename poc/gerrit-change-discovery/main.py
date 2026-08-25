@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 from change_analyzer import analyze_change
-from gerrit_client import GerritClient, GerritError
+from database import Database
+from gerrit_client import GerritClient
 from inventory import Inventory
+from report_generator import generate_report
 from skill_digest import GitError, calculate_skill_digest, clone_or_fetch_project
 
 
@@ -17,10 +19,14 @@ def load_config(path):
     with config_path.open("r", encoding="utf-8-sig") as fh:
         config = json.load(fh)
     base = config_path.parent
-    for key in ("workspace", "output_dir", "inventory_file"):
+    for key in ("workspace", "output_dir", "inventory_file", "database_path", "report_dir"):
         value = config.get(key)
         if value and not Path(value).is_absolute():
             config[key] = str((base / value).resolve())
+    if not config.get("database_path"):
+        config["database_path"] = str((base / "data" / "skillhub-poc.db").resolve())
+    if not config.get("report_dir"):
+        config["report_dir"] = str((base / "output" / "dashboard").resolve())
     return config
 
 
@@ -64,21 +70,19 @@ def main():
     env_name = g.get("http_password_env", "GERRIT_HTTP_PASSWORD")
     has_direct_password = bool(g.get("http_password"))
     has_env_password = bool(os.environ.get(env_name))
-
     if g.get("username") and not (has_direct_password or has_env_password):
-        logger.warning(
-            "未配置 Gerrit HTTP Password：请在 config.json 的 gerrit.http_password 中填写，"
-            "或设置环境变量 %s；REST 请求将按匿名方式尝试",
-            env_name,
-        )
+        logger.warning("未配置 Gerrit HTTP Password；REST 请求将按匿名方式尝试")
     elif has_direct_password:
         logger.info("REST 认证: 使用 config.json 中配置的 Gerrit HTTP Password")
     else:
         logger.info("REST 认证: 使用环境变量 %s", env_name)
 
     try:
+        database = Database(config["database_path"], logger=logger)
+        database.init_schema()
+
         client = GerritClient.from_config(config, logger)
-        logger.info("[1/6] 获取 Gerrit Change 信息...")
+        logger.info("[1/8] 获取 Gerrit Change 信息...")
         detail = client.get_change_detail(args.change)
         revision_sha, revision_info = client.current_revision_info(detail)
         revision_ref = revision_info.get("ref")
@@ -91,26 +95,26 @@ def main():
         logger.info("Revision: %s", revision_sha)
         logger.info("Revision Ref: %s", revision_ref)
 
-        logger.info("[2/6] 获取本 Patchset 文件清单...")
+        logger.info("[2/8] 获取本 Patchset 文件清单...")
         files = client.get_revision_files(args.change, revision_sha)
         logger.info("Changed Files: %s", len(files))
         for path, info in files.items():
             logger.debug("  %s %s old=%s", info.get("status") or "M", path, info.get("old_path"))
 
-        logger.info("[3/6] 加载 Skill Source Inventory...")
-        inventory = Inventory.load(config.get("inventory_file"), logger)
+        logger.info("[3/8] 加载 Baseline + SQLite Skill Inventory...")
+        baseline_inventory = Inventory.load(config.get("inventory_file"), logger)
+        sqlite_inventory = Inventory.from_rows(database.inventory_rows(), logger, "SQLite Inventory")
+        inventory = baseline_inventory.merge(sqlite_inventory, logger)
 
-        logger.info("[4/6] 基于文件清单识别受影响 Skill...")
+        logger.info("[4/8] 基于文件清单识别受影响 Skill...")
         affected = analyze_change(client, inventory, args.change, detail, files, logger)
         logger.info("受影响 Skill 记录: %s", len(affected))
 
         digest_enabled = bool(config.get("calculate_digest", True)) and not args.no_digest
         if digest_enabled and affected:
-            logger.info("[5/6] 获取当前 Patchset Git 对象并仅计算受影响 Skill Root Digest...")
+            logger.info("[5/8] 仅获取当前 Patchset，并计算受影响 Skill Root Digest...")
             try:
-                repo_dir, resolved = clone_or_fetch_project(
-                    config, project, revision_sha, revision_ref, logger
-                )
+                repo_dir, resolved = clone_or_fetch_project(config, project, revision_sha, revision_ref, logger)
                 digest_cache = {}
                 for item in affected:
                     if item.get("action") == "DELETED_SKILL":
@@ -131,11 +135,11 @@ def main():
                         item["digest_status"] = "ERROR"
                         item["digest_error"] = str(exc)
         else:
-            logger.info("[5/6] Digest 阶段跳过")
+            logger.info("[5/8] Digest 阶段跳过")
             for item in affected:
                 item["digest_status"] = "SKIPPED" if item.get("action") != "DELETED_SKILL" else "NOT_APPLICABLE"
 
-        logger.info("[6/6] 写入分析结果...")
+        logger.info("[6/8] 写入原始 JSON 结果...")
         payload = {
             "change": {
                 "id": detail.get("id"),
@@ -167,14 +171,27 @@ def main():
         output_file = output_dir / "change-{}-patchset-{}.json".format(safe_change, patchset or "current")
         with output_file.open("w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2, sort_keys=False)
+        logger.info("JSON: %s", output_file)
 
-        logger.info("完成。结果文件: %s", output_file)
+        logger.info("[7/8] SQLite 数据库存档...")
+        database.persist_analysis(payload)
+
+        logger.info("[8/8] 刷新 HTML Dashboard...")
+        if bool(config.get("auto_generate_report", True)):
+            dashboard = generate_report(config["database_path"], config["report_dir"], logger)
+            logger.info("Dashboard: %s", dashboard)
+        else:
+            logger.info("auto_generate_report=false，跳过 Dashboard 生成")
+
         if not affected:
             logger.info("本单据未发现新增 SKILL.md，也未命中 Inventory 中已有 Skill Root")
+        logger.info("完成。")
         return 0
 
-    except (GerritError, ValueError, OSError, json.JSONDecodeError) as exc:
+    except Exception as exc:
         logger.error("执行失败: %s", exc)
+        if args.verbose:
+            logger.exception("详细异常")
         return 2
 
 
