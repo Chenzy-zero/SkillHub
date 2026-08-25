@@ -89,7 +89,8 @@ def _parse_ls_tree(raw):
 
 def calculate_skill_digest(repo, revision, skill_root):
     root = (skill_root or "").replace("\\", "/").strip("/")
-    args = ["ls-tree", "-rz", revision]
+    # 必须递归读取整个 Skill Root，而不是只读取该目录的 tree object。
+    args = ["ls-tree", "-r", "-z", revision]
     if root:
         args += ["--", root]
     entries = _parse_ls_tree(run_git(repo, *args))
