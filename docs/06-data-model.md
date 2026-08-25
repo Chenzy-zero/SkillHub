@@ -1,332 +1,444 @@
 # Skill 安全治理数据模型建议
 
+> 版本：v0.2
+
 ## 1. 设计原则
 
-当前附件中 `skill_summary + skill_history` 的方向可以保留，但生产数据模型建议进一步拆分，避免把“Skill 当前信息、版本、扫描、审核、审计”全部塞进两张表。
+数据模型必须同时解决四类不同问题：
+
+1. **逻辑资产**：多个引用来源是否属于同一个 Skill；
+2. **来源追溯**：Skill 来自哪个仓库、目录、commit；
+3. **内容识别**：两个来源/commit 的 Skill Package 内容是否完全一致；
+4. **安全治理**：哪个内容版本被什么扫描器、什么策略扫描并最终审核。
 
 核心原则：
 
-- 当前状态与不可变历史分离；
-- Skill 身份与 Skill 内容版本分离；
-- 扫描记录与人工审核记录分离；
-- commit/revision 是来源信息，digest 是内容身份；
-- 所有关键状态变化保留 audit event。
+> **Commit/Revision 是来源版本，Digest 是内容版本；安全结论绑定内容版本，Git 追溯绑定来源版本。**
+
+`repository + skill_path + skill_name` 用于识别 Skill Source，不作为最终 Canonical Skill 唯一键。
 
 ---
 
-## 2. 核心实体
+## 2. 推荐实体关系
 
 ```mermaid
 erDiagram
-  SKILL ||--o{ SKILL_VERSION : has
-  SKILL ||--o{ SOURCE_BINDING : sourced_from
-  SKILL_VERSION ||--o{ SCAN_RESULT : scanned_by
+  CANONICAL_SKILL ||--o{ SKILL_SOURCE : contains
+  SKILL_SOURCE ||--o{ SOURCE_REVISION : has
+  SOURCE_REVISION }o--|| CONTENT_VERSION : resolves_to
+  CONTENT_VERSION ||--o{ SCAN_RESULT : scanned_by
   SCAN_RESULT ||--o{ FINDING : contains
-  SKILL_VERSION ||--o{ REVIEW_RECORD : reviewed_by
-  SKILL_VERSION ||--o{ PUBLISH_RECORD : published_as
-  SKILL_VERSION ||--o{ EXCEPTION : may_have
-  SKILL ||--o{ AUDIT_EVENT : generates
+  CONTENT_VERSION ||--o{ REVIEW_RECORD : reviewed_by
+  CONTENT_VERSION ||--o{ SKILLHUB_RECORD : synced_as
+  CANONICAL_SKILL ||--o{ AUDIT_EVENT : generates
+  SKILL_SOURCE ||--o{ AUDIT_EVENT : generates
 ```
 
-## 3. skill
+## 3. canonical_skill
 
-表示逻辑 Skill 资产。
-
-建议字段：
+表示逻辑上的同一个 Skill 能力。
 
 ```text
-skill_id PK
-namespace
-name
+canonical_skill_id PK
+canonical_name
 display_name
 description
 owner_team
-owner_user
-risk_level
-current_version_id
-current_digest
-lifecycle_status
-review_status
+status
+created_by
 created_at
 updated_at
 ```
 
-说明：
+### 说明
 
-- `skill_id` 建议使用 UUID/平台 ID；
-- name 不是全局唯一；
-- namespace + canonical slug 可做业务唯一键。
+- 可以先创建“临时 Canonical Skill”，一个 Source 默认对应一个 Canonical；
+- 后续多个 Source 被确认属于同一个逻辑 Skill 时，只修改关联关系；
+- 不删除原 Source 和 Revision；
+- 需要支持误合并后的拆分。
 
 ---
 
-## 4. source_binding
+## 4. skill_source
 
-表示 Skill 与 SCM/外部来源的绑定。
+表示 Skill 的一个具体代码来源。
+
+第一阶段来源识别键：
 
 ```text
-source_binding_id PK
-skill_id FK
-source_type          # gerrit/github/gitlab/upload/external
+repository + skill_path + skill_name
+```
+
+建议字段：
+
+```text
+source_id PK
+canonical_skill_id FK
+scm_type               # gerrit
 repository
 branch
 skill_path
-gerrit_change_id
-patchset_number
-revision_sha
-merged_commit_sha
-external_url
-external_version
-source_digest
-is_canonical
+skill_name
+owner_team
+status                  # ACTIVE/INACTIVE/DELETED/MOVED
+moved_from_source_id nullable
+first_seen_at
+last_seen_at
 created_at
+updated_at
+```
+
+### 唯一约束
+
+建议首版：
+
+```text
+UNIQUE(repository, branch, skill_path, skill_name)
+```
+
+如果最终确认 branch 不属于 Source 身份的一部分，可以在实施前调整；但必须先明确纳管 branch 语义。
+
+---
+
+## 5. source_revision
+
+表示某个 Skill Source 在某次 Git revision 下的不可变快照。
+
+```text
+source_revision_id PK
+source_id FK
+gerrit_change_id nullable
+patchset_number nullable
+revision_sha
+parent_revision_sha nullable
+merged_commit_sha nullable
+content_version_id FK
+change_type             # ADD/MODIFY/DELETE/RENAME/COPY/BASELINE
+author
+committer
+commit_time
+observed_at
+```
+
+### 唯一约束
+
+```text
+UNIQUE(source_id, revision_sha)
+```
+
+### 规则
+
+- 同一 Source 的不同 revision 都必须保存；
+- 即使两个 revision 最终 digest 相同，也不能删除 revision；
+- Source Revision 是 Git 事实，不承载最终安全结论。
+
+---
+
+## 6. content_version
+
+表示真实 Skill Package 内容版本。
+
+```text
+content_version_id PK
+skill_digest
+hash_algorithm          # SHA-256
+package_manifest
+file_count
+package_size
+created_at
+```
+
+建议：
+
+```text
+UNIQUE(skill_digest)
 ```
 
 ### 说明
 
-对于 Gerrit，不建议只保留 `commitid`。
+同一个 Content Version 可以被多个 Source Revision 引用。
 
-至少要区分：
+例如：
 
-- Change-Id；
-- Patchset；
-- Revision SHA；
-- Merge Commit。
+```text
+A/commit1 -> Digest X
+A/commit2 -> Digest Y
+A/commit3 -> Digest Y
+B/commit8 -> Digest Y
+```
+
+数据库中：
+
+- 4 条 source_revision；
+- 2 条 content_version。
+
+### 是否全局按 digest 去重
+
+首版建议全局按内容去重，因为完全相同的 Skill Package 没有必要重复扫描。
+
+如果后续发现同内容在不同业务上下文中需要独立安全决策，可以将 Review Policy 增加上下文维度，而不必放弃内容去重。
 
 ---
 
-## 5. skill_version
+## 7. package_manifest
 
-每个内容版本一条记录，不可覆盖。
+建议保存规范化 Manifest，方便解释 digest。
 
-```text
-version_id PK
-skill_id FK
-semantic_version
-skill_digest
-source_binding_id
-package_manifest
-file_count
-package_size
-change_type
-previous_version_id
-created_by
-created_at
+示例：
+
+```json
+[
+  {
+    "path": "SKILL.md",
+    "sha256": "...",
+    "mode": "100644"
+  },
+  {
+    "path": "scripts/query.py",
+    "sha256": "...",
+    "mode": "100755"
+  }
+]
 ```
 
-### 唯一约束建议
+Digest 推荐使用 Manifest 规范化内容再做 SHA-256。
 
-```text
-UNIQUE(skill_id, skill_digest)
-```
-
-如果同一内容被多次提交，可增加 source binding，而无需重复创建 version。
+不使用 MD5。
 
 ---
 
-## 6. scan_result
+## 8. scan_result
 
 一次扫描任务一条记录。
 
 ```text
 scan_id PK
-version_id FK
+content_version_id FK
 scanner_name
 scanner_version
 policy_version
-scan_mode           # static/semantic/dependency/etc
-status              # pending/running/success/failed/timeout
-risk_score
-risk_level
+scan_mode
+status                  # PENDING/RUNNING/PASSED/FAILED/ERROR/TIMEOUT
+risk_score nullable
+risk_level nullable
 started_at
 finished_at
-raw_report_ref
-error_message
+raw_report_ref nullable
+error_message nullable
+created_at
 ```
 
 ### 幂等键
 
-建议：
-
 ```text
-version_id + scanner_name + scanner_version + policy_version + scan_mode
+content_version_id
++ scanner_name
++ scanner_version
++ policy_version
++ scan_mode
 ```
+
+这样可以避免：
+
+- 同 digest 多个 Source 重复扫描；
+- 实时事件和定时任务重复扫描；
+- 重复 Gerrit Event 产生多份相同任务。
 
 ---
 
-## 7. finding
-
-统一不同扫描器结果。
+## 9. finding
 
 ```text
 finding_id PK
 scan_id FK
-external_finding_id
+external_finding_id nullable
 rule_id
 category
 severity
 title
 description
-file_path
-start_line
-end_line
-evidence
-recommendation
+file_path nullable
+start_line nullable
+end_line nullable
+evidence nullable
+recommendation nullable
 fingerprint
-status              # open/accepted/fixed/false_positive
+status                  # OPEN/FIXED/ACCEPTED/FALSE_POSITIVE
 created_at
+updated_at
 ```
 
-### fingerprint
-
-建议根据：
+建议 fingerprint 基于：
 
 ```text
 rule_id + normalized_path + normalized_evidence
 ```
 
-生成，便于比较新旧扫描结果。
+便于比较扫描器重复发现的问题。
 
 ---
 
-## 8. review_record
+## 10. review_record
 
-人工审核记录。
+审核绑定 Content Version。
 
 ```text
 review_id PK
-version_id FK
-review_type          # security/owner/compliance
+content_version_id FK
+review_type              # CM/SECURITY/EXCEPTION
 reviewer
 reviewer_role
-decision             # approve/reject/request_changes/approve_with_exception
-reviewed_digest
+decision                 # APPROVE/REJECT/REQUEST_CHANGES/EXCEPTION
 policy_version
 comment
 created_at
 ```
 
+如果后续需要按 Source 上下文单独审批，可以增加：
+
+```text
+source_id nullable
+```
+
+但默认安全内容结论应首先复用 Content Version。
+
+---
+
+## 11. skillhub_record
+
+SkillHub 同步状态独立于安全审核状态。
+
+```text
+skillhub_record_id PK
+canonical_skill_id FK
+source_id nullable
+content_version_id FK
+skillhub_skill_id nullable
+skillhub_version_id nullable
+sync_status              # NOT_SYNCED/DRAFT/PUBLISHED/OFFLINE/REVOKED/ERROR
+sync_error nullable
+synced_by nullable
+synced_at nullable
+published_at nullable
+offlined_at nullable
+created_at
+updated_at
+```
+
 ### 关键规则
 
-`reviewed_digest` 必须与审批提交时当前 version digest 一致。
-
-审批接口必须做乐观校验：
+以下状态完全可能同时存在：
 
 ```text
-reviewed_digest == current_target_digest
+review_status = APPROVED
+skillhub_status = ERROR
 ```
 
-否则返回 `STALE_REVIEW`。
+表示安全审核已经完成，只是 SkillHub 同步失败。
+
+不得因为 SkillHub API 失败而覆盖安全事实。
 
 ---
 
-## 9. exception
+## 12. source_merge_history
 
-风险接受/豁免。
+建议增加 Source 与 Canonical Skill 关联历史，而不是只修改外键后无记录。
 
 ```text
-exception_id PK
-version_id FK
-finding_id nullable
-risk_description
-justification
-compensating_control
-requester
-approver
-approved_at
-expire_at
-status
+merge_event_id PK
+source_id
+old_canonical_skill_id
+new_canonical_skill_id
+operation                # LINK/UNLINK/MOVE
+reason
+operator
+created_at
 ```
 
-任何例外必须有到期或取消条件。
+用于回答：
+
+- 谁把两个 Source 认定为同一个 Skill；
+- 为什么合并；
+- 何时重新拆分。
 
 ---
 
-## 10. publish_record
-
-记录上架行为。
-
-```text
-publish_id PK
-version_id FK
-registry
-namespace
-published_version
-published_digest
-status
-published_by
-published_at
-offlined_at
-revoked_at
-revoke_reason
-```
-
-`published_digest` 不允许被原地修改。
-
----
-
-## 11. audit_event
-
-所有关键操作的统一审计事件。
+## 13. audit_event
 
 ```text
 audit_id PK
-skill_id
-version_id nullable
+canonical_skill_id nullable
+source_id nullable
+source_revision_id nullable
+content_version_id nullable
 event_type
 actor_type
 actor_id
-source_ip / client_id (按公司审计政策)
-old_state
-new_state
+old_state nullable
+new_state nullable
 metadata
 created_at
 ```
 
-事件例子：
+事件示例：
 
-- SKILL_DISCOVERED；
-- VERSION_CREATED；
+- SOURCE_DISCOVERED；
+- SOURCE_MOVED；
+- SOURCE_DELETED；
+- REVISION_CREATED；
+- CONTENT_VERSION_CREATED；
+- CONTENT_VERSION_REUSED；
 - SCAN_STARTED；
 - SCAN_COMPLETED；
 - REVIEW_APPROVED；
 - REVIEW_REJECTED；
-- RISK_ACCEPTED；
-- PUBLISHED；
-- OFFLINED；
-- REVOKED；
-- OWNER_CHANGED；
-- POLICY_REEVALUATED。
+- SOURCE_LINKED_TO_CANONICAL；
+- SOURCE_UNLINKED；
+- SKILLHUB_DRAFT_CREATED；
+- SKILLHUB_PUBLISHED；
+- SKILLHUB_SYNC_FAILED。
 
 ---
 
-## 12. current summary / materialized view
+## 14. 当前视图 skill_summary
 
-如果 CM 日常需要类似附件中的 `skill_summary`，建议它成为“当前视图/投影”，而不是所有历史的事实表。
+附件中的 `skill_summary` 可以保留为 CM 日常使用的查询视图，但不作为事实历史表。
 
-展示字段：
+推荐展示：
 
 ```text
-skill_id
+canonical_skill_id
 skill_name
 repository
 branch
 skill_path
-latest_revision
+source_id
+latest_revision_sha
 latest_digest
-risk_level
 scan_status
 review_status
-publish_status
-latest_policy_version
-latest_reviewer
+skillhub_status
+risk_level
 updated_at
 ```
 
+其中：
+
+```text
+latest_revision_sha
+```
+
+来自最新 Source Revision；
+
+```text
+latest_digest
+```
+
+来自该 Revision 关联的 Content Version。
+
 ---
 
-## 13. 状态机
-
-建议将“扫描状态、审核状态、发布状态”分离，不要做成一个过度复杂的单状态字段。
+## 15. 状态模型
 
 ### Scan Status
 
@@ -337,56 +449,105 @@ RUNNING
 PASSED
 FAILED
 ERROR
+TIMEOUT
 ```
 
 ### Review Status
 
 ```text
-NOT_REQUIRED
+NOT_REVIEWED
 PENDING
-IN_REVIEW
 APPROVED
 REJECTED
-STALE
 EXCEPTION
+STALE
 ```
 
-### Publish Status
+### SkillHub Status
 
 ```text
-NOT_PUBLISHED
+NOT_SYNCED
+DRAFT
 PUBLISHED
 OFFLINE
 REVOKED
+ERROR
 ```
 
-### 聚合 Lifecycle
-
-供 UI 简化展示：
+UI 可以进一步聚合成：
 
 ```text
 DISCOVERED
+SCANNING
 REVIEWING
 APPROVED
 PUBLISHED
-STALE
-REJECTED
-REVOKED
+BLOCKED
 ```
+
+但事实表不要只存一个总状态。
 
 ---
 
-## 14. 为什么 Boolean `是否经过安全审查` 不够
+## 16. 数据示例
 
-Boolean 无法表达：
+假设：
 
-- 扫描正在执行；
-- 扫描失败；
-- 人工待审；
-- 已驳回；
-- 有风险例外；
-- 已批准但内容变更；
-- 已批准但策略升级后需要复审；
-- 已发布后被撤销。
+```text
+repoA/skills/jira-query
+name = jira-query-skill
+```
 
-所以附件中的“是否经过安全审查”建议在 UI 中仍可以显示“是/否”，但底层必须使用完整状态和记录。
+经历：
+
+```text
+commit 111 -> digest AAA
+commit 222 -> digest BBB
+commit 333 -> digest BBB
+```
+
+另一个来源：
+
+```text
+repoB/common/jira
+name = jira-query-skill
+commit 999 -> digest BBB
+```
+
+应表现为：
+
+```text
+Canonical Skill: jira-query-skill
+├── Source A
+│   ├── Revision 111 -> AAA
+│   ├── Revision 222 -> BBB
+│   └── Revision 333 -> BBB
+└── Source B
+    └── Revision 999 -> BBB
+
+Content AAA
+└── Scan/Review
+
+Content BBB
+└── Scan/Review
+```
+
+这可以同时满足：
+
+- 每个 commit 都可追；
+- 同内容不重复保存；
+- 同内容不必无意义重复扫描；
+- 多个引用来源不会丢失。
+
+---
+
+## 17. 需要在开发前最终确认的字段决策
+
+1. `branch` 是否进入 Skill Source 唯一键；
+2. `skill_name` 是取 SKILL.md frontmatter 还是目录名，冲突时如何处理；
+3. Digest 忽略哪些文件；
+4. 换行符、文件 mode、symlink、LFS 的规范化规则；
+5. Content Version 是否全局 digest 去重；
+6. 相同 digest 在不同 Canonical Skill 下是否允许共享 Review；
+7. SkillHub 一个版本对应 Source Revision 还是 Content Version；
+8. 删除/移动 Source 后 SkillHub 是否自动下架。
