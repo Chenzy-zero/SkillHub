@@ -2,8 +2,8 @@
 """POC: discover SKILL.md-based skills from any Git revision and calculate SHA-256 package digests.
 
 Works with both normal and bare repositories. Uses only the Python standard library and git CLI.
+Compatible with Python 3.8+.
 """
-from __future__ import annotations
 
 import argparse
 import hashlib
@@ -14,20 +14,29 @@ import subprocess
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import PurePosixPath
-from typing import Iterable
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 class GitError(RuntimeError):
     pass
 
 
-def git(repo: str, *args: str, input_bytes: bytes | None = None) -> bytes:
-    cmd = ["git", "-C", repo, *args]
-    proc = subprocess.run(cmd, input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def git(repo, *args, **kwargs):
+    input_bytes = kwargs.get("input_bytes")
+    cmd = ["git", "-C", repo] + list(args)
+    proc = subprocess.run(
+        cmd,
+        input=input_bytes,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     if proc.returncode != 0:
         raise GitError(
-            f"git command failed ({proc.returncode}): {' '.join(cmd)}\n"
-            f"{proc.stderr.decode('utf-8', 'replace')}"
+            "git command failed ({}): {}\n{}".format(
+                proc.returncode,
+                " ".join(cmd),
+                proc.stderr.decode("utf-8", "replace"),
+            )
         )
     return proc.stdout
 
@@ -51,12 +60,12 @@ class SkillRecord:
     digest_algorithm: str
     file_count: int
     package_size: int
-    manifest: list[dict]
-    warnings: list[str]
+    manifest: List[Dict]
+    warnings: List[str]
 
 
-def parse_ls_tree(raw: bytes) -> list[TreeEntry]:
-    entries: list[TreeEntry] = []
+def parse_ls_tree(raw):
+    entries = []
     for rec in raw.split(b"\0"):
         if not rec:
             continue
@@ -73,16 +82,16 @@ def parse_ls_tree(raw: bytes) -> list[TreeEntry]:
     return entries
 
 
-def list_tree(repo: str, revision: str) -> list[TreeEntry]:
+def list_tree(repo, revision):
     return parse_ls_tree(git(repo, "ls-tree", "-rz", revision))
 
 
-def read_blob(repo: str, revision: str, path: str) -> bytes:
-    return git(repo, "show", f"{revision}:{path}")
+def read_blob(repo, revision, path):
+    return git(repo, "show", "{}:{}".format(revision, path))
 
 
-def parse_skill_name(skill_md: bytes, fallback: str) -> tuple[str, list[str]]:
-    warnings: list[str] = []
+def parse_skill_name(skill_md, fallback):
+    warnings = []
     text = skill_md.decode("utf-8-sig", "replace")
     lines = text.splitlines()
 
@@ -102,10 +111,10 @@ def parse_skill_name(skill_md: bytes, fallback: str) -> tuple[str, list[str]]:
     # POC parser: extract only a top-level `name:` scalar without adding a PyYAML dependency.
     name_re = re.compile(r"^name\s*:\s*(.*?)\s*$")
     for line in lines[1:end]:
-        m = name_re.match(line)
-        if not m:
+        match = name_re.match(line)
+        if not match:
             continue
-        value = m.group(1).strip()
+        value = match.group(1).strip()
         if not value:
             break
         if (value.startswith('"') and value.endswith('"')) or (
@@ -119,35 +128,31 @@ def parse_skill_name(skill_md: bytes, fallback: str) -> tuple[str, list[str]]:
     return fallback, warnings
 
 
-def is_under(path: str, root: str) -> bool:
+def is_under(path, root):
     if not root:
         return True
     return path == root or path.startswith(root.rstrip("/") + "/")
 
 
-def rel_to_root(path: str, root: str) -> str:
+def rel_to_root(path, root):
     if not root:
         return path
     prefix = root.rstrip("/") + "/"
     return path[len(prefix):] if path.startswith(prefix) else path
 
 
-def package_digest(
-    repo: str,
-    revision: str,
-    root: str,
-    entries: Iterable[TreeEntry],
-) -> tuple[str, int, int, list[dict], list[str]]:
-    warnings: list[str] = []
-    manifest: list[dict] = []
+def package_digest(repo, revision, root, entries):
+    warnings = []
+    manifest = []
     package_size = 0
 
     package_entries = [
-        e for e in entries
-        if e.obj_type in {"blob", "commit"} and is_under(e.path, root)
+        entry
+        for entry in entries
+        if entry.obj_type in {"blob", "commit"} and is_under(entry.path, root)
     ]
     package_entries.sort(
-        key=lambda e: rel_to_root(e.path, root).encode("utf-8", "surrogateescape")
+        key=lambda entry: rel_to_root(entry.path, root).encode("utf-8", "surrogateescape")
     )
 
     manifest_bytes = bytearray()
@@ -158,8 +163,8 @@ def package_digest(
             # Git submodule/gitlink: parent repo contains only the pinned child commit id.
             content = ("GITLINK\0" + entry.object_id).encode("ascii")
             warnings.append(
-                f"submodule/gitlink detected: {rel_path}; actual child repository content "
-                "is not present in this Git tree"
+                "submodule/gitlink detected: {}; actual child repository content is not present "
+                "in this Git tree".format(rel_path)
             )
         else:
             content = read_blob(repo, revision, entry.path)
@@ -170,18 +175,18 @@ def package_digest(
         if entry.mode == "120000":
             target = content.decode("utf-8", "replace")
             warnings.append(
-                f"symlink detected: {rel_path} -> {target}; "
-                "POC hashes the link target text and does not follow it"
+                "symlink detected: {} -> {}; POC hashes the link target text and does not "
+                "follow it".format(rel_path, target)
             )
         if content.startswith(b"version https://git-lfs.github.com/spec/v1\n"):
             warnings.append(
-                f"Git LFS pointer detected: {rel_path}; POC hashes the pointer, "
-                "not the external LFS object"
+                "Git LFS pointer detected: {}; POC hashes the pointer, not the external LFS "
+                "object".format(rel_path)
             )
         if entry.obj_type == "blob" and b"\0" in content[:8192]:
             warnings.append(
-                f"binary-like blob detected: {rel_path}; POC hashes raw bytes but "
-                "performs no semantic binary analysis"
+                "binary-like blob detected: {}; POC hashes raw bytes but performs no semantic "
+                "binary analysis".format(rel_path)
             )
 
         manifest.append(
@@ -205,25 +210,25 @@ def package_digest(
     return digest, len(package_entries), package_size, manifest, warnings
 
 
-def scan_revision(
-    repo: str,
-    revision: str,
-    repository_name: str | None = None,
-) -> list[SkillRecord]:
+def scan_revision(repo, revision, repository_name=None):
     revision = git(repo, "rev-parse", revision).decode("ascii").strip()
-    repository_name = repository_name or os.path.basename(os.path.abspath(repo)).removesuffix(".git")
-    entries = list_tree(repo, revision)
+    if not repository_name:
+        repository_name = os.path.basename(os.path.abspath(repo))
+        if repository_name.endswith(".git"):
+            repository_name = repository_name[:-4]
 
+    entries = list_tree(repo, revision)
     skill_md_paths = sorted(
         [
-            e.path for e in entries
-            if e.obj_type == "blob" and PurePosixPath(e.path).name == "SKILL.md"
+            entry.path
+            for entry in entries
+            if entry.obj_type == "blob" and PurePosixPath(entry.path).name == "SKILL.md"
         ]
     )
 
-    records: list[SkillRecord] = []
-    roots = [str(PurePosixPath(p).parent) for p in skill_md_paths]
-    roots = ["" if r == "." else r for r in roots]
+    records = []
+    roots = [str(PurePosixPath(path).parent) for path in skill_md_paths]
+    roots = ["" if root == "." else root for root in roots]
 
     for skill_md_path, root in zip(skill_md_paths, roots):
         fallback_name = PurePosixPath(root).name if root else repository_name
@@ -232,8 +237,10 @@ def scan_revision(
 
         # POC behavior: if nested roots exist, the parent package still contains all descendants.
         nested = [
-            r for r in roots
-            if r != root and (not root or r.startswith(root.rstrip("/") + "/"))
+            candidate
+            for candidate in roots
+            if candidate != root
+            and (not root or candidate.startswith(root.rstrip("/") + "/"))
         ]
         if nested:
             warnings.append(
@@ -242,11 +249,14 @@ def scan_revision(
             )
 
         digest, file_count, package_size, manifest, digest_warnings = package_digest(
-            repo, revision, root, entries
+            repo,
+            revision,
+            root,
+            entries,
         )
         warnings.extend(digest_warnings)
 
-        source_key = f"{repository_name}|{root}|{skill_name}"
+        source_key = "{}|{}|{}".format(repository_name, root, skill_name)
         records.append(
             SkillRecord(
                 repository=repository_name,
@@ -265,7 +275,7 @@ def scan_revision(
     return records
 
 
-def main() -> int:
+def main():
     parser = argparse.ArgumentParser(
         description="Discover SKILL.md roots and calculate package SHA-256 digests for a Git revision"
     )
@@ -298,4 +308,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
