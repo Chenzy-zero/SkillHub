@@ -1,21 +1,45 @@
 # SkillHub 安全管理项目
 
-公司内网 Agent Skill / SKILL.md 资产的统一注册、安全审查、发布、分发与追溯治理项目。
+公司内网 Agent Skill / `SKILL.md` 资产的发现、版本识别、安全扫描、审核与 SkillHub 纳管项目。
 
-## 项目目标
+## 当前阶段目标
 
-1. 建设公司内网统一 SkillHub，所有公司内输出、引用、安装和分发的 Skill 必须来自统一 SkillHub，或已在 SkillHub 完成注册与安全审查。
-2. 对现有 Gerrit 仓库中的 Skill 进行自动发现、登记、变更跟踪和安全审查，形成可追溯的 Skill 资产台账。
-3. 建立“自动扫描 + 人工复核 + 发布门禁 + 运行时来源校验”的纵深防御体系，而不是只依赖单次人工审查。
-4. 逐步形成公司级 Skill 安全规范、审查标准、例外流程和审计证据链。
+当前第一阶段只聚焦 **已经进入公司 Gerrit 代码仓库的 Skill**，暂不把公网 Skill、本地个人 Skill、Runtime 强制可信源等问题纳入首版建设范围。
 
-## 推荐总体方案
+1. 以 `SKILL.md` 作为 Skill 识别锚点，其所在目录作为 `Skill Root`，整个目录作为 `Skill Package`。
+2. 在 Gerrit 服务端统一触发 Skill 检查，对历史 Skill 做 Baseline 全量盘点，对后续提交做增量识别。
+3. 以“仓库 + Skill 路径 + Skill 名称”识别一个 `Skill Source`；不同来源先分别登记，后续再关联到同一个逻辑 Skill。
+4. 同一来源的不同 commit/revision 均保留为独立 `Source Revision`，用于 Git 来源追溯。
+5. 对完整 Skill Package 计算 SHA-256 `skill_digest`，将“Git 来源版本”和“安全内容版本”分离。
+6. 自动扫描由 Gerrit 服务端流程或定时任务触发，CM 依据扫描结果完成治理审核；高风险、异常或策略例外可升级人工安全复核。
+7. 审核通过后的 Skill 同步/注册到公司 iflytek SkillHub；如 SkillHub 支持 Draft，可提前登记，但未通过公司策略前不得正式发布。
 
-- **SkillHub 控制面**：优先对 `iflytek/skillhub` 与 `Nacos 3.2+ Skill Registry` 做双轨 POC，不建议第一阶段直接完全自研。
-- **SCM 发现面**：Gerrit 侧使用服务端事件/插件/CI 检查发现 Skill 变更，不依赖开发者本地 Git Hook。
-- **安全扫描面**：接入 Cisco AI Skill Scanner、NVIDIA SkillSpector 等可插拔扫描器，自动扫描只作为第一层门禁，保留人工安全复核。
-- **可信发布面**：审批绑定到 Skill 目录内容摘要（digest），而不仅仅绑定 commit id；任何 Skill 内容变化都会使旧审批失效或进入重新评估。
-- **运行时管控面**：Agent/CLI 默认只允许从内网 SkillHub 安装，外部 Skill 必须先导入隔离区、固定版本并完成审查后再上架。
+## 核心版本模型
+
+```text
+Canonical Skill（逻辑 Skill）
+        │
+        ├── Skill Source A（repo + path + name）
+        │       ├── Revision 1（commit A） -> Digest X
+        │       ├── Revision 2（commit B） -> Digest Y
+        │       └── Revision 3（commit C） -> Digest Y
+        │
+        └── Skill Source B（另一个引用来源）
+                └── Revision 1（commit D） -> Digest Y
+```
+
+> **Commit/Revision 是来源版本，Digest 是内容版本；安全扫描和审核绑定内容版本，Git 追溯绑定来源版本。**
+
+不同 Source 不物理合并删除，而是通过 `Canonical Skill` 建立关联，从而保留多个引用来源及完整历史证据链。
+
+## 当前技术路线
+
+- **SkillHub**：当前选择自行搭建 `iflytek/skillhub` 进行验证和公司内网适配。
+- **Gerrit 发现**：使用服务端 Hook / Event / Plugin 统一触发，不依赖开发者本地 Hook。
+- **资产识别**：`SKILL.md` 是边界锚点，但 Skill Root 内任意受管控文件变化都需要识别。
+- **内容版本**：SHA-256 `skill_digest`，不使用 MD5 作为安全完整性标识。
+- **安全扫描**：支持 Gerrit 发现后自动扫描、定时批量扫描以及 SkillHub 内置扫描；公司侧保留统一审核策略和结果记录。
+- **SkillHub 纳管**：审核通过后进入正式发布；若平台支持 Draft，可先同步为未发布资产。
 
 ## 仓库结构
 
@@ -36,6 +60,6 @@
 
 ## 当前阶段
 
-当前处于 **策略设计 + 技术选型 + POC 准备** 阶段。
+当前处于 **策略 v0.2 固化 + iflytek SkillHub 搭建 + Gerrit 发现链路设计** 阶段。
 
-详细项目上下文、约束、推荐架构、需求与任务拆分见 [AGENTS.md](./AGENTS.md)。
+详细项目上下文、设计决策、需求与任务拆分见 [AGENTS.md](./AGENTS.md)。
