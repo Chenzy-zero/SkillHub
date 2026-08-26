@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Minimal Gerrit Hooks Plugin submit hook for verification only.
+# Purpose: confirm that clicking Submit triggers the hook and that Gerrit passes arguments correctly.
+# This hook DOES NOT run Skill scanning and always allows Submit unless TEST_BLOCK=1.
+
+LOG_FILE="${GERRIT_SUBMIT_TEST_LOG:-/tmp/gerrit-submit-test.log}"
+TEST_BLOCK="${GERRIT_SUBMIT_TEST_BLOCK:-0}"
+
+{
+  echo "============================================================"
+  echo "time=$(date '+%Y-%m-%d %H:%M:%S %z')"
+  echo "event=submit-test"
+  echo "user=$(id -un 2>/dev/null || echo unknown)"
+  echo "pid=$$"
+  echo "args=$*"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --change)
+        echo "change=${2:-}"
+        shift 2
+        ;;
+      --project)
+        echo "project=${2:-}"
+        shift 2
+        ;;
+      --branch)
+        echo "branch=${2:-}"
+        shift 2
+        ;;
+      --patchset)
+        echo "patchset=${2:-}"
+        shift 2
+        ;;
+      --commit)
+        echo "commit=${2:-}"
+        shift 2
+        ;;
+      --submitter)
+        echo "submitter=${2:-}"
+        shift 2
+        ;;
+      --submitter-username)
+        echo "submitter_username=${2:-}"
+        shift 2
+        ;;
+      *)
+        echo "unknown_arg=$1"
+        shift
+        ;;
+    esac
+  done
+} >> "$LOG_FILE" 2>&1
+
+if [[ "$TEST_BLOCK" == "1" ]]; then
+  echo "Submit Hook test triggered successfully; blocking Submit for verification."
+  echo "Log: $LOG_FILE"
+  exit 1
+fi
+
+echo "Submit Hook test triggered successfully; Submit is allowed."
+echo "Log: $LOG_FILE"
+exit 0
