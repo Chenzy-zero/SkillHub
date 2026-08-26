@@ -52,6 +52,8 @@ def main():
     parser = argparse.ArgumentParser(description="Analyze one Gerrit Code Review patchset for affected Skills")
     parser.add_argument("--config", default="config.json", help="Config JSON path")
     parser.add_argument("--change", required=True, help="Gerrit change number or change-id")
+    parser.add_argument("--expected-revision", help="Optional exact revision SHA expected by caller/hook")
+    parser.add_argument("--expected-patchset", type=int, help="Optional exact patchset number expected by caller/hook")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--no-digest", action="store_true", help="Only analyze changed files; do not clone/fetch Git")
     args = parser.parse_args()
@@ -95,6 +97,19 @@ def main():
         logger.info("Patchset: %s", patchset)
         logger.info("Revision: %s", revision_sha)
         logger.info("Revision Ref: %s", revision_ref)
+
+        if args.expected_revision and revision_sha != args.expected_revision:
+            raise ValueError(
+                "当前 Gerrit revision 与 Submit Hook 传入 commit 不一致: current={} expected={}".format(
+                    revision_sha, args.expected_revision
+                )
+            )
+        if args.expected_patchset is not None and int(patchset) != int(args.expected_patchset):
+            raise ValueError(
+                "当前 Gerrit patchset 与 Submit Hook 传入 patchset 不一致: current={} expected={}".format(
+                    patchset, args.expected_patchset
+                )
+            )
 
         logger.info("[2/8] 获取本 Patchset 文件清单...")
         files = client.get_revision_files(args.change, revision_sha)

@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Gerrit Hooks Plugin synchronous submit hook.
+# Trigger the SkillHub Gerrit Change Discovery scan only when a user clicks Submit.
+
+set -u
+
+# Override these with environment variables if your deployment path is different.
+POC_HOME="${SKILLHUB_POC_HOME:-/opt/skillhub/gerrit-change-discovery}"
+PYTHON="${SKILLHUB_PYTHON:-/usr/bin/python3}"
+CONFIG="${SKILLHUB_CONFIG:-${POC_HOME}/config.json}"
+LOG_DIR="${SKILLHUB_HOOK_LOG_DIR:-${POC_HOME}/output/hooks}"
+
+CHANGE=""
+PROJECT=""
+BRANCH=""
+SUBMITTER=""
+SUBMITTER_USERNAME=""
+PATCHSET=""
+COMMIT=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --change)
+      CHANGE="${2:-}"
+      shift 2
+      ;;
+    --project)
+      PROJECT="${2:-}"
+      shift 2
+      ;;
+    --branch)
+      BRANCH="${2:-}"
+      shift 2
+      ;;
+    --submitter)
+      SUBMITTER="${2:-}"
+      shift 2
+      ;;
+    --submitter-username)
+      SUBMITTER_USERNAME="${2:-}"
+      shift 2
+      ;;
+    --patchset)
+      PATCHSET="${2:-}"
+      shift 2
+      ;;
+    --commit)
+      COMMIT="${2:-}"
+      shift 2
+      ;;
+    *)
+      # Ignore unknown arguments so the hook remains forward-compatible
+      # with additional Gerrit Hooks Plugin parameters.
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$CHANGE" || -z "$PROJECT" || -z "$PATCHSET" || -z "$COMMIT" ]]; then
+  echo "Skill Security: submit hook 参数不完整，拒绝 Submit。"
+  echo "change=$CHANGE project=$PROJECT patchset=$PATCHSET commit=$COMMIT"
+  exit 2
+fi
+
+if [[ ! -x "$PYTHON" ]]; then
+  echo "Skill Security: Python 不可执行: $PYTHON"
+  exit 2
+fi
+
+if [[ ! -f "$POC_HOME/main.py" ]]; then
+  echo "Skill Security: 未找到扫描程序: $POC_HOME/main.py"
+  exit 2
+fi
+
+if [[ ! -f "$CONFIG" ]]; then
+  echo "Skill Security: 未找到配置文件: $CONFIG"
+  exit 2
+fi
+
+mkdir -p "$LOG_DIR" || {
+  echo "Skill Security: 无法创建日志目录: $LOG_DIR"
+  exit 2
+}
+
+SAFE_PROJECT="${PROJECT//\//_}"
+LOG_FILE="${LOG_DIR}/submit-${SAFE_PROJECT}-${CHANGE}-${PATCHSET}.log"
+TMP_FILE="$(mktemp "${TMPDIR:-/tmp}/skillhub-submit.XXXXXX")" || exit 2
+trap 'rm -f "$TMP_FILE"' EXIT
+
+{
+  echo "============================================================"
+  echo "time=$(date '+%Y-%m-%d %H:%M:%S %z')"
+  echo "event=submit"
+  echo "change=$CHANGE"
+  echo "project=$PROJECT"
+  echo "branch=$BRANCH"
+  echo "patchset=$PATCHSET"
+  echo "commit=$COMMIT"
+  echo "submitter=$SUBMITTER"
+  echo "submitter_username=$SUBMITTER_USERNAME"
+  echo "============================================================"
+} >> "$LOG_FILE"
+
+"$PYTHON" "$POC_HOME/main.py" \
+  --config "$CONFIG" \
+  --change "$CHANGE" \
+  --expected-revision "$COMMIT" \
+  --expected-patchset "$PATCHSET" \
+  >"$TMP_FILE" 2>&1
+RESULT=$?
+
+cat "$TMP_FILE" >> "$LOG_FILE"
+
+if [[ $RESULT -ne 0 ]]; then
+  echo "Skill Security 扫描执行失败，Submit 已拒绝。"
+  echo "Project: $PROJECT"
+  echo "Change: $CHANGE"
+  echo "Patchset: $PATCHSET"
+  echo "Commit: $COMMIT"
+  echo ""
+  echo "最近的扫描日志："
+  tail -n 20 "$TMP_FILE"
+  exit "$RESULT"
+fi
+
+# main.py returns 0 when discovery/digest/database workflow completes successfully.
+# When a real security scanner is integrated, make its policy failure return
+# a non-zero exit code from main.py to block Submit here automatically.
+echo "Skill Security 扫描完成，允许 Submit。" >> "$LOG_FILE"
+exit 0
