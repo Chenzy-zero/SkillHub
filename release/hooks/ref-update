@@ -1,0 +1,462 @@
+#!/usr/bin/python3
+# coding: utf-8
+
+# V1：gerrit服务端日志格式校验
+# V2：获取commit提交的文件，如果包含skills，写入数据库
+
+import sys
+import re
+import http.client
+import json
+import os
+import ssl
+import pymysql
+
+
+class Help:
+    def __init__(self):
+        self.helpInfo = ("\n"
+                         "提交日志必须满足如下要求：\n"
+                         "\n"
+                         "1）所有的合入都必须有单号，包括任务单号、开发故障单号、系统故障单号等。\n"
+                         "2）单号必须为Jira中实际存在的单号\n"
+                         "3）日志中填写的单据类型与Jira单号实际的单据类型对应关系必须符合如下要求。\n"
+                         "（1）系统故障=故障单\n"
+                         "（2）开发故障=开发故障单\n"
+                         "（3）新增需求=需求|子需求|产品需求|子产品需求|故事\n"
+                         "（4）需求变更=变更需求\n"
+                         "（5）任务=任务|子任务|项目任务单|支持类任务单|项目管理任务单|部门任务单\n"
+                         "（6）基线申请=基线申请\n"
+                         "4）若一次提交解决多个问题，请换行说明，格式也必须为如下类型之一。\n"
+                         "5）统一各种合入的格式，可复制如下规则内容并修改后作为日志提交。\n"
+                         "   具体格式如下：\n"
+                         "   a）系统故障单，例子如下：\n"
+                         "	 【系统故障FWG6402-276】故障单名描述。\n"
+                         "   b）开发故障单，例子如下：\n"
+                         "	 【开发故障BDP10-20】故障单名描述。\n"
+                         "   c）新增需求，例子如下：\n"
+                         "	 【新增需求GUARD6101-5265】需求单名描述。\n"
+                         "   d）变更需求，例子如下：\n"
+                         "	 【变更需求ZEUS10-81】需求单名描述。\n"
+                         "   e）任务，例子如下：\n"
+                         "	 【任务GUARD6101-3763】任务单名描述。\n"
+                         "   f）基线申请，例子如下：\n"
+                         "	 【基线申请GUARD6101-5363】基线申请单名描述。\n"
+                         "\n")
+
+    def get_help(self):
+        # sys.stderr.write(self.helpInfo)
+        print(self.helpInfo)
+
+
+class Message:
+    def __init__(self):
+        self.messageBody = ["日志不符合规范，提交失败！！！\n",
+                            "SVN服务器连接JIRA超时，提交失败！\n",
+                            "请联系项目配置管理员解决该问题！\n",
+                            "Jira中不存在单据 ",
+                            " ,请填写正确的单号！\n",
+                            " 请参照如下规则重新填写后再做提交！\n",
+                            "日志不能为空！\n",
+                            "项目名称必须与Jira中的项目名或者项目关键字一致（不区分字母大小写），\"",
+                            "\"不满足该条件！\n",
+                            "单据 ",
+                            "不是【",
+                            "】中的一种\n"]
+
+    @staticmethod
+    def message_border():
+        # sys.stderr.write("#######################################################################\n")
+        print("#######################################################################\n")
+
+    @staticmethod
+    def message_blankline():
+        # sys.stderr.write("\n")
+        print("\n")
+
+    def message_body(self, *body):
+        retMessage = ""
+        for param in body:
+            if type(param) == list or type(param) == tuple:
+                for m_num in param:
+                    retMessage += self.messageBody[m_num]
+            else:
+                retMessage = retMessage + param
+
+        # sys.stderr.write(retMessage)
+        print(retMessage)
+
+
+class LogTemplate:
+    def __init__(self):
+        # 【系统故障Jira单号】：故障单名描述。
+        self.regexBug = re.compile(
+            r"\s*【\s*(?P<commit_type>系统故障)\s*(?P<item_num>[a-zA-Z0-9]{1,30}-[1-9][0-9]{0,10})\s*?】.+")
+        # 【开发故障Jira单号】：故障单名描述。
+        self.regexDevBug = re.compile(
+            r"\s*【\s*(?P<commit_type>开发故障)\s*(?P<item_num>[a-zA-Z0-9]{1,30}-[1-9][0-9]{0,10})\s*?】.+")
+        # 【新增需求Jira单号】：需求单名描述。
+        self.regexNewReq = re.compile(
+            r"\s*【\s*(?P<commit_type>新增需求)\s*(?P<item_num>[a-zA-Z0-9]{1,30}-[1-9][0-9]{0,10})\s*?】.+")
+        # 【需求变更Jira单号】：需求单名描述。
+        self.regexReqChange = re.compile(
+            r"\s*【\s*(?P<commit_type>需求变更)\s*(?P<item_num>[a-zA-Z0-9]{1,30}-[1-9][0-9]{0,10})\s*?】.+")
+        # 【任务Jira单号】：任务单名描述。
+        self.regexOptimize = re.compile(
+            r"\s*【\s*(?P<commit_type>任务)\s*(?P<item_num>[a-zA-Z0-9]{1,30}-[1-9][0-9]{0,10})\s*?】.+")
+        # 【基线申请Jira单号】：基线单名描述。
+        self.regexBaseline = re.compile(
+            r"\s*【\s*(?P<commit_type>基线申请)\s*(?P<item_num>[a-zA-Z0-9]{1,30}-[1-9][0-9]{0,10})\s*?】.+")
+
+        self.regexType = ["Bug", "DevBug", "NewReq", "ReqChange", "Optimize", "Baseline"]
+        self.payload = ''
+        self.conn = http.client.HTTPSConnection("jira.sinovatio.com")
+
+        self.headers = {'Authorization': 'Basic dmlld0FkbWluOmxaaWZlNzg5ZjIjZmVs'}
+
+    def match_template(self,
+                       log_content):  # match_template()函数的功能：检查提交日志是否符合四种格式中的一种，如果符合就返回:True,日志中填写的“单据类型”,日志中填写的“Jira单号”。即ret_logValidation的内容。
+        regexAim = None
+        for rt in self.regexType:
+            if rt == "Bug":
+                regexTypes["regex" + rt + "Group"] = self.regexBug.match(log_content)
+            elif rt == "DevBug":
+                regexTypes["regex" + rt + "Group"] = self.regexDevBug.match(log_content)
+            elif rt == "NewReq":
+                regexTypes["regex" + rt + "Group"] = self.regexNewReq.match(log_content)
+            elif rt == "ReqChange":
+                regexTypes["regex" + rt + "Group"] = self.regexReqChange.match(log_content)
+            elif rt == "Optimize":
+                regexTypes["regex" + rt + "Group"] = self.regexOptimize.match(log_content)
+            elif rt == "Baseline":
+                regexTypes["regex" + rt + "Group"] = self.regexBaseline.match(log_content)
+
+            # 日志不匹配时，regexTypes.get("regex" + rt + "Group") 返回为 None
+            if regexTypes.get(
+                    "regex" + rt + "Group"):  # regexTypes.get：返回字典regexTypes中指定Key的value。此段代码应该是指依次返回上述四种格式的日志提交信息。即regexAim的值。
+                # sys.stderr.write("regex" + rt + "Group")
+                regexAim = regexTypes.get("regex" + rt + "Group")
+                break
+
+        if regexAim is None:
+            return False, None
+        else:
+            return True, regexAim.group('commit_type'), regexAim.group('item_num')
+
+    def validate_project(self, project_name):
+        # 校验项目名是否合法，对一下两种情况校验
+        # 1）日志中填写的项目名与Jira中的项目名或项目关键字是否一致（不区分字母大小写）；
+        # 2）项目名前后有空白字符
+        self.conn.request("GET", "/rest/api/2/project", self.payload, self.headers)
+        res = self.conn.getresponse()
+        data = res.read()
+        # ret为list类型
+        project_name_list = []
+        project_key_list = []
+        ret = json.loads(data.decode("utf-8"))
+        for proj in ret:
+            # 转化为小写字母
+            project_name_list.append(proj["name"].lower())
+            project_key_list.append(proj["key"].lower())
+
+        if project_name not in project_name_list and project_name not in project_key_list:
+            # 项目名称与Jira中的项目名不一致
+            return True
+        else:
+            return False
+
+    def validate_issue_type(self, issue_type_list,
+                            ticket_number):  # issue_type_list传入的是“commit-msg-configuration.ini”文件中配置的对应Jira单据类型；ticket_number传入的是日志中配置的Jira单号
+        # 校验问题类型名称与单据编号是否一致
+        self.conn.request("GET", "/rest/api/2/issue/" + ticket_number, self.payload, self.headers)
+        res = self.conn.getresponse()
+        data = res.read()
+        ret = json.loads(data.decode("utf-8"))
+
+        if ret["fields"]["issuetype"]["name"] in issue_type_list:
+            return False
+        else:
+            return True
+
+    def validate_ticket_number(self, ticket_number):  # ticket_number：小写的Jira单号
+        # 校验单号是否存在
+        self.conn.request("GET", "/rest/api/2/issue/" + ticket_number, self.payload, self.headers)
+        res = self.conn.getresponse()
+        data = res.read()
+        ret = json.loads(data.decode("utf-8"))
+
+        if "errorMessages" in ret.keys():
+            # 单号不存在
+            return True
+        else:
+            return False
+
+
+def get_config_from_file(file_name):
+    config_para_dict = {}
+    with open(file_name, "r", encoding="utf8") as config_file_instance:
+        current_key = ""
+        for config_line in config_file_instance.readlines():
+            config_line = config_line.strip()
+            if config_line.startswith("["):
+                current_key = config_line[1:-1].strip()
+                if current_key not in config_para_dict.keys():
+                    config_para_dict[current_key] = []
+            elif not config_line.startswith("#") and config_line != "" and current_key != "":
+                config_para_dict[current_key].append(config_line)
+
+    return config_para_dict
+
+
+class SkillDB:
+    def __init__(self, db_config):
+        self.conn = pymysql.connect(
+            host=db_config.get("host", "localhost"),
+            port=int(db_config.get("port", 3306)),
+            user=db_config.get("user", "root"),
+            password=db_config.get("password", ""),
+            database=db_config.get("database", "skills"),
+            charset="utf8mb4",
+            autocommit=False
+        )
+        self._init_tables()
+
+    def _init_tables(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute('''CREATE TABLE IF NOT EXISTS skill_summary (
+                skill_name VARCHAR(64) NOT NULL,
+                repo_name VARCHAR(64) NOT NULL,
+                branch VARCHAR(64) NOT NULL,
+                skill_path VARCHAR(512) NOT NULL,
+                latest_commitid VARCHAR(64) NOT NULL,
+                security_reviewed VARCHAR(8) NOT NULL DEFAULT '否',
+                PRIMARY KEY (skill_name, repo_name, branch, skill_path)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4''')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS skill_history (
+                skill_name VARCHAR(64) NOT NULL,
+                repo_name VARCHAR(64) NOT NULL,
+                branch VARCHAR(64) NOT NULL,
+                skill_path VARCHAR(512) NOT NULL,
+                commitid VARCHAR(64) NOT NULL,
+                update_seq INT NOT NULL,
+                PRIMARY KEY (skill_name, repo_name, branch, skill_path, update_seq)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4''')
+        self.conn.commit()
+
+    def get_skill_paths(self, repo_name, branch):
+        """一次性取出该仓库+分支已记录的全部SKILL路径"""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT skill_path FROM skill_summary WHERE repo_name = %s AND branch = %s",
+                (repo_name, branch))
+            return [row[0] for row in cursor.fetchall()]
+
+    def update_existing_skill(self, skill_name, repo_name, branch, skill_path, commit_id):
+        """分支A：已存在SKILL，记录历史并更新汇总"""
+        with self.conn.cursor() as cursor:
+            # 记录到skill_history
+            cursor.execute(
+                "SELECT MAX(update_seq) FROM skill_history WHERE skill_name = %s AND repo_name = %s AND branch = %s AND skill_path = %s",
+                (skill_name, repo_name, branch, skill_path))
+            max_seq = cursor.fetchone()[0]
+            new_seq = (max_seq or 0) + 1
+            cursor.execute(
+                "INSERT INTO skill_history (skill_name, repo_name, branch, skill_path, commitid, update_seq) VALUES (%s, %s, %s, %s, %s, %s)",
+                (skill_name, repo_name, branch, skill_path, commit_id, new_seq))
+
+            # 更新skill_summary：最新commitid + 重置安全审查为"否"
+            cursor.execute(
+                "UPDATE skill_summary SET latest_commitid = %s, security_reviewed = '否' WHERE skill_name = %s AND repo_name = %s AND branch = %s AND skill_path = %s",
+                (commit_id, skill_name, repo_name, branch, skill_path))
+        self.conn.commit()
+
+    def add_new_skill(self, skill_name, repo_name, branch, skill_path, commit_id):
+        """分支B：新增SKILL，首次记录至skill_summary"""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO skill_summary (skill_name, repo_name, branch, skill_path, latest_commitid, security_reviewed) VALUES (%s, %s, %s, %s, %s, '否')",
+                (skill_name, repo_name, branch, skill_path, commit_id))
+            cursor.execute(
+                "INSERT INTO skill_history (skill_name, repo_name, branch, skill_path, commitid, update_seq) VALUES (%s, %s, %s, %s, %s, 1)",
+                (skill_name, repo_name, branch, skill_path, commit_id))
+        self.conn.commit()
+
+    def close(self):
+        if self.conn:
+            self.conn.close()
+
+
+def process_skill_commit(gerritProject, repo_name, branch, commit_id):
+    """若提交中包含SKILL文件，将SKILL信息写入数据库（更新/新增）"""
+    gerrit_file_cmd = "git --git-dir=" + gerritProject + ".git log --pretty=format: --name-only -n 1 " + commit_id
+    results_file = os.popen(gerrit_file_cmd).read()
+
+    # 数据库连接配置
+    db_config = {
+        "host": "10.45.186.157",
+        "port": "3306",
+        "user": "root",
+        "password": "mysql@123",
+        "database": "skills"
+    }
+
+    skill_db = SkillDB(db_config)
+    try:
+        commit_files = [f.strip() for f in results_file.split("\n") if f.strip()]
+
+        # 一次性取出该仓库+分支已记录的SKILL路径
+        existing_paths = skill_db.get_skill_paths(repo_name, branch)
+        processed = set()
+
+        # 分支A：提交文件命中已记录SKILL的路径，判定为更新
+        for commit_file in commit_files:
+            for skill_path in existing_paths:
+                if commit_file == skill_path or commit_file.startswith(skill_path + "/"):
+                    if skill_path not in processed:
+                        processed.add(skill_path)
+                        skill_name = skill_path.rsplit("/", 1)[-1] if skill_path != "/" else skill_path
+                        skill_db.update_existing_skill(skill_name, repo_name, branch, skill_path, commit_id)
+                        print("SKILL更新:", skill_name, skill_path, commit_id)
+                    break
+
+        # 分支B：存在新提交的SKILL.md，且路径未被记录，判定为新增
+        for commit_file in commit_files:
+            if commit_file.endswith("/SKILL.md") or commit_file == "SKILL.md":
+                skill_dir = commit_file.rsplit("/", 1)[0] if "/" in commit_file else "/"
+                if skill_dir not in existing_paths:
+                    skill_name = skill_dir.rsplit("/", 1)[-1] if skill_dir != "/" else skill_dir
+                    skill_db.add_new_skill(skill_name, repo_name, branch, skill_dir, commit_id)
+                    print("新增SKILL:", skill_name, skill_dir, commit_id)
+    finally:
+        skill_db.close()
+
+
+if __name__ == "__main__":
+    regexTypes = locals()
+    my_help = Help()
+    message = Message()
+    ssl._create_default_https_context = ssl._create_unverified_context
+
+    # 从配置文件获取配置清单
+    gerritPath = "/home/backup_recover/gerrit/gerrit_site"
+    gerritConfigfile = gerritPath + "/hooks/commit-msg-configuration.ini"
+    para_dict = get_config_from_file(gerritConfigfile)
+
+    # print(sys.argv)
+
+    # 定义process_skill_commit()函数所需的参数变量
+    repo_name = sys.argv[2]
+    branch = sys.argv[4].replace("refs/heads/", "", 1)
+    gerritCommitId = sys.argv[10]
+    gerritGitPath = gerritPath + "/git/"
+    gerritProject = gerritGitPath + repo_name
+
+    try:
+        # 文档仓库不检查日志格式
+        doc_repo = re.compile('/doc$', re.I)
+        if doc_repo.findall(sys.argv[2]):
+            process_skill_commit(gerritProject, repo_name, branch, gerritCommitId)
+            print("文档仓库不需要进行日志格式检查！")
+            sys.exit(0)
+
+        # CI仓库不检查日志格式
+        ci_repo = re.compile('/ci$', re.I)
+        if ci_repo.findall(sys.argv[2]):
+            process_skill_commit(gerritProject, repo_name, branch, gerritCommitId)
+            print("CI仓库不需要进行日志格式检查！")
+            sys.exit(0)
+
+        # 不检查日志格式的用户
+        if para_dict["no_check_persons"]:
+            if sys.argv[6] in para_dict["no_check_persons"]:
+                process_skill_commit(gerritProject, repo_name, branch, gerritCommitId)
+                print("用户不需要进行日志格式检查！")
+                sys.exit(0)
+
+        # 不检查日志格式的代码仓库
+        if para_dict["no_check_code_repos"]:
+            if sys.argv[2] in para_dict["no_check_code_repos"]:
+                process_skill_commit(gerritProject, repo_name, branch, gerritCommitId)
+                print("代码仓库不需要进行日志格式检查！")
+                sys.exit(0)
+
+        # 生成单据类型名称对照表
+        issue_type_map_dict = {}  # 定义一个字典issue_type_map_dict
+        if para_dict["issue_type_svn_log_jira_map"]:
+            for issue_type_map in para_dict["issue_type_svn_log_jira_map"]:
+                commit_type = issue_type_map.strip().split("=")[0]  # commit_type的值：开发故障 系统故障 任务
+                jira_issue_type_list = issue_type_map.strip().split("=")[1].split(
+                    "|")  # jira_issue_type_list的值：开发故障单 故障单 任务 子任务 项目任务单
+                issue_type_map_dict[
+                    commit_type] = jira_issue_type_list  # 将commit-msg-configuration.ini文件中[issue_type_svn_log_jira_map]的内容存放到字典中
+
+        gerritCmd = "git --git-dir=" + gerritProject + ".git log --pretty=format:'%s' -n 1 " + gerritCommitId
+        results = os.popen(gerritCmd).read()
+
+        if results.strip() == "":
+            # 日志为空
+            message.message_border()
+            message.message_body([6])
+            message.message_border()
+            my_help.get_help()
+            message.message_border()
+            # log_file.write("报错类型：日志为空！\n")
+            sys.exit(1)
+        else:
+            for log in results.split("\n"):
+                if log.strip() != "":
+                    logValidation = LogTemplate()
+                    ret_logValidation = logValidation.match_template(
+                        log.strip())  # ret_logValidation的取值有两种：(1)False, None;(2)True,日志中填写的“单据类型”,日志中填写的“Jira单号”。
+                    if not ret_logValidation[0]:
+                        # 日志不规范，日志与任何模式都不匹配
+                        message.message_border()
+                        message.message_body([0], [5])
+                        message.message_border()
+                        my_help.get_help()
+                        message.message_border()
+                        # log_file.write("报错类型：日志不规范，日志与任何模式都不匹配！\n")
+                        sys.exit(2)
+                    elif len(ret_logValidation) == 3:
+                        # 校验单号是否存在
+                        exit_flag_ticket_number = False
+                        exit_flag_ticket_number = logValidation.validate_ticket_number(
+                            ret_logValidation[2].lower())  # exit_flag_ticket_number的取值：True或者False
+                        if exit_flag_ticket_number:
+                            message.message_border()
+                            message.message_body([3], ret_logValidation[2], [4])
+                            message.message_border()
+                            my_help.get_help()
+                            message.message_border()
+                            # log_file.write("报错类型：单号不存在！\n")
+                            sys.exit(3)
+                        else:
+                            if "issue_type_svn_log_jira_map" in para_dict.keys() and len(
+                                    para_dict["issue_type_svn_log_jira_map"]) > 0:
+                                # 如果配置文件中定义了该类型单据在Jira中对应的问题类型，则进行校验，否则不校验
+                                issue_type_match_flag = False
+                                if ret_logValidation[1] in issue_type_map_dict.keys():
+                                    issue_type_match_flag = logValidation.validate_issue_type(
+                                        issue_type_map_dict[ret_logValidation[1]],
+                                        ret_logValidation[2])  # 一致返回False，否则返回True
+                                if issue_type_match_flag:
+                                    message.message_border()
+                                    message.message_body([9], ret_logValidation[2], [10],
+                                                         "】、【".join(issue_type_map_dict[ret_logValidation[1]]), [11])
+                                    message.message_border()
+                                    my_help.get_help()
+                                    message.message_border()
+                                    # log_file.write("报错类型：单号与问题类型不匹配！\n")
+                                    sys.exit(4)
+
+        # 获取commit提交的文件，按SKILL管理流程处理
+        process_skill_commit(gerritProject, repo_name, branch, gerritCommitId)
+
+    except TimeoutError:
+        # 无法连接Jira服务器
+        message.message_border()
+        message.message_body([1])
+        message.message_body([2])
+        message.message_border()
+        # log_file.write("报错类型：无法连接Jira服务器！\n")
+        sys.exit(10000)
