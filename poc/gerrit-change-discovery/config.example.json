@@ -10,7 +10,10 @@
   },
   "workspace": "./workspace",
   "output_dir": "./output",
+  "database_path": "./data/skillhub-poc.db",
+  "report_dir": "./output/dashboard",
   "inventory_file": "../gerrit-skill-discovery/output/skill_inventory.json",
   "calculate_digest": true,
+  "auto_generate_report": true,
   "git_fetch_timeout_seconds": 120
 }

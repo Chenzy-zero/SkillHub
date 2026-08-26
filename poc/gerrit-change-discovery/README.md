@@ -1,86 +1,50 @@
 # Gerrit Change Skill Discovery POC
 
-这个目录是日常增量治理的主 POC。它不再每次遍历整个仓库，而是围绕 **Gerrit Code Review / Patchset 的文件清单** 判断本次单据是否新增或影响 Skill。
+这是 SkillHub 项目的日常 Gerrit 增量发现 POC。核心原则是：**不在每次提交时全仓扫描，而是先读取 Gerrit Code Review / Patchset 文件清单，只定位受影响 Skill，再对受影响 Skill Root 计算完整 Digest。**
 
-## 目标流程
+## 当前完整流程
 
 ```text
-Gerrit Code Review
-        ↓
-读取 current patchset
-        ↓
-GET revision files
-        ↓
+Gerrit Code Review / Patchset
+          ↓
+Gerrit REST: Revision Files
+          ↓
 A / M / D / R / C
-        ↓
-┌────────────────────────────┐
-│                            │
-│  新增/修改 SKILL.md       │
-│  或文件命中已有 Skill Root │
-│                            │
-└──────────────┬─────────────┘
-               ↓
-        Affected Skills
-               ↓
-仅 fetch 当前 Patchset Git ref
-               ↓
-仅计算受影响 Skill Root 完整 Digest
-               ↓
-输出 Change 分析结果
+          ↓
+新增 SKILL.md 或命中已有 Skill Root
+          ↓
+Affected Skills
+          ↓
+仅 fetch 当前 Patchset
+          ↓
+仅读取受影响 Skill Root 全部 tracked files
+          ↓
+SHA-256 Content Digest
+          ↓
+┌─────────────────────────────┐
+│ JSON 原始证据              │
+│ SQLite 结构化事实存档      │
+│ HTML Dashboard 展示        │
+└─────────────────────────────┘
 ```
 
-历史全量盘点仍由 `../gerrit-skill-discovery/` 目录负责。两者定位如下：
+历史全量盘点仍由 `../gerrit-skill-discovery/` 负责；本目录负责后续 Code Review 增量处理。
 
-- `gerrit-skill-discovery`：一次性 Baseline / Inventory 初始化。
-- `gerrit-change-discovery`：日常 Gerrit Code Review 增量识别。
+---
 
-## 已实现能力
-
-- 按 Gerrit Change Number / Change-Id 查询当前 Patchset；
-- 获取 Gerrit Revision Files 文件清单；
-- 支持 `A/M/D/R/C`，Gerrit Modified 未显式返回 status 时按 `M` 处理；
-- 新增 `SKILL.md` -> `NEW_SKILL`；
-- 已有 `SKILL.md` 修改 -> `UPDATED_SKILL`；
-- 删除 `SKILL.md` -> `DELETED_SKILL`；
-- rename/move `SKILL.md` -> `RENAMED_SKILL`；
-- copy `SKILL.md` -> `COPIED_SKILL`；
-- 普通文件变更通过 Inventory 判断是否落在已有 Skill Root 内；
-- `SKILL.md` name 变化时按当前策略创建新的 Skill Source 候选；
-- 从 Gerrit RevisionInfo 获取 `refs/changes/...`，只 fetch 当前 Patchset；
-- 只对受影响 Skill Root 获取完整 Git tracked 内容并计算 SHA-256 Digest；
-- Windows PowerShell 一键执行；
-- 详细控制台日志 + 文件日志；
-- JSON 结果输出；
-- 纯 Python 标准库 + Git CLI，无 pip 依赖。
-
-## 目录
-
-```text
-poc/gerrit-change-discovery/
-├── README.md
-├── config.example.json
-├── inventory.example.json
-├── gerrit_client.py
-├── inventory.py
-├── change_analyzer.py
-├── skill_digest.py
-├── main.py
-├── run_change.ps1
-└── .gitignore
-```
-
-## 1. Windows 准备
+## 一键部署（Windows）
 
 要求：
 
 ```text
 Python 3.8+
 Git CLI
-能够访问 Gerrit REST API
-能够通过 SSH clone/fetch Gerrit 仓库
+PowerShell
+可访问 Gerrit REST API
+可通过 SSH clone/fetch Gerrit
 ```
 
-先更新项目：
+更新仓库并进入目录：
 
 ```powershell
 cd "D:\AI_Project\SKILL学习\SKILLHUB\SkillHub"
@@ -88,21 +52,48 @@ git pull
 cd .\poc\gerrit-change-discovery
 ```
 
-复制配置：
+执行：
 
 ```powershell
-Copy-Item .\config.example.json .\config.json
+.\deploy.ps1
 ```
 
-## 2. 配置 Gerrit
+部署脚本会自动：
 
-示例：
+1. 检查 Python / Git；
+2. 如不存在则生成 `config.json`；
+3. 创建 `data/`、`output/`、`workspace/`；
+4. 初始化 SQLite；
+5. 创建全部表和索引；
+6. 生成初始 HTML Dashboard。
+
+部署完成后目录包含：
+
+```text
+poc/gerrit-change-discovery/
+├── config.json                 # 本地配置，不提交 Git
+├── data/
+│   └── skillhub-poc.db         # SQLite 事实库
+├── output/
+│   ├── dashboard/
+│   │   └── index.html          # HTML Dashboard
+│   ├── gerrit-change-discovery.log
+│   └── change-*-patchset-*.json
+└── workspace/                  # Git Patchset 本地缓存
+```
+
+---
+
+## 配置
+
+编辑 `config.json`：
 
 ```json
 {
   "gerrit": {
     "base_url": "https://gerrit.company.com",
     "username": "1003304",
+    "http_password": "你的 Gerrit HTTP Password",
     "http_password_env": "GERRIT_HTTP_PASSWORD",
     "verify_ssl": true,
     "ssh_username": "1003304",
@@ -110,391 +101,276 @@ Copy-Item .\config.example.json .\config.json
   },
   "workspace": "./workspace",
   "output_dir": "./output",
+  "database_path": "./data/skillhub-poc.db",
+  "report_dir": "./output/dashboard",
   "inventory_file": "../gerrit-skill-discovery/output/skill_inventory.json",
   "calculate_digest": true,
+  "auto_generate_report": true,
   "git_fetch_timeout_seconds": 120
 }
 ```
 
-### REST 认证
-
-POC 使用 Gerrit HTTP Basic Auth。不要把 HTTP Password 写进 `config.json`，建议只配置环境变量名：
-
-```json
-"http_password_env": "GERRIT_HTTP_PASSWORD"
-```
-
-PowerShell 当前窗口设置：
+POC 支持直接填写 `http_password`；如果不想在本地配置文件保存明文，也可以删除该字段值并使用：
 
 ```powershell
 $env:GERRIT_HTTP_PASSWORD="你的 Gerrit HTTP Password"
 ```
 
-如果 Gerrit 允许匿名读取 Change，则可以不设置；如果需要登录，Gerrit 通常使用用户设置中生成的 HTTP Password，而不是 Windows/域账号密码。
+`config.json`、`data/`、`workspace/` 和 `output/` 均已加入 `.gitignore`。
 
-### SSH 地址模板
+---
 
-项目名来自 Gerrit Change 的 `project` 字段。
+## 一键处理 Gerrit 单据
 
-例如项目：
-
-```text
-team/Skill-CM
-```
-
-模板：
-
-```text
-ssh://{username}@gerrit.company.com:29418/{project}
-```
-
-最终自动得到：
-
-```text
-ssh://1003304@gerrit.company.com:29418/team/Skill-CM
-```
-
-如果公司的 SSH 端口或地址不同，只修改模板即可。
-
-## 3. Inventory
-
-增量检测有两种判断来源：
-
-### 新 Skill
-
-Gerrit 文件清单直接出现：
-
-```text
-A tools/jira-query/SKILL.md
-```
-
-这种情况即使没有 Inventory，也可以发现。
-
-### 已有 Skill 内普通文件修改
-
-例如：
-
-```text
-M tools/jira-query/scripts/query.py
-```
-
-这时必须先知道：
-
-```text
-tools/jira-query
-```
-
-是已有 Skill Root，所以需要 Inventory。
-
-推荐直接复用 Baseline POC 生成的：
-
-```text
-../gerrit-skill-discovery/output/skill_inventory.json
-```
-
-如果暂时没有 Baseline 数据，可以：
+例如单据号 `123456`：
 
 ```powershell
-Copy-Item .\inventory.example.json .\inventory.json
+.\run_change.ps1 -Change 123456 -VerboseLog
 ```
 
-然后在 `config.json` 改为：
-
-```json
-"inventory_file": "./inventory.json"
-```
-
-Inventory 至少需要：
-
-```json
-{
-  "skills": [
-    {
-      "repository": "team/Skill-CM",
-      "skill_name": "jira-query",
-      "skill_path": "tools/jira-query",
-      "source_key": "team/Skill-CM|tools/jira-query|jira-query"
-    }
-  ]
-}
-```
-
-## 4. 最简单的第一次测试：不算 Digest
-
-建议先只验证 Gerrit REST + 文件清单识别，不进行 Git clone：
+同时打开 Dashboard：
 
 ```powershell
-python .\main.py --config .\config.json --change 123456 --no-digest --verbose
+.\run_change.ps1 -Change 123456 -VerboseLog -OpenDashboard
 ```
 
-或者：
+只测试 Gerrit 文件清单、不进行 Git Digest：
 
 ```powershell
 .\run_change.ps1 -Change 123456 -NoDigest -VerboseLog
 ```
 
-执行日志类似：
+每次成功执行都会自动完成：
 
 ```text
-[1/6] 获取 Gerrit Change 信息...
-项目: team/Skill-CM
-Patchset: 3
-Revision: 5d8a...
-
-[2/6] 获取本 Patchset 文件清单...
-Changed Files: 4
-A tools/jira-query/SKILL.md
-A tools/jira-query/scripts/query.py
-M README.md
-
-[3/6] 加载 Skill Source Inventory...
-[4/6] 基于文件清单识别受影响 Skill...
-识别结果: NEW_SKILL ...
+Gerrit 分析
+  ↓
+JSON 留档
+  ↓
+SQLite 存档
+  ↓
+HTML Dashboard 刷新
 ```
 
-如果这一步正常，说明核心的“Gerrit Code Review -> Changed Files -> Skill 判断”已经跑通。
+---
 
-## 5. 开启 Digest
+## SQLite 数据模型
 
-确认 REST 流程后，执行：
+当前 POC 建立 5 张核心表：
 
-```powershell
-python .\main.py --config .\config.json --change 123456 --verbose
-```
+### `skill_source`
 
-程序会：
-
-1. 从 Gerrit Change 取得 current revision SHA 和 `refs/changes/...`；
-2. 根据项目名拼接 SSH URL；
-3. 第一次自动 `git clone --no-checkout` 到 `workspace/`；
-4. 后续复用本地仓库；
-5. `git fetch origin refs/changes/...`；
-6. 不扫描整个 repository，只对 `affected_skills` 的 Skill Root 执行 `git ls-tree`；
-7. 对该 Root 内全部 Git tracked 内容计算 SHA-256 Digest。
-
-## 6. 识别规则
-
-### 新增
+一个来源 Skill：
 
 ```text
-A skills/demo/SKILL.md
+repository + skill_path + skill_name
 ```
 
-结果：
+保存 ACTIVE / INACTIVE / MOVED / DELETED 状态。
+
+### `source_revision`
+
+保存每次 Gerrit/Git 来源 Revision：
 
 ```text
-NEW_SKILL
+Skill Source
+  ↓
+revision_sha
+change_number
+patchset
+branch
+  ↓
+content_version_id
 ```
 
-### 已有 Skill 内脚本修改
+### `content_version`
 
-Inventory：
+按 `skill_digest` 去重。
+
+因此可以表达：
 
 ```text
-skills/demo
+commit A -> Digest X
+commit B -> Digest Y
+commit C -> Digest Y
 ```
 
-Change：
+其中 B/C 是两个 Source Revision，但只对应一个 Content Version Y。
 
-```text
-M skills/demo/scripts/a.py
-```
+### `gerrit_patchset`
 
-结果：
+保存本次 Gerrit 单据、Patchset、Revision 和 Changed Files 原始信息。
 
-```text
-UPDATED_SKILL
-```
+### `change_skill_event`
 
-### SKILL.md 修改
-
-```text
-M skills/demo/SKILL.md
-```
-
-如果 `repository + path + name` 仍与 Inventory 一致：
-
-```text
-UPDATED_SKILL
-```
-
-如果 frontmatter `name` 改了，根据当前管理策略：
+保存：
 
 ```text
 NEW_SKILL
-reason = SKILL.md name changed; create a new Skill Source by current policy
-previous_sources = [...]
-```
-
-后续再由 Canonical Skill 流程决定是否关联。
-
-### 删除
-
-```text
-D skills/demo/SKILL.md
-```
-
-结果：
-
-```text
+UPDATED_SKILL
 DELETED_SKILL
-```
-
-### Rename / Move
-
-Gerrit 返回：
-
-```text
-status = R
-old_path = skills/old/SKILL.md
-path = skills/new/SKILL.md
-```
-
-结果：
-
-```text
 RENAMED_SKILL
-old_skill_path = skills/old
-skill_path = skills/new
-```
-
-### Copy
-
-结果：
-
-```text
 COPIED_SKILL
 ```
 
-## 7. 输出
+以及 trigger file / reason 等证据。
 
-默认目录：
-
-```text
-output/
-├── gerrit-change-discovery.log
-└── change-123456-patchset-3.json
-```
-
-JSON 示例：
-
-```json
-{
-  "change": {
-    "number": 123456,
-    "project": "team/Skill-CM",
-    "branch": "feature/demo",
-    "patchset": 3,
-    "revision": "5d8a...",
-    "revision_ref": "refs/changes/56/123456/3"
-  },
-  "changed_file_count": 2,
-  "affected_skill_count": 1,
-  "affected_skills": [
-    {
-      "action": "UPDATED_SKILL",
-      "repository": "team/Skill-CM",
-      "skill_path": "tools/jira-query",
-      "skill_name": "jira-query",
-      "source_key": "team/Skill-CM|tools/jira-query|jira-query",
-      "trigger_file": "tools/jira-query/scripts/query.py",
-      "skill_digest": "...",
-      "digest_algorithm": "SHA-256",
-      "digest_status": "SUCCESS"
-    }
-  ]
-}
-```
-
-## 8. 为什么仍然需要 Git fetch
-
-**判断 Skill 是否受影响**只使用 Gerrit 文件清单，不扫描仓库。
-
-但如果确认某个 Skill 受影响，需要生成完整 Content Version Digest，就必须拿到当前 Patchset 中该 Skill Root 的完整状态。例如单据只修改：
+数据库 Schema 位于：
 
 ```text
-skills/demo/scripts/a.py
+schema.sql
 ```
 
-Content Version 仍然应该基于：
+查看当前数据库统计：
 
-```text
-skills/demo/SKILL.md
-skills/demo/README.md
-skills/demo/scripts/a.py
-skills/demo/scripts/b.py
-skills/demo/references/...
+```powershell
+python .\database.py --config .\config.json --summary
 ```
 
-因此流程是：
+---
+
+## Inventory 策略
+
+系统现在同时读取两个来源：
 
 ```text
-Gerrit Files
-  -> 定位 Affected Skill
-  -> fetch Patchset
-  -> 只读取 Affected Skill Root
-  -> Digest
-```
-
-而不是重新全仓寻找所有 `SKILL.md`。
-
-## 9. Gerrit REST API 依赖
-
-POC 使用：
-
-```text
-GET /changes/{change-id}/detail?o=CURRENT_REVISION
-GET /changes/{change-id}/revisions/{revision-id}/files/
-GET /changes/{change-id}/revisions/{revision-id}/files/{file-id}/content
-```
-
-Gerrit JSON 响应的 XSSI 前缀 `)]}'` 已在客户端中自动去除。FileInfo 中 Modified 通常没有 `status` 字段，POC 按 `M` 处理；Rename/Copy 使用 `old_path`。
-
-## 10. 当前仍是 POC 的部分
-
-尚未做：
-
-- 数据库存储；
-- Gerrit `patchset-created` 自动事件接入；
-- 队列与幂等任务；
-- 自动 Scanner；
-- CM Review；
-- SkillHub API；
-- 自动更新 Inventory；
-- Canonical Skill 自动推荐关联；
-- 对 merge commit 多 parent 的特殊处理。
-
-下一阶段建议：
-
-```text
-patchset-created event
+Baseline JSON Inventory
+        +
+SQLite 中 ACTIVE Skill Source
         ↓
-main workflow
-        ↓
-Skill Source / Revision / Content Version DB
-        ↓
-Scan Queue
+合并后的 Inventory
 ```
 
-## 11. 推荐验证顺序
+第一次上线可以通过旧的 Baseline POC 初始化历史资产；此后新发现的 Skill 会进入 SQLite，后续普通脚本修改就可以直接从数据库命中 Skill Root。
 
-先选择一个真实 Gerrit 单据，按以下顺序测试：
+例如：
 
 ```text
-1. --no-digest
-   验证 REST、Change、文件列表
-
-2. 新增 SKILL.md 的单据
-   验证 NEW_SKILL
-
-3. 修改已有 Skill scripts 的单据
-   验证 Inventory 匹配 UPDATED_SKILL
-
-4. 开启 Digest
-   验证 refs/changes fetch + Skill Root SHA-256
-
-5. Rename/Delete 单据
-   验证 Source 生命周期事件
+M skills/jira-query/scripts/query.py
 ```
 
-这样可以很快确认整个增量方案是否适合公司现有 Gerrit 数据。
+即使没有修改 `SKILL.md`，只要 SQLite / Baseline Inventory 中存在：
+
+```text
+skills/jira-query
+```
+
+就会识别为：
+
+```text
+UPDATED_SKILL
+```
+
+---
+
+## Dashboard
+
+默认地址：
+
+```text
+output/dashboard/index.html
+```
+
+当前展示：
+
+- Skill Source 总数 / Active 数；
+- Content Version 数；
+- Source Revision 数；
+- 已处理 Gerrit Patchset 数；
+- Skill Event 数；
+- Skill Source 列表；
+- 最新 Revision / Digest；
+- 最近 Gerrit 单据；
+- 最近 Skill 变更事件。
+
+也可单独重新生成：
+
+```powershell
+python .\report_generator.py --config .\config.json
+```
+
+HTML 不承担事实存储，数据源始终是 SQLite。
+
+---
+
+## JSON 为什么继续保留
+
+SQLite 用于结构化查询；JSON 用于保存单次处理的完整原始证据。
+
+默认：
+
+```text
+output/change-123456-patchset-3.json
+```
+
+所以当前采用：
+
+```text
+SQLite = 事实库
+JSON   = 原始证据
+HTML   = 展示层
+```
+
+后续迁移 PostgreSQL 时，Gerrit 分析逻辑、Digest 模型和展示模型可以继续复用。
+
+---
+
+## 已支持识别规则
+
+| Gerrit 变化 | 结果 |
+| --- | --- |
+| 新增 `SKILL.md` | `NEW_SKILL` |
+| 修改已有 `SKILL.md` | `UPDATED_SKILL` |
+| 修改已登记 Skill Root 内其他文件 | `UPDATED_SKILL` |
+| 删除 `SKILL.md` | `DELETED_SKILL` |
+| Rename / Move | `RENAMED_SKILL` |
+| Copy | `COPIED_SKILL` |
+| `name` 变化 | 新 Source 候选，旧 Source 进入 INACTIVE |
+
+Digest 对完整受影响 Skill Root 的 Git tracked 内容递归计算，不扫描其他无关目录。
+
+---
+
+## 当前目录
+
+```text
+poc/gerrit-change-discovery/
+├── README.md
+├── config.example.json
+├── schema.sql
+├── database.py
+├── report_generator.py
+├── deploy.ps1
+├── run_change.ps1
+├── gerrit_client.py
+├── inventory.py
+├── change_analyzer.py
+├── skill_digest.py
+├── main.py
+└── .gitignore
+```
+
+## 下一阶段
+
+当前 POC 已经具备：
+
+```text
+Gerrit Change
+ -> Changed Files
+ -> Skill Resolver
+ -> Digest
+ -> SQLite
+ -> JSON
+ -> Dashboard
+```
+
+下一阶段再建设：
+
+```text
+Gerrit patchset-created 自动事件
+ -> Queue / 幂等任务
+ -> Scanner Adapter
+ -> Scan Result
+ -> CM Review
+ -> SkillHub Sync
+```

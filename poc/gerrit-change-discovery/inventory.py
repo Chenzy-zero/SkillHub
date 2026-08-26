@@ -32,17 +32,10 @@ class Inventory:
         self.sources = list(sources or [])
 
     @classmethod
-    def load(cls, path, logger=None):
-        if not path or not os.path.exists(path):
-            if logger:
-                logger.warning("Inventory 不存在: %s；只能可靠识别直接变更的 SKILL.md", path)
-            return cls([])
-        with open(path, "r", encoding="utf-8-sig") as fh:
-            payload = json.load(fh)
-        rows = payload.get("skills", []) if isinstance(payload, dict) else payload
+    def from_rows(cls, rows, logger=None, label="Inventory"):
         sources = []
         seen = set()
-        for row in rows:
+        for row in rows or []:
             repository = row.get("repository") or row.get("project")
             skill_path = normalize_path(row.get("skill_path"))
             skill_name = row.get("skill_name") or row.get("name")
@@ -54,8 +47,28 @@ class Inventory:
             seen.add(source_key)
             sources.append(SkillSource(repository, skill_path, skill_name, source_key))
         if logger:
-            logger.info("已加载 Inventory: %s 个 Skill Source", len(sources))
+            logger.info("已加载 %s: %s 个 Skill Source", label, len(sources))
         return cls(sources)
+
+    @classmethod
+    def load(cls, path, logger=None):
+        if not path or not os.path.exists(path):
+            if logger:
+                logger.warning("Baseline Inventory 不存在: %s；将主要依赖 SQLite Inventory", path)
+            return cls([])
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            payload = json.load(fh)
+        rows = payload.get("skills", []) if isinstance(payload, dict) else payload
+        return cls.from_rows(rows, logger, "Baseline Inventory")
+
+    def merge(self, other, logger=None):
+        merged = {}
+        for source in list(self.sources) + list(other.sources):
+            merged[source.source_key] = source
+        self.sources = list(merged.values())
+        if logger:
+            logger.info("合并后的有效 Inventory: %s 个 Skill Source", len(self.sources))
+        return self
 
     def for_repository(self, repository):
         return [s for s in self.sources if s.repository == repository]
