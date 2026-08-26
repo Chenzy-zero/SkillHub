@@ -78,7 +78,8 @@ def main():
         logger.info("REST 认证: 使用环境变量 %s", env_name)
 
     try:
-        database = Database(config["database_path"], logger=logger)
+        database = Database.from_config(config, logger=logger)
+        logger.info("数据库: %s", database.description())
         database.init_schema()
 
         client = GerritClient.from_config(config, logger)
@@ -101,10 +102,10 @@ def main():
         for path, info in files.items():
             logger.debug("  %s %s old=%s", info.get("status") or "M", path, info.get("old_path"))
 
-        logger.info("[3/8] 加载 Baseline + SQLite Skill Inventory...")
+        logger.info("[3/8] 加载 Baseline + Database Skill Inventory...")
         baseline_inventory = Inventory.load(config.get("inventory_file"), logger)
-        sqlite_inventory = Inventory.from_rows(database.inventory_rows(), logger, "SQLite Inventory")
-        inventory = baseline_inventory.merge(sqlite_inventory, logger)
+        db_inventory = Inventory.from_rows(database.inventory_rows(), logger, "Database Inventory")
+        inventory = baseline_inventory.merge(db_inventory, logger)
 
         logger.info("[4/8] 基于文件清单识别受影响 Skill...")
         affected = analyze_change(client, inventory, args.change, detail, files, logger)
@@ -173,12 +174,12 @@ def main():
             json.dump(payload, fh, ensure_ascii=False, indent=2, sort_keys=False)
         logger.info("JSON: %s", output_file)
 
-        logger.info("[7/8] SQLite 数据库存档...")
+        logger.info("[7/8] 数据库存档...")
         database.persist_analysis(payload)
 
         logger.info("[8/8] 刷新 HTML Dashboard...")
         if bool(config.get("auto_generate_report", True)):
-            dashboard = generate_report(config["database_path"], config["report_dir"], logger)
+            dashboard = generate_report(config, config["report_dir"], logger)
             logger.info("Dashboard: %s", dashboard)
         else:
             logger.info("auto_generate_report=false，跳过 Dashboard 生成")

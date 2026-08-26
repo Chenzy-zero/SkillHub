@@ -1,13 +1,8 @@
--- SkillHub Gerrit Change Discovery POC - MySQL schema
--- Recommended: MySQL 5.7+ / 8.0+, InnoDB, utf8mb4
--- If your DBA does not allow CREATE DATABASE, remove the first two statements
--- and execute the table DDL in an existing dedicated database.
-
-CREATE DATABASE IF NOT EXISTS skillhub_security
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
-USE skillhub_security;
+-- SkillHub Gerrit Change Discovery POC - MySQL tables
+-- Recommended: MySQL 5.7+ / 8.0+, InnoDB, utf8mb4.
+-- This script ONLY creates tables in the database configured by config.json.
+-- Create the database first, for example:
+--   CREATE DATABASE skillhub_security CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS skill_source (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
