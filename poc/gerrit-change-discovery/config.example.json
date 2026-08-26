@@ -8,6 +8,18 @@
     "ssh_username": "your_username",
     "ssh_url_template": "ssh://{username}@gerrit.company.com:29418/{project}"
   },
+  "database": {
+    "type": "mysql",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "database": "skillhub_security",
+    "username": "skillhub_app",
+    "password": "",
+    "password_env": "SKILLHUB_DB_PASSWORD",
+    "charset": "utf8mb4",
+    "connect_timeout_seconds": 10,
+    "ssl": false
+  },
   "workspace": "./workspace",
   "output_dir": "./output",
   "database_path": "./data/skillhub-poc.db",
