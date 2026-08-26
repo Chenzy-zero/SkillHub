@@ -7,32 +7,16 @@
 当前第一阶段只聚焦 **已经进入公司 Gerrit 代码仓库的 Skill**，暂不把公网 Skill、本地个人 Skill、Runtime 强制可信源等问题纳入首版建设范围。
 
 1. 以 `SKILL.md` 作为 Skill 识别锚点，其所在目录作为 `Skill Root`，整个目录作为 `Skill Package`。
-2. 历史资产通过 Baseline 全量盘点初始化；日常增量治理使用 Gerrit Code Review / Patchset 文件清单定位受影响 Skill，不做每次全仓扫描。
-3. 当前 POC 已支持在 **Gerrit Submit** 时通过 Hooks Plugin 的同步 `submit` hook 触发完整 Discovery / Digest / Database 流程；后续仍可演进为 Patchset 阶段预扫描、Submit 阶段只做门禁校验。
-4. 以“仓库 + Skill 路径 + Skill 名称”识别一个 `Skill Source`；不同来源先分别登记，后续再关联到同一个逻辑 Skill。
-5. 同一来源的不同 commit/revision 均保留为独立 `Source Revision`，用于 Git 来源追溯。
-6. 对受影响 Skill Root 的完整 Skill Package 计算 SHA-256 `skill_digest`，将“Git 来源版本”和“安全内容版本”分离。
-7. 当前事实数据支持 MySQL / SQLite，正式 POC 推荐 MySQL；JSON 保存单次分析原始证据，HTML Dashboard 用于展示。
-8. 后续自动扫描结果由 CM 依据公司策略完成治理审核；高风险、异常或策略例外可升级人工安全复核。
-9. 审核通过后的 Skill 同步/注册到公司 iflytek SkillHub；如 SkillHub 支持 Draft，可提前登记，但未通过公司策略前不得正式发布。
+2. 历史资产通过 Baseline 全量盘点初始化；日常增量治理使用 Gerrit 服务端 `ref-update` 作为变更触发入口。
+3. 当前正式实现以 `release/hooks/ref-update` 为基础：在目标 Ref 更新过程中识别新增/变化的 Skill，写入 Skill 台账和历史记录，并将新版本安全审查状态重置为待审。
+4. 第一阶段以“仓库 + 分支 + Skill 路径 + Skill 名称”管理一个 Skill 实例，并使用 Commit ID 做来源版本追溯。
+5. 现阶段 MySQL 使用 `skill_summary` 保存最新状态、`skill_history` 保存历史版本；后续可再引入 Digest 等内容版本模型。
+6. 安全治理目标是形成“发现 → 扫描 → 审核 → SkillHub 发布 → 持续监控 → 告警/下架 → 修复恢复”的完整闭环。
+7. Gerrit 负责可信来源，安全体系负责判断内容是否可信，SkillHub 作为审核通过 Skill 的统一可信分发入口。
 
-## 核心版本模型
+## 核心治理原则
 
-```text
-Canonical Skill（逻辑 Skill）
-        │
-        ├── Skill Source A（repo + path + name）
-        │       ├── Revision 1（commit A） -> Digest X
-        │       ├── Revision 2（commit B） -> Digest Y
-        │       └── Revision 3（commit C） -> Digest Y
-        │
-        └── Skill Source B（另一个引用来源）
-                └── Revision 1（commit D） -> Digest Y
-```
-
-> **Commit/Revision 是来源版本，Digest 是内容版本；安全扫描和审核绑定内容版本，Git 追溯绑定来源版本。**
-
-不同 Source 不物理合并删除，而是通过 `Canonical Skill` 建立关联，从而保留多个引用来源及完整历史证据链。
+> **Gerrit 管来源，安全体系管可信，SkillHub 管分发；任何公司正式 Skill 都应做到来源可追溯、版本可识别、风险可判断、发布可控制、异常可下架、过程可审计。**
 
 ## Gerrit 发现模式
 
@@ -43,40 +27,39 @@ Canonical Skill（逻辑 Skill）
 ```text
 Gerrit repositories
  -> 全量查找 SKILL.md
- -> 初始化 Skill Source Inventory
+ -> 初始化 Skill Inventory / skill_summary
 ```
 
-POC：`poc/gerrit-skill-discovery/`
+历史盘点 POC：`poc/gerrit-skill-discovery/`
 
-### Incremental / Submit Trigger
+### Incremental / ref-update
 
-日常运行不遍历整个仓库：
+日常增量治理基于 Gerrit 服务端 `ref-update`：
 
 ```text
 Gerrit Code Review
- -> 用户点击 Submit
- -> Gerrit submit hook
- -> Revision Files
- -> A/M/D/R/C
- -> 新增 SKILL.md / 命中已有 Skill Root
- -> Affected Skills
- -> 仅获取受影响 Skill Root 完整内容
- -> SHA-256 Digest
- -> MySQL / JSON / Dashboard
+ -> Submit
+ -> refs/heads/* 准备更新
+ -> ref-update
+ -> 识别新增/变化 Skill
+ -> skill_summary / skill_history
+ -> security_reviewed = 否
+ -> 安全扫描 / 审核
+ -> SkillHub 发布
 ```
 
-POC：`poc/gerrit-change-discovery/`
+当前正式实现：`release/hooks/ref-update`
 
 ## 当前技术路线
 
-- **SkillHub**：当前选择自行搭建 `iflytek/skillhub` 进行验证和公司内网适配。
-- **Gerrit 触发**：当前 POC 使用 Submit Hook；架构仍保留后续升级为 Patchset 预扫描 + Submit 门禁的空间。
-- **Gerrit 识别**：日常增量使用 Gerrit Revision Files，不做每次全仓扫描。
-- **资产识别**：`SKILL.md` 是边界锚点；已有 Skill Root 内任意 Git tracked 文件变化都视为该 Skill 受影响。
-- **内容版本**：SHA-256 `skill_digest`，不使用 MD5 作为安全完整性标识。
-- **数据库**：当前支持 MySQL / SQLite；正式 POC 推荐 MySQL 独立库 `skillhub_security`。
-- **安全扫描**：支持在 Gerrit 发现流程后接 Scanner Adapter；公司侧保留统一审核策略和结果记录。
-- **SkillHub 纳管**：审核通过后进入正式发布；若平台支持 Draft，可先同步为未发布资产。
+- **Gerrit 触发**：以现有 `ref-update` 同步 Hook 作为 Skill 变更检出入口。
+- **Baseline**：上线前对历史 Skill 做一次全量资产初始化，日常由 `ref-update` 增量维护。
+- **资产识别**：以 `SKILL.md` 为锚点，已知 Skill Root 内文件变化视为该 Skill 发生变化。
+- **版本追溯**：第一阶段使用 Gerrit/Git Commit ID 作为来源版本；后续可增加 Skill Package Digest。
+- **数据库**：当前正式实现使用 MySQL 的 `skill_summary` 与 `skill_history` 维护 Skill 当前状态和历史版本。
+- **安全审查**：Skill 发生变化后重新进入待审状态，后续接入自动 Scanner + CM/Security 人工复核与例外管理。
+- **SkillHub**：作为公司审核后 Skill 的统一可信分发入口；新版本未完成审批前，不替换上一已批准版本。
+- **持续治理**：后续补齐周期复审、风险告警、异常下架、修复恢复和审计追溯。
 
 ## 仓库结构
 
@@ -93,22 +76,25 @@ POC：`poc/gerrit-change-discovery/`
 │   ├── 06-data-model.md
 │   ├── 07-rollout-plan.md
 │   ├── 08-current-flow-reproduction.md
-│   └── 09-complete-user-guide.md
-└── poc/
-    ├── gerrit-skill-discovery/      # Baseline 全量盘点
-    └── gerrit-change-discovery/     # 增量识别 + DB + Dashboard + Submit Hook
+│   ├── 09-complete-user-guide.md
+│   └── 10-skill-security-governance-strategy.md
+├── poc/
+│   ├── gerrit-skill-discovery/
+│   └── gerrit-change-discovery/
+└── release/
+    └── hooks/
+        └── ref-update               # 当前正式实现入口
 ```
 
-## 使用说明
+## 重点文档
 
-完整部署、配置、Baseline、MySQL、Gerrit Submit Hook、日常操作与故障排查请查看：
-
+- [Skill 安全治理体系建设方案](./docs/10-skill-security-governance-strategy.md)
 - [完整使用说明](./docs/09-complete-user-guide.md)
-- [增量 POC 说明](./poc/gerrit-change-discovery/README.md)
-- [Gerrit Submit Hook 说明](./poc/gerrit-change-discovery/gerrit-hooks/README.md)
+- [Skill 安全管理策略](./docs/02-skill-security-management-strategy.md)
+- [Gerrit Skill 发现与审核设计](./docs/03-gerrit-skill-discovery-and-review-design.md)
 
 ## 当前阶段
 
-当前处于 **策略 v0.2 固化 + iflytek SkillHub 搭建 + Gerrit Submit 触发的增量发现/版本存档 POC 验证** 阶段。
+当前处于 **基于 `ref-update` 的 Skill 资产检出/版本台账落地 + 安全审查与 SkillHub 发布闭环设计** 阶段。
 
 详细项目上下文、设计决策、需求与任务拆分见 [AGENTS.md](./AGENTS.md)。
