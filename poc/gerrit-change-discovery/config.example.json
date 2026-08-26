@@ -18,7 +18,10 @@
     "password_env": "SKILLHUB_DB_PASSWORD",
     "charset": "utf8mb4",
     "connect_timeout_seconds": 10,
-    "ssl": false
+    "ssl": false,
+    "ssl_ca": "",
+    "ssl_cert": "",
+    "ssl_key": ""
   },
   "workspace": "./workspace",
   "output_dir": "./output",
