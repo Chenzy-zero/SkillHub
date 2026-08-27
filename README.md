@@ -90,9 +90,9 @@ Gerrit Code Review
 
 ## 重点文档
 
-- [企业内部 Skill 安全管理方案](./docs/11-final-skill-security-management-framework.md)（当前正式方案）
+- [Skill 安全管理方案](./docs/11-final-skill-security-management-framework.md)（当前正式方案）
 - [Skill 安全管理建设规划](./docs/12-skill-security-implementation-plan.md)（当前实施规划）
-- [Skill 安全治理体系建设方案](./docs/10-skill-security-governance-strategy.md)
+- [Skill 安全管理策略](./docs/10-skill-security-governance-strategy.md)
 - [完整使用说明](./docs/09-complete-user-guide.md)
 - [Skill 安全管理策略](./docs/02-skill-security-management-strategy.md)
 - [Gerrit Skill 发现与审核设计](./docs/03-gerrit-skill-discovery-and-review-design.md)

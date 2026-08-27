@@ -1,4 +1,4 @@
-# 企业内部 Skill 安全管理方案
+# Skill 安全管理方案
 
 > 文档版本：V1.0
 >
@@ -111,7 +111,7 @@ SkillHub 中公开的 Skill 必须与审查通过的代码版本和内容一致�
 
 ## 6. 总体管理流程
 
-![企业内部 Skill 安全管理流程](./diagrams/skill-security-management-flow.png)
+![Skill 安全管理流程](./diagrams/skill-security-management-flow.png)
 
 整体流程分为六个环节：
 
