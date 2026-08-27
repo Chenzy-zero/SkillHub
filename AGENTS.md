@@ -2,8 +2,13 @@
 
 > 本文件是项目统一上下文与执行约束。后续人工或 AI Agent 继续设计、开发或维护本项目时，应优先遵循本文。
 >
-> 当前策略版本：v0.2  
-> 基线日期：2026-08-25
+> 当前策略版本：v1.0
+>
+> 基线日期：2026-08-27
+>
+> 最终统一框架：`docs/11-final-skill-security-management-framework.md`
+>
+> 当前建设规划：`docs/12-skill-security-implementation-plan.md`
 
 ## 1. 当前项目范围
 
@@ -58,7 +63,7 @@ Skill 检查在 Git/Gerrit 服务端统一触发，不依赖开发者本地 Hook
 第一阶段使用：
 
 ```text
-repository + skill_path + skill_name
+repository + branch + skill_path + skill_name
 ```
 
 识别一个 `Skill Source`。
@@ -126,9 +131,9 @@ CM 的主要职责是 Skill 安全治理流程执行，而不是独立承担所�
 
 ### 2.7 SkillHub 纳管时机
 
-当前采用 iflytek SkillHub 作为内网 SkillHub 验证平台。
+公司内部 SkillHub 在讯飞开源 SkillHub 与公司 AI WorkForce 平台 Skill 商城之间评估选择，最终以功能、安全、维护和内部使用要求为准。
 
-推荐流程：
+统一流程：
 
 ```text
 Gerrit 发现
@@ -137,12 +142,14 @@ Gerrit 发现
  -> Content Digest
  -> 自动扫描
  -> CM/策略审核
- -> APPROVED
- -> 同步/上传 SkillHub
+ -> 平台建立私密候选并提醒产品线
+ -> 产品线确认是否上架
+ -> 产品线自行上传或提交上架申请
+ -> 核对上传版本与审核版本
  -> Published
 ```
 
-如果 iflytek SkillHub 支持 Draft/未发布资产，可以在审核前同步为 Draft；但未满足公司安全策略前不得正式发布给用户使用。
+平台可以根据台账建立私密候选或发送提醒，但候选 Skill 不得被普通用户搜索和安装。CM、平台和 SkillHub 管理员不得代替产品线自动公开上架。
 
 ## 3. 核心对象模型
 
@@ -193,7 +200,7 @@ flowchart LR
   M --> O[CM/Policy Review]
   N --> O
   O --> P{Approved?}
-  P -->|是| Q[同步/发布到 SkillHub]
+  P -->|是| Q[提醒产品线自行上传/申请上架]
   P -->|否| R[待整改/驳回]
 ```
 
@@ -204,6 +211,7 @@ flowchart LR
 以下任一变化先按新 Source 登记：
 
 - repository 不同；
+- branch 不同；
 - skill_path 不同；
 - skill_name 不同。
 
@@ -310,37 +318,11 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 7. Skill 审核过程中发生新提交，旧 Revision 的审核结果可以保留，但不能错误标记最新 Revision 已通过。
 8. 定时批量扫描与事件扫描可能重复，任务 key 必须幂等。
 9. SkillHub 同步失败不能丢失已完成的审核结论，应单独记录同步状态并重试。
-10. `repo + path + name` 是 Source 标识，不是全局 Canonical Skill 标识。
+10. `repo + branch + path + name` 是 Source 标识，不是全局 Canonical Skill 标识。
 
-## 10. 当前任务优先级
+## 10. 当前建设规划
 
-### P0
-
-- 固化 Skill Root / Skill Package 规范；
-- 定义 Source / Revision / Digest / Canonical 模型；
-- 完成 Gerrit Baseline 方案；
-- 实现服务端增量发现；
-- 实现 SHA-256 Digest；
-- 设计 Scanner Adapter / 扫描任务；
-- 搭建 iflytek SkillHub 并明确 Draft/Publish API。
-
-### P1
-
-- 自动扫描结果入库；
-- CM Review Queue；
-- Digest 复用逻辑；
-- Canonical Skill 手工关联；
-- SkillHub 自动同步与发布门禁；
-- Reconciliation。
-
-### P2
-
-- 高级风险分级；
-- Security 升级审批；
-- 数字签名；
-- Runtime 可信源；
-- 外部 Skill 引入；
-- 动态沙箱。
+建设顺序、交付成果和完成标准统一维护在 `docs/12-skill-security-implementation-plan.md`，本文件不再重复维护计划内容。
 
 ## 11. 开发约束
 
@@ -365,3 +347,7 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 - `docs/06-data-model.md`：Canonical / Source / Revision / Content Version 数据模型
 - `docs/07-rollout-plan.md`：分阶段上线计划
 - `docs/08-current-flow-reproduction.md`：当前流程与升级版流程对照
+- `docs/09-complete-user-guide.md`：部署、验证与日常操作说明
+- `docs/10-skill-security-governance-strategy.md`：企业级管理策略文件
+- `docs/11-final-skill-security-management-framework.md`：当前正式 Skill 安全管理方案
+- `docs/12-skill-security-implementation-plan.md`：当前 Skill 安全管理建设规划
