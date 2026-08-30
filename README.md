@@ -79,7 +79,10 @@ Gerrit Code Review
 │   ├── 09-complete-user-guide.md
 │   ├── 10-skill-security-governance-strategy.md
 │   ├── 11-final-skill-security-management-framework.md
-│   └── 12-skill-security-implementation-plan.md
+│   ├── 12-skill-security-implementation-plan.md
+│   └── 13-skill-batch-security-review-and-scoring-design.md
+├── skills/
+│   └── skill-security-review/          # Claude Code 只读 AI 审查 Skill
 ├── poc/
 │   ├── gerrit-skill-discovery/
 │   └── gerrit-change-discovery/
@@ -92,6 +95,7 @@ Gerrit Code Review
 
 - [Skill 安全管理方案](./docs/11-final-skill-security-management-framework.md)（当前正式方案）
 - [Skill 安全管理建设规划](./docs/12-skill-security-implementation-plan.md)（当前实施规划）
+- [Skill 批量安全审查与质量评分设计](./docs/13-skill-batch-security-review-and-scoring-design.md)（存量 Skill 批量审查设计）
 - [Skill 安全管理策略](./docs/10-skill-security-governance-strategy.md)
 - [完整使用说明](./docs/09-complete-user-guide.md)
 - [Skill 安全管理策略](./docs/02-skill-security-management-strategy.md)
@@ -99,6 +103,6 @@ Gerrit Code Review
 
 ## 当前阶段
 
-当前处于 **基于 `ref-update` 的 Skill 资产检出/版本台账落地 + 安全审查与 SkillHub 发布闭环设计** 阶段。
+当前处于 **基于 `ref-update` 的 Skill 资产台账落地 + 存量 Skill 批量安全审查与私密候选归档设计** 阶段。
 
 详细项目上下文、设计决策、需求与任务拆分见 [AGENTS.md](./AGENTS.md)。

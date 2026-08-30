@@ -1,0 +1,450 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:skill-security-management:schema:ai-skill-review-result:1.0",
+  "title": "AI Skill Security and Quality Review Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "review_id",
+    "policy_version",
+    "reviewed_at",
+    "reviewer",
+    "subject",
+    "input_coverage",
+    "security_review",
+    "quality_review",
+    "overall"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "review_id": {
+      "type": ["string", "null"]
+    },
+    "policy_version": {
+      "type": ["string", "null"]
+    },
+    "reviewed_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "model"],
+      "properties": {
+        "kind": {
+          "const": "AI"
+        },
+        "model": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "skill_name",
+        "repo_name",
+        "branch",
+        "skill_path",
+        "inventory_revision",
+        "source_revision",
+        "skill_digest_sha256"
+      ],
+      "properties": {
+        "skill_name": {"type": ["string", "null"]},
+        "repo_name": {"type": ["string", "null"]},
+        "branch": {"type": ["string", "null"]},
+        "skill_path": {"type": ["string", "null"]},
+        "inventory_revision": {"type": ["string", "null"]},
+        "source_revision": {"type": ["string", "null"]},
+        "skill_digest_sha256": {
+          "anyOf": [
+            {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "input_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "package_complete",
+        "manifest_status",
+        "files_expected",
+        "files_reviewed",
+        "unreadable_or_skipped_files",
+        "static_reports",
+        "digest_consistent",
+        "traceability_complete",
+        "limitations"
+      ],
+      "properties": {
+        "package_complete": {"type": "boolean"},
+        "manifest_status": {
+          "enum": ["COMPLETE", "MISSING", "INVALID", "MISMATCHED"]
+        },
+        "files_expected": {"type": ["integer", "null"], "minimum": 0},
+        "files_reviewed": {"type": "integer", "minimum": 0},
+        "unreadable_or_skipped_files": {
+          "type": "array",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "static_reports": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/staticReport"},
+          "allOf": [
+            {
+              "contains": {
+                "type": "object",
+                "properties": {"scanner": {"const": "CISCO_AI_SKILL_SCANNER"}},
+                "required": ["scanner"]
+              }
+            },
+            {
+              "contains": {
+                "type": "object",
+                "properties": {"scanner": {"const": "NVIDIA_SKILLSPECTOR"}},
+                "required": ["scanner"]
+              }
+            }
+          ]
+        },
+        "digest_consistent": {"type": "boolean"},
+        "traceability_complete": {"type": "boolean"},
+        "limitations": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "security_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "max_severity", "summary", "findings"],
+      "properties": {
+        "verdict": {
+          "enum": ["PASS", "REVIEW_REQUIRED", "BLOCK", "INCOMPLETE"]
+        },
+        "max_severity": {
+          "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "NONE"]
+        },
+        "summary": {"type": "string"},
+        "findings": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {"$ref": "#/$defs/finding"},
+              {
+                "type": "object",
+                "properties": {
+                  "domain": {"const": "SECURITY"},
+                  "category": {
+                    "enum": [
+                      "IDENTITY_AND_INTENT",
+                      "PROMPT_OR_TOOL_INJECTION",
+                      "PERMISSION_FIT",
+                      "COMMAND_OR_CODE_EXECUTION",
+                      "FILES_AND_SECRETS",
+                      "NETWORK_OR_DATA_MOVEMENT",
+                      "DEPENDENCY_OR_INSTALLATION",
+                      "PERSISTENCE_OR_CONCEALMENT",
+                      "STATIC_REPORT_CONFLICT",
+                      "OTHER_SECURITY"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "quality_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "verdict", "score", "summary", "dimensions", "findings"],
+      "properties": {
+        "basis": {"const": "STATIC_PACKAGE_REVIEW"},
+        "verdict": {
+          "enum": ["PASS", "FAIL", "INCOMPLETE"]
+        },
+        "score": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "summary": {"type": "string"},
+        "dimensions": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "prefixItems": [
+            {
+              "allOf": [
+                {"$ref": "#/$defs/qualityDimension"},
+                {
+                  "properties": {
+                    "name": {"const": "PURPOSE_AND_TRIGGER"},
+                    "max_score": {"const": 20}
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/$defs/qualityDimension"},
+                {
+                  "properties": {
+                    "name": {"const": "INSTRUCTION_CLARITY"},
+                    "max_score": {"const": 25}
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/$defs/qualityDimension"},
+                {
+                  "properties": {
+                    "name": {"const": "SCOPE_AND_PERMISSION_FIT"},
+                    "max_score": {"const": 15}
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/$defs/qualityDimension"},
+                {
+                  "properties": {
+                    "name": {"const": "ROBUSTNESS_AND_BOUNDARIES"},
+                    "max_score": {"const": 20}
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {"$ref": "#/$defs/qualityDimension"},
+                {
+                  "properties": {
+                    "name": {"const": "MAINTAINABILITY_AND_VERIFIABILITY"},
+                    "max_score": {"const": 20}
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {"$ref": "#/$defs/finding"},
+              {
+                "type": "object",
+                "properties": {
+                  "domain": {"const": "QUALITY"},
+                  "category": {
+                    "enum": [
+                      "PURPOSE_AND_TRIGGER",
+                      "INSTRUCTION_CLARITY",
+                      "SCOPE_AND_PERMISSION_FIT",
+                      "ROBUSTNESS_AND_BOUNDARIES",
+                      "MAINTAINABILITY_AND_VERIFIABILITY",
+                      "OTHER_QUALITY"
+                    ]
+                  },
+                  "severity": {
+                    "enum": ["HIGH", "MEDIUM", "LOW", "INFO"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"verdict": {"const": "INCOMPLETE"}},
+            "required": ["verdict"]
+          },
+          "then": {"properties": {"score": {"type": "null"}}}
+        },
+        {
+          "if": {
+            "properties": {"verdict": {"const": "PASS"}},
+            "required": ["verdict"]
+          },
+          "then": {
+            "properties": {
+              "score": {"type": "integer", "minimum": 70, "maximum": 100}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"verdict": {"const": "FAIL"}},
+            "required": ["verdict"]
+          },
+          "then": {
+            "properties": {
+              "score": {"type": "integer", "minimum": 0, "maximum": 69}
+            }
+          }
+        }
+      ]
+    },
+    "overall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "private_candidate_eligible", "reasons"],
+      "properties": {
+        "disposition": {
+          "enum": ["APPROVE_CANDIDATE", "MANUAL_REVIEW", "REJECT", "INCOMPLETE"]
+        },
+        "private_candidate_eligible": {"type": "boolean"},
+        "reasons": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"disposition": {"const": "APPROVE_CANDIDATE"}},
+            "required": ["disposition"]
+          },
+          "then": {
+            "properties": {"private_candidate_eligible": {"const": true}}
+          },
+          "else": {
+            "properties": {"private_candidate_eligible": {"const": false}}
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "staticReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scanner",
+        "status",
+        "tool_version",
+        "rules_or_config_version",
+        "scanned_digest_sha256",
+        "report_path"
+      ],
+      "properties": {
+        "scanner": {
+          "enum": ["CISCO_AI_SKILL_SCANNER", "NVIDIA_SKILLSPECTOR"]
+        },
+        "status": {
+          "enum": ["COMPLETED", "FAILED", "TIMEOUT", "MISSING", "INVALID"]
+        },
+        "tool_version": {"type": ["string", "null"]},
+        "rules_or_config_version": {"type": ["string", "null"]},
+        "scanned_digest_sha256": {
+          "anyOf": [
+            {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
+            {"type": "null"}
+          ]
+        },
+        "report_path": {"type": ["string", "null"]}
+      }
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "line_start", "line_end"],
+      "properties": {
+        "path": {"type": "string"},
+        "line_start": {"type": ["integer", "null"], "minimum": 1},
+        "line_end": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "sourceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "finding_id"],
+      "properties": {
+        "source": {
+          "enum": ["AI_REVIEW", "CISCO_AI_SKILL_SCANNER", "NVIDIA_SKILLSPECTOR"]
+        },
+        "finding_id": {"type": ["string", "null"]}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "domain",
+        "category",
+        "severity",
+        "confidence",
+        "title",
+        "description",
+        "locations",
+        "evidence",
+        "source_references",
+        "recommendation"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^AI-(SEC|QUAL)-[0-9]{3}$"},
+        "domain": {"enum": ["SECURITY", "QUALITY"]},
+        "category": {"type": "string"},
+        "severity": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]},
+        "confidence": {"enum": ["HIGH", "MEDIUM", "LOW"]},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "locations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/location"}
+        },
+        "evidence": {"type": "string", "maxLength": 500},
+        "source_references": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/sourceReference"}
+        },
+        "recommendation": {"type": "string"}
+      }
+    },
+    "qualityDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "anchor", "score", "max_score", "reason"],
+      "properties": {
+        "name": {
+          "enum": [
+            "PURPOSE_AND_TRIGGER",
+            "INSTRUCTION_CLARITY",
+            "SCOPE_AND_PERMISSION_FIT",
+            "ROBUSTNESS_AND_BOUNDARIES",
+            "MAINTAINABILITY_AND_VERIFIABILITY"
+          ]
+        },
+        "anchor": {
+          "enum": ["STRONG", "ACCEPTABLE", "WEAK", "POOR", "ABSENT", "NOT_ASSESSED"]
+        },
+        "score": {"type": ["integer", "null"], "minimum": 0, "maximum": 25},
+        "max_score": {"enum": [15, 20, 25]},
+        "reason": {"type": "string"}
+      }
+    }
+  }
+}

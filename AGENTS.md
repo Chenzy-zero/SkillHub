@@ -9,6 +9,8 @@
 > 最终统一框架：`docs/11-final-skill-security-management-framework.md`
 >
 > 当前建设规划：`docs/12-skill-security-implementation-plan.md`
+>
+> 当前批量审查设计：`docs/13-skill-batch-security-review-and-scoring-design.md`
 
 ## 1. 当前项目范围
 
@@ -150,6 +152,33 @@ Gerrit 发现
 ```
 
 平台可以根据台账建立私密候选或发送提醒，但候选 Skill 不得被普通用户搜索和安装。CM、平台和 SkillHub 管理员不得代替产品线自动公开上架。
+
+### 2.8 存量 Skill 批量审查
+
+当前存量审查输入为 CSV，兼容以下字段：
+
+```text
+skill_name
+repo_name
+branch
+skill_path
+lasted_commited
+security_reviewed
+status
+```
+
+已确认规则：
+
+- `lasted_commited` 只作为现有台账字段兼容，内部保存为 `inventory_revision`，不能直接当作最终审查版本；
+- 审查前必须从 Gerrit 冻结实际来源版本，并与 CSV、分支和 Skill 路径对账；
+- Source 事实身份仍包含 branch，不删除多分支来源；批量审查选择视图按 `repo_name + normalized_skill_path` 比较各分支中该路径最近变化时间，只审常规最新候选；
+- 同时间但内容不同的分支版本不能静默任选，应分别检查并进入人工确认；
+- 同一仓库一次下载，但不同 Skill 可以绑定不同冻结 Revision；
+- Cisco AI Skill Scanner 与 NVIDIA SkillSpector 先对同一内容版本并行完成静态检查；
+- AI 审查使用 `skills/skill-security-review/`，由 Claude Code 调用公司内网模型执行；AI Skill 只读、不联网、不执行被审查内容；
+- 安全结论与质量得分分别保存。安全未通过或检查不完整时，质量高分不能放行；私密候选质量门槛当前为 70 分；
+- 通过内容只生成本地私密候选工作空间，不自动 Commit、Push 或上架；由负责人后续手动同步到私密 Git 中转仓库；
+- 原始报告进入受限证据区，不进入私密候选 Git 工作空间。
 
 ## 3. 核心对象模型
 
@@ -351,3 +380,5 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 - `docs/10-skill-security-governance-strategy.md`：企业级管理策略文件
 - `docs/11-final-skill-security-management-framework.md`：当前正式 Skill 安全管理方案
 - `docs/12-skill-security-implementation-plan.md`：当前 Skill 安全管理建设规划
+- `docs/13-skill-batch-security-review-and-scoring-design.md`：存量 Skill 批量安全审查、质量评分与私密候选归档设计
+- `skills/skill-security-review/`：供 Claude Code 使用的只读 AI 安全与质量审查 Skill
