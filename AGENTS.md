@@ -11,6 +11,10 @@
 > 当前建设规划：`docs/12-skill-security-implementation-plan.md`
 >
 > 当前批量审查设计：`docs/13-skill-batch-security-review-and-scoring-design.md`
+>
+> 当前批量审查任务：`docs/14-skill-batch-review-implementation-tasks.md`
+>
+> 当前批量审查使用说明：`docs/15-skill-batch-review-script-user-guide.md`
 
 ## 1. 当前项目范围
 
@@ -381,4 +385,9 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 - `docs/11-final-skill-security-management-framework.md`：当前正式 Skill 安全管理方案
 - `docs/12-skill-security-implementation-plan.md`：当前 Skill 安全管理建设规划
 - `docs/13-skill-batch-security-review-and-scoring-design.md`：存量 Skill 批量安全审查、质量评分与私密候选归档设计
+- `docs/14-skill-batch-review-implementation-tasks.md`：批量审查 T00–T53 实施任务、依赖和验收标准
+- `docs/15-skill-batch-review-script-user-guide.md`：批量审查脚本配置、逐仓库执行、AI 结果导入、报告、清理和排障说明
+- `batch-review/`：存量 Skill 批量审查程序、脱敏配置样例和本地测试
 - `skills/skill-security-review/`：供 Claude Code 使用的只读 AI 安全与质量审查 Skill
+
+当前 `batch-review/` 已实现逐仓库两阶段流程并通过本地模拟测试。真实批量运行前仍必须取得脱敏 CSV/status 枚举、Gerrit 只读 SSH 参数、批准的扫描器版本与路径、公司内网模型标识、目录权限和首批小样本仓库；不得用示例占位符直接运行。

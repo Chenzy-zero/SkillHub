@@ -1,0 +1,90 @@
+# This file is a local example. Replace the Gerrit values, lifecycle statuses,
+# scanner versions and model identifier before any execution command uses it.
+
+[batch]
+inventory_csv = "../examples/inventory.example.csv"
+batch_id_prefix = "skill-review"
+# Only these mapped lifecycle statuses enter the review queue. This list is
+# intentionally explicit because real status values must be confirmed first.
+included_statuses = ["ACTIVE"]
+
+[workspace]
+root = "../.batch-review/work"
+evidence_root = "../.batch-review/evidence"
+candidate_root = "../.batch-review/candidates"
+manifest_root = "../.batch-review/manifests"
+clean_after_repository = true
+keep_failed_workspace = false
+
+[gerrit]
+# Supported placeholders: repo_name, branch, user, host, port.
+# The command runner must pass the rendered URL as one argument; do not use a
+# shell string or put credentials in this file.
+ssh_url_template = "ssh://{user}@{host}:{port}/{repo_name}.git"
+user = "git"
+host = "gerrit.example.com"
+port = 29418
+# Leave empty to use the template for every repository, or set an allowlist.
+allowed_repositories = []
+
+[status_mapping]
+# The source CSV keeps its existing status values.  Values on the right are
+# internal labels used by the execution stages.
+# These values only make the bundled example CSV runnable. Replace the keys
+# with the complete set of values from the real inventory before review.
+"active" = "ACTIVE"
+"inactive" = "INACTIVE"
+
+[quality]
+# A score is independent from the security decision.  A candidate requires
+# both a completed security pass and this quality threshold.
+candidate_threshold = 70
+max_score = 100
+
+[ai]
+# Claude Code 由负责人在公司内网模型环境中执行；批处理程序只准备交接材料并校验结果。
+skill_path = "../../skills/skill-security-review"
+result_schema_path = "../../skills/skill-security-review/references/review-result.schema.json"
+policy_version = "pin-in-deployment"
+reviewer_model = "set-company-intranet-model-id"
+
+[scanners.cisco]
+enabled = true
+version = "pin-in-deployment"
+timeout_seconds = 600
+command = [
+  "skill-scanner",
+  "scan",
+  "{skill_root}",
+  "--format",
+  "json",
+  "--compact",
+  "--output",
+  "{output_file}",
+]
+
+[scanners.skillspector]
+enabled = true
+version = "pin-in-deployment"
+timeout_seconds = 600
+command = [
+  "skillspector",
+  "scan",
+  "{skill_root}",
+  "--no-llm",
+  "--format",
+  "json",
+  "--output",
+  "{output_file}",
+]
+
+[retry]
+max_attempts = 3
+backoff_seconds = 5
+max_backoff_seconds = 60
+
+[concurrency]
+# Start conservatively.  Increase only after checking Gerrit and model quota.
+repositories = 1
+skills_per_repository = 1
+ai_reviews = 1

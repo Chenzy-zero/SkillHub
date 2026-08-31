@@ -80,7 +80,14 @@ Gerrit Code Review
 │   ├── 10-skill-security-governance-strategy.md
 │   ├── 11-final-skill-security-management-framework.md
 │   ├── 12-skill-security-implementation-plan.md
-│   └── 13-skill-batch-security-review-and-scoring-design.md
+│   ├── 13-skill-batch-security-review-and-scoring-design.md
+│   ├── 14-skill-batch-review-implementation-tasks.md
+│   └── 15-skill-batch-review-script-user-guide.md
+├── batch-review/                       # 存量 Skill 批量审查程序
+│   ├── config/                         # 脱敏配置样例
+│   ├── examples/                       # CSV 样例
+│   ├── src/skill_batch_review/         # Python 实现
+│   └── tests/                          # 本地单元测试
 ├── skills/
 │   └── skill-security-review/          # Claude Code 只读 AI 审查 Skill
 ├── poc/
@@ -96,6 +103,8 @@ Gerrit Code Review
 - [Skill 安全管理方案](./docs/11-final-skill-security-management-framework.md)（当前正式方案）
 - [Skill 安全管理建设规划](./docs/12-skill-security-implementation-plan.md)（当前实施规划）
 - [Skill 批量安全审查与质量评分设计](./docs/13-skill-batch-security-review-and-scoring-design.md)（存量 Skill 批量审查设计）
+- [Skill 批量安全审查实施任务分解](./docs/14-skill-batch-review-implementation-tasks.md)（T00–T53 实施清单）
+- [Skill 批量安全审查脚本详细使用说明](./docs/15-skill-batch-review-script-user-guide.md)（配置、执行、AI 审查、报告、清理与排障）
 - [Skill 安全管理策略](./docs/10-skill-security-governance-strategy.md)
 - [完整使用说明](./docs/09-complete-user-guide.md)
 - [Skill 安全管理策略](./docs/02-skill-security-management-strategy.md)
@@ -103,6 +112,6 @@ Gerrit Code Review
 
 ## 当前阶段
 
-当前处于 **基于 `ref-update` 的 Skill 资产台账落地 + 存量 Skill 批量安全审查与私密候选归档设计** 阶段。
+当前处于 **基于 `ref-update` 的 Skill 资产台账落地 + 存量 Skill 批量安全审查程序实现与内网联调准备** 阶段。批量程序已完成本地模拟验收，尚未对公司真实 Skill 执行审查。
 
 详细项目上下文、设计决策、需求与任务拆分见 [AGENTS.md](./AGENTS.md)。

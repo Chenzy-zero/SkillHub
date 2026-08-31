@@ -1,0 +1,5 @@
+skill_name,repo_name,branch,skill_path,lasted_commited,security_reviewed,status
+jira-query,team/Skill-CM,refs/heads/main,tools/jira-query,1111111111111111111111111111111111111111,否,active
+jira-query,team/Skill-CM,refs/heads/main,tools/jira-query,1111111111111111111111111111111111111111,否,active
+sonar-check,team/Skill-CM,release/2026-Q3,tools/sonar-check,2222222222222222222222222222222222222222,是,active
+root-skill,team/Skill-CM,main,/,3333333333333333333333333333333333333333,否,active
