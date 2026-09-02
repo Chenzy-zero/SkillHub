@@ -1,0 +1,71 @@
+# GitHub 验证配置模板。正式切换 Gerrit 时，以 review.company.example.toml 为基础替换本文件。
+# 源站配置沿用程序当前的 [gerrit] 兼容字段名，但 URL 模板已指向 GitHub SSH 443。
+
+[batch]
+inventory_csv = "../../test/github_skill_summary.csv"
+batch_id_prefix = "github-validation"
+included_statuses = ["ACTIVE"]
+
+[workspace]
+root = "../.batch-review/github-validation/work"
+evidence_root = "../.batch-review/github-validation/restricted-evidence"
+candidate_root = "../.batch-review/github-validation/private-candidates"
+manifest_root = "../.batch-review/github-validation/manifests"
+clean_after_repository = true
+keep_failed_workspace = true
+
+[gerrit]
+ssh_url_template = "ssh://{user}@{host}:{port}/{repo_name}.git"
+user = "git"
+host = "ssh.github.com"
+port = 443
+allowed_repositories = ["Chenzy-zero/SkillHub"]
+# 可选：填写执行节点上的只读 SSH 私钥路径；也可以省略并使用 ssh-agent。
+ssh_identity_file = "FILL_GITHUB_READONLY_SSH_KEY_PATH"
+
+[status_mapping]
+"新增" = "ACTIVE"
+"修改" = "ACTIVE"
+"删除" = "DELETED"
+
+[quality]
+candidate_threshold = 70
+max_score = 100
+
+[ai]
+skill_path = "../../.claude/skills/skill-security-review"
+result_schema_path = "../../.claude/skills/skill-security-review/references/review-result.schema.json"
+policy_version = "skill-security-policy-v1.0"
+reviewer_model = "FILL_APPROVED_MODEL_ID"
+
+[scanners.cisco]
+enabled = true
+version = "2.0.13"
+timeout_seconds = 600
+command = [
+  "FILL_CISCO_EXECUTABLE",
+  "scan", "{skill_root}",
+  "--format", "json", "--compact",
+  "--output", "{output_file}",
+]
+
+[scanners.skillspector]
+enabled = true
+version = "2.5.1"
+timeout_seconds = 600
+command = [
+  "FILL_SKILLSPECTOR_EXECUTABLE",
+  "scan", "{skill_root}",
+  "--no-llm", "--format", "json",
+  "--output", "{output_file}",
+]
+
+[retry]
+max_attempts = 3
+backoff_seconds = 5
+max_backoff_seconds = 60
+
+[concurrency]
+repositories = 1
+skills_per_repository = 1
+ai_reviews = 1

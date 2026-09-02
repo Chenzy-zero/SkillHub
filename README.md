@@ -82,14 +82,16 @@ Gerrit Code Review
 │   ├── 12-skill-security-implementation-plan.md
 │   ├── 13-skill-batch-security-review-and-scoring-design.md
 │   ├── 14-skill-batch-review-implementation-tasks.md
-│   └── 15-skill-batch-review-script-user-guide.md
+│   ├── 15-skill-batch-review-script-user-guide.md
+│   └── 16-skill-batch-review-quick-start.md
 ├── batch-review/                       # 存量 Skill 批量审查程序
 │   ├── config/                         # 脱敏配置样例
 │   ├── examples/                       # CSV 样例
 │   ├── src/skill_batch_review/         # Python 实现
 │   └── tests/                          # 本地单元测试
-├── skills/
-│   └── skill-security-review/          # Claude Code 只读 AI 审查 Skill
+├── .claude/
+│   └── skills/
+│       └── skill-security-review/      # Claude Code 项目级只读 AI 审查入口
 ├── poc/
 │   ├── gerrit-skill-discovery/
 │   └── gerrit-change-discovery/
@@ -105,10 +107,20 @@ Gerrit Code Review
 - [Skill 批量安全审查与质量评分设计](./docs/13-skill-batch-security-review-and-scoring-design.md)（存量 Skill 批量审查设计）
 - [Skill 批量安全审查实施任务分解](./docs/14-skill-batch-review-implementation-tasks.md)（T00–T53 实施清单）
 - [Skill 批量安全审查脚本详细使用说明](./docs/15-skill-batch-review-script-user-guide.md)（配置、执行、AI 审查、报告、清理与排障）
+- [Skill 批量安全审查快速使用说明](./docs/16-skill-batch-review-quick-start.md)（待填写配置、一键启动与 Skill 触发指令）
 - [Skill 安全管理策略](./docs/10-skill-security-governance-strategy.md)
 - [完整使用说明](./docs/09-complete-user-guide.md)
 - [Skill 安全管理策略](./docs/02-skill-security-management-strategy.md)
 - [Gerrit Skill 发现与审核设计](./docs/03-gerrit-skill-discovery-and-review-design.md)
+
+Claude Code 项目级安全审查入口位于
+`.claude/skills/skill-security-review/`，可在本项目上下文中调用
+`/skill-security-review`。该 Skill 是公司维护的审查流程，参考了
+UseAI-pro 的 `skill-vetter` 和 `skill-auditor`，但不是上游 Skill 的原样副本。
+
+GitHub 联调可使用 `batch-review/tools/discover_git_skills.py` 从固定 Revision 生成 CSV，
+并以 `batch-review/config/review.github.example.toml` 作为可切换到正式 Gerrit 的配置模板。
+完成批次后会同时生成机器可读结果和离线 HTML 管理报告。
 
 ## 当前阶段
 

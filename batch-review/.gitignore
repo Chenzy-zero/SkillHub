@@ -1,5 +1,8 @@
 __pycache__/
 *.py[cod]
+.scanner-tools/
+config/review.company.toml
+config/*.local.toml
 *.egg-info/
 .pytest_cache/
 .batch-review/

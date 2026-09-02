@@ -33,8 +33,8 @@ candidate_threshold = 70
 max_score = 100
 
 [ai]
-skill_path = "skills/skill-security-review"
-result_schema_path = "skills/skill-security-review/references/review-result.schema.json"
+skill_path = ".claude/skills/skill-security-review"
+result_schema_path = ".claude/skills/skill-security-review/references/review-result.schema.json"
 policy_version = "policy-1"
 reviewer_model = "intranet-model"
 

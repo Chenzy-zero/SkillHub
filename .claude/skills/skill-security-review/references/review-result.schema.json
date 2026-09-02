@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:skill-security-management:schema:ai-skill-review-result:1.0",
+  "$comment": "Company-maintained output schema for the local skill-security-review entry point; not an upstream schema copy.",
   "title": "AI Skill Security and Quality Review Result",
   "type": "object",
   "additionalProperties": false,

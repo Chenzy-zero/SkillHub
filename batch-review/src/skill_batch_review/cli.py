@@ -286,6 +286,10 @@ def _cmd_cleanup_repository(args: argparse.Namespace) -> int:
 
 def _cmd_report_batch(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    inventory = load_inventory_csv(
+        config.batch.inventory_csv,
+        status_mapping=config.status_mapping.aliases,
+    )
     result_dir = Path(args.results_dir).expanduser().resolve()
     records: list[Mapping[str, Any]] = []
     for path in sorted(result_dir.glob("*.results.json")):
@@ -299,8 +303,11 @@ def _cmd_report_batch(args: argparse.Namespace) -> int:
         records,
         Path(args.output_dir).expanduser().resolve(),
         batch_id=_validate_batch_id(args.batch_id),
+        input_csv_sha256=inventory.raw_csv_sha256,
         policy_version=config.ai.policy_version,
+        generated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         candidate_threshold=config.quality.candidate_threshold,
+        evidence_root=config.workspace.evidence_root,
     )
     print(json.dumps(paths.as_dict(), ensure_ascii=False, indent=2))
     return 0

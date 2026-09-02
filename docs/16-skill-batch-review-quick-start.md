@@ -1,0 +1,193 @@
+# Skill 批量安全审查快速使用说明
+
+本文用于第一次配置和日常逐仓库执行。完整字段、输出结构和故障处理见
+[`15-skill-batch-review-script-user-guide.md`](./15-skill-batch-review-script-user-guide.md)。
+
+## 1. 运行方式
+
+整套流程不能只用一个 AI Skill 完成，职责分为两部分：
+
+```text
+run.sh / run.cmd
+  ├─ 读取 CSV、下载仓库、冻结版本
+  ├─ 运行 Cisco AI Skill Scanner 与 SkillSpector
+  ├─ 生成 AI 审查交接文件
+  ├─ 校验 AI 结果、汇总结论、生成候选
+  └─ 确认结果持久化后清理当前仓库
+
+/skill-security-review
+  └─ 只负责读取一个交接文件和 Skill 快照，输出一份 AI 审查 JSON
+```
+
+AI Skill 不下载仓库、不调用静态扫描器、不清理目录，也不执行被审查 Skill。
+
+## 2. 填写配置
+
+在仓库根目录执行：
+
+```bash
+cp batch-review/config/review.company.example.toml \
+  batch-review/config/review.company.toml
+```
+
+真实配置文件已被 `.gitignore` 忽略。至少填写下列内容：
+
+| 配置项 | 填写内容 |
+|---|---|
+| `batch.inventory_csv` | Skill 清单路径；仓库内测试清单默认是 `test/skill_summary.csv` |
+| `workspace.*` | 临时区、受限证据区、候选区和清单区的绝对路径 |
+| `gerrit.user/host/port` | Gerrit 只读 SSH 参数 |
+| `gerrit.allowed_repositories` | 首批联调的 1～3 个仓库；正式批次确认后再放开 |
+| `status_mapping` | CSV 中各状态对应 `ACTIVE`、`DELETED` 等内部状态 |
+| `ai.policy_version` | 本次审查规则版本 |
+| `ai.reviewer_model` | 公司内网模型标识 |
+| `scanners.*.version` | 公司内网源实际批准的固定版本 |
+| `scanners.*.command[0]` | 两个扫描器可执行文件的绝对路径 |
+
+配置中不要填写 Git 密码、SSH 私钥、模型密钥或 pip 密码。认证信息使用服务器已有的
+SSH 配置、环境变量或公司的密钥管理方式提供。
+
+## 3. 安装
+
+正式扫描节点建议使用 CentOS/Linux 与 Python 3.12 或 3.13。Windows 可以做配置和小样本
+验证；Python 3.14 暂不用于首批正式扫描。
+
+先从公司的 pip 内网源安装批处理程序：
+
+```bash
+python3.12 -m pip install -e './batch-review'
+```
+
+在公司内网源已经同步两个固定版本 wheel 后，安装静态扫描器：
+
+```bash
+python3.12 batch-review/tools/install_scanners.py \
+  --root /opt/skill-review/scanners
+```
+
+扫描节点不能访问 GitHub也不使用 Docker。安装脚本只从当前 pip 配置的内网源取包，并为
+两个工具建立独立环境。安装完成后，把输出的可执行文件路径填回配置。
+
+## 4. 首次检查，不联网、不扫描
+
+Linux/CentOS：
+
+```bash
+./batch-review/run.sh plan \
+  --config batch-review/config/review.company.toml \
+  --batch-id baseline-20260901
+```
+
+Windows PowerShell 或 CMD：
+
+```text
+batch-review\run.cmd plan --config batch-review\config\review.company.toml --batch-id baseline-20260901
+```
+
+`plan` 只读取配置和 CSV，并在 `workspace.manifest_root` 下生成本地执行计划。它不访问
+Gerrit，也不运行扫描器。计划中的仓库数、排除项和状态应先人工核对。
+
+## 5. 启动第一个仓库
+
+`start` 会访问 Gerrit 并实际运行两套静态扫描器，因此必须显式写 `--execute`：
+
+```bash
+./batch-review/run.sh start \
+  --config batch-review/config/review.company.toml \
+  --batch-id baseline-20260901 \
+  --execute
+```
+
+脚本会一次只下载一个仓库，处理该仓库内本轮选中的全部 Skill，并生成：
+
+- `ai-review-queue.json`：机器可读的待审任务；
+- `AI_REVIEW_NEXT_STEPS.md`：当前仓库逐项 handoff 和结果保存路径；
+- 静态扫描报告、Skill 摘要和冻结版本信息。
+
+`start` 会继续使用 `plan` 已生成的同一批次和固定配置；如果没有预先执行 `plan`，它也会先
+创建计划再准备第一个仓库。批次创建后不得修改该批次使用的配置文件；配置变化应新建批次。
+
+## 6. 调用 AI 审查 Skill
+
+在本仓库根目录启动公司批准的 Claude Code。输入触发指令：
+
+```text
+/skill-security-review
+```
+
+然后为队列中的每个任务提供以下要求：
+
+```text
+读取 AI_REVIEW_NEXT_STEPS.md 中本任务对应的 handoff JSON。
+严格按 handoff、项目 Skill 和结果 Schema 审查；不要联网，不要执行被审查内容，
+不要修改快照。只返回 JSON，并将结果保存到该任务的 expected_result 路径。
+```
+
+每个任务必须生成一份独立 JSON。不能把聊天说明、Markdown 代码围栏或多个结果混入同一
+文件；批处理程序会校验 Schema、Digest、规则版本和任务身份，不接受不匹配的结果。
+
+## 7. 完成当前仓库并进入下一个仓库
+
+确认当前队列的所有 AI JSON 已保存后执行：
+
+```bash
+./batch-review/run.sh advance \
+  --config batch-review/config/review.company.toml \
+  --batch-id baseline-20260901 \
+  --execute \
+  --confirm-cleanup
+```
+
+该命令按以下顺序执行：
+
+1. 检查当前仓库的 AI 结果是否齐全；
+2. 校验并合并静态结果与 AI 结果；
+3. 生成审查结论和符合门槛的本地私密候选；
+4. 确认持久化结果存在后，清理当前仓库临时工作区；
+5. 下载并准备下一个仓库。
+
+若 AI 结果缺失，命令停止并列出缺失路径，不会清理、不会跳过，也不会进入下一个仓库。
+每完成一次 AI 审查就再次执行同一条 `advance` 命令，直至批次完成并生成汇总报告。
+
+## 8. 查看进度
+
+```bash
+./batch-review/run.sh status \
+  --config batch-review/config/review.company.toml \
+  --batch-id baseline-20260901
+```
+
+Windows 将 `./batch-review/run.sh` 替换为 `batch-review\run.cmd`。如果 Windows 上的 Python
+不由 `py -3.12` 管理，可把 `SKILL_REVIEW_PYTHON` 设置为 Python 3.12 可执行文件的完整路径。
+
+## 9. 一键启动的边界
+
+`start` 是第一个仓库的单命令启动入口，`advance` 是每个后续仓库的单命令续跑入口。两者
+之间必须由公司内网模型完成 AI 审查，因此不能安全地做成完全无人值守的一条命令。这个暂停点
+用于防止 AI 结果缺失、结果串批或未经确认就删除临时证据。
+
+程序不会自动 Commit、Push 或上架 SkillHub。通过的内容只写入本地私密候选目录，后续由
+负责人手动同步到私密 Git 中转仓库。
+
+## 10. 使用 GitHub 仓库做联调
+
+先从远端已固定的 Git Revision 生成台账，不读取本地未提交内容：
+
+```bash
+python3.12 batch-review/tools/discover_git_skills.py \
+  --repository . \
+  --repo-name Chenzy-zero/SkillHub \
+  --branch main \
+  --revision origin/main \
+  --output test/github_skill_summary.csv
+```
+
+复制 `batch-review/config/review.github.example.toml` 为一个 `*.local.toml` 文件，然后填写：
+
+- GitHub 或正式 Gerrit 的 SSH 地址、端口、只读身份和仓库白名单；
+- Cisco 与 SkillSpector 可执行文件路径；
+- 公司批准的模型标识；
+- 本次固定策略版本。
+
+GitHub 受限网络可使用 `ssh.github.com:443`。正式切换 Gerrit 时只需替换源站段、CSV、
+工作目录和工具路径，台账字段及后续命令不变。`*.local.toml` 已被 Git 忽略。

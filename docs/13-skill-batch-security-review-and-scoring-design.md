@@ -74,17 +74,17 @@
 
 ### 3.2 CSV Commit 只作为台账提示
 
-CSV 中的 `lasted_commited` 原样兼容，进入系统后规范化为 `inventory_revision`。它与当前 `release/hooks/ref-update` 中 `skill_summary.latest_commitid` 的对应关系为：
+正式 CSV 中的 `latest_commitid` 进入系统后规范化为 `inventory_revision`。旧清单中的 `lasted_commited` 仍兼容，但不能与新字段同时出现。它与当前 `release/hooks/ref-update` 中 `skill_summary.latest_commitid` 的对应关系为：
 
 ```text
 release 表字段 latest_commitid
-        ↓ CSV 导出时映射
-CSV 字段 lasted_commited
+        ↓ CSV 原样导出
+CSV 字段 latest_commitid
         ↓ 批次读取后规范化
 内部字段 inventory_revision
 ```
 
-最终接受检查的 `source_revision` 不是直接照抄 `lasted_commited`，而是批次创建时从 Gerrit 冻结的目标分支 HEAD Commit。这样可以防止台账更新延迟或 Hook 参数取值错误导致审查旧内容。
+最终接受检查的 `source_revision` 不是直接照抄 `latest_commitid`，而是批次创建时从 Gerrit 冻结的目标分支 HEAD Commit。这样可以防止台账更新延迟或 Hook 参数取值错误导致审查旧内容。
 
 ### 3.3 检查完整 Skill Package
 
@@ -168,9 +168,12 @@ CSV 保持用户当前字段名称，不要求在源文件中改名。
 | `repo_name` | 是 | `repository` | Gerrit 项目名，通过受控配置映射到 SSH 地址 |
 | `branch` | 是 | `source_branch` | 兼容普通分支名和 `refs/heads/` 格式，内部统一为普通分支名 |
 | `skill_path` | 是 | `normalized_skill_path` | 仓库内 Skill Root 路径，必须能定位到 `SKILL.md` |
-| `lasted_commited` | 是 | `inventory_revision` | 与 release 表 `latest_commitid` 映射；仅作台账版本提示和一致性检查 |
+| `latest_commitid` | 是 | `inventory_revision` | release 表原始字段；仅作台账版本提示和一致性检查。旧字段 `lasted_commited` 继续兼容 |
 | `security_reviewed` | 是 | `inventory_review_hint` | 只保留为旧台账上下文；首次统一审查不据此跳过，也不作为正式审查证据 |
 | `status` | 是 | `inventory_status` | 判断来源是否有效；未知状态进入数据待确认 |
+| `skill_id` | 是 | 追溯字段 | 保留台账标识，不代替 Source 身份 |
+| `update_time` | 是 | 追溯字段 | 保留台账更新时间，不用于替代 Git 时间 |
+| `history_id` | 是 | 追溯字段 | 保留历史记录标识 |
 
 ### 5.2 派生字段
 
@@ -205,13 +208,13 @@ source_selection_status
 读取后必须完成以下校验：
 
 1. 文件能够按 UTF-8 正常解析，表头只出现一次；
-2. 七个规定字段全部存在且必填值不为空；
+2. 正式清单的十个规定字段全部存在且必填值不为空；旧七列格式仍兼容；
 3. `repo_name` 能通过受控配置解析到唯一 Gerrit SSH 仓库；
 4. `branch` 在远端存在；
 5. `skill_path` 是仓库内相对路径，不允许绝对路径、`..` 越界、空字节或未规范化分隔符；
 6. 根目录 Skill 的 `/` 写法在内部统一为 `.`；
 7. `<skill_path>/SKILL.md` 在冻结版本中存在；
-8. `lasted_commited` 能在对应仓库解析为 Commit；
+8. `latest_commitid` 或兼容字段 `lasted_commited` 能在对应仓库解析为 Commit；
 9. `skill_name` 与 `SKILL.md` 中的名称不一致时记录 `SKILL_NAME_MISMATCH`，不自行改写源数据；
 10. 完全重复的 CSV 行只创建一个执行任务，但所有原始行号都要保留；
 11. 同一来源键出现互相矛盾的状态或 Commit 时，标记 `INPUT_CONFLICT`；
@@ -295,7 +298,7 @@ repo_name + normalized_skill_path
 
 以下情况记录为 `STALE_INVENTORY`：
 
-- `lasted_commited` 无法解析；
+- `latest_commitid`（或兼容字段 `lasted_commited`）无法解析；
 - CSV Commit 与远端分支或该 Skill 路径没有合理关联；
 - CSV Commit 明显早于当前路径最近变化 Commit；
 - CSV 状态声称有效，但冻结 HEAD 中已经没有该 Skill；
@@ -308,7 +311,7 @@ repo_name + normalized_skill_path
 当前 `release/hooks/ref-update`：
 
 - 表字段使用 `latest_commitid`；
-- CSV 的 `lasted_commited` 应从该字段映射；
+- 正式 CSV 原样使用 `latest_commitid`；旧导出中的 `lasted_commited` 仅作为兼容字段；
 - Hook 中使用 `gerritCommitId = sys.argv[10]`。按照 [Gerrit 官方 `ref-update` 参数顺序](https://gerrit.googlesource.com/plugins/hooks/+/HEAD/src/main/resources/Documentation/hooks.md)，该位置通常是 `oldrev`，更新后的 `newrev` 通常位于 `sys.argv[12]`；除非生产部署存在额外包装，否则当前 release 代码记录的可能是更新前版本；
 - release 表本身没有 `status` 字段，因此 CSV 的 `status` 来源和值域必须单独固定，不能假定它由当前 Hook 维护；
 - 批量审查不能仅依赖这一字段判断最新内容，必须通过远端分支 HEAD 和 Skill 路径最近变化记录再次核实。
@@ -489,7 +492,7 @@ AI 审查必须遵循：
 
 本方案固定使用 [Cisco AI Skill Scanner](https://github.com/cisco-ai-defense/skill-scanner) 和 [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) 作为两套独立静态主审工具。Cisco 只启用本地规则、字节码、命令管道和行为分析能力，不启用 LLM、VirusTotal 上传或 Cisco 云分析；SkillSpector 使用无 LLM 的静态模式，并关闭公共漏洞库外联。两者都不执行被审查 Skill。
 
-用户指定的 [UseAI-pro/openclaw-skills-security](https://github.com/UseAI-pro/openclaw-skills-security) 中，`skill-auditor` 是当前六步主审流程，`skill-vetter` 是保留的旧版深度检查清单。项目中的 `skills/skill-security-review` 借鉴其权限、依赖、提示词攻击、网络外传和隐藏行为等检查维度，但做了以下调整：
+用户指定的 [UseAI-pro/openclaw-skills-security](https://github.com/UseAI-pro/openclaw-skills-security) 中，`skill-auditor` 是当前六步主审流程，`skill-vetter` 是保留的旧版深度检查清单。项目中的 `.claude/skills/skill-security-review` 借鉴其权限、依赖、提示词攻击、网络外传和隐藏行为等检查维度，但做了以下调整：
 
 - 不依赖 OpenClaw 专属权限字段；缺少权限声明时按实际文件和行为推断；
 - 不以作者、仓库热度或已有 `security_reviewed` 值降低风险；
@@ -938,10 +941,10 @@ AI 读取完整 Skill + 两套静态报告
 项目中的主版本保存在：
 
 ```text
-skills/skill-security-review/
+.claude/skills/skill-security-review/
 ```
 
-Claude Code 只会自动发现 `.claude/skills/` 等约定位置，不会自动发现本项目根目录的 `skills/`。执行前，应由批次控制层将主版本复制或只读链接到当前审查工作区的 `.claude/skills/skill-security-review/`；也可以在会话中明确要求读取主版本的 `SKILL.md`。批次控制层必须在两套静态报告完成后显式调用该 Skill，不能依赖模型自行判断触发时机。审查会话只开放 `Read`、`Glob`、`Grep`，并禁用 MCP 和其他执行类工具。
+Claude Code 从项目 `.claude/skills/` 自动发现该 Skill。批次控制层必须在两套静态报告完成后显式调用 `/skill-security-review`，不能依赖模型自行判断触发时机。审查会话只开放 `Read`、`Glob`、`Grep`，并禁用 MCP 和其他执行类工具。
 
 单个 Skill 的调用信息建议按以下模板提供：
 
@@ -1065,8 +1068,8 @@ candidate_status
 
 ### 20.1 输入和分支选择
 
-- 能原样读取七个 CSV 字段，包括 `lasted_commited`；
-- 能把 `lasted_commited` 映射为内部台账版本提示，并与 `latest_commitid` 关系清楚；
+- 能原样读取正式十列 CSV，包括 `latest_commitid` 和三个追溯字段，并兼容旧七列格式；
+- 能把 `latest_commitid` 映射为内部台账版本提示；旧 `lasted_commited` 不与新字段混用；
 - 所有原始 CSV 行都能通过 `source_row_id` 回查；
 - 同一仓库同一路径跨分支时，能按路径最近变化时间选择候选；
 - 不使用 SHA 字符串大小判断新旧；

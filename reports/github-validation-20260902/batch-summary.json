@@ -1,0 +1,33 @@
+{
+  "batch_id": "github-validation-20260902",
+  "branch_conflict_count": 0,
+  "candidate_count": 0,
+  "candidate_threshold": 70,
+  "failure_count": 0,
+  "generated_at": "2026-09-02T02:30:21.734994Z",
+  "input_csv_sha256": "63e2655d2deea84dfb33391893578cde8ce8f9bf4defdb7606355990eff5d0a5",
+  "quality_level_distribution": {
+    "EXCELLENT": 1,
+    "GOOD": 0,
+    "QUALIFIED": 0,
+    "UNQUALIFIED": 0,
+    "UNSCORED": 0
+  },
+  "records_without_digest_count": 0,
+  "repository_count": 1,
+  "result_record_count": 1,
+  "retry_pending_count": 0,
+  "review_policy_version": "skill-security-policy-v1.0",
+  "schema_version": "0.1",
+  "security_decision_counts": {
+    "BLOCKED": 0,
+    "INCOMPLETE": 0,
+    "PASS": 0,
+    "REVIEW_REQUIRED": 1
+  },
+  "selected_content_version_count": 1,
+  "source_row_count": 1,
+  "stale_inventory_count": 0,
+  "superseded_branch_source_count": 0,
+  "tool_failure_or_incomplete_count": 0
+}

@@ -17,7 +17,7 @@
 | T00、T01、T06 | 已实现并通过本地测试 | 严格 CSV 契约、显式状态范围、配置冻结、数据模型、证据与结果格式 | 脱敏真实 CSV、完整 `status` 枚举和纳入状态确认 |
 | T02、T03 | 部分实现 | SSH 地址受控生成、仓库白名单、分支/Commit/路径重新对账；已识别 `ref-update` 参数取值风险 | Gerrit 只读账号、地址/端口/主机指纹；用真实样本验证 Hook 的 `oldrev/newrev` 对应关系 |
 | T04、T20、T21、T22 | 已实现并通过本地测试 | Cisco 与 SkillSpector 本地静态适配、固定命令、并行执行、超时/报告/输入变化检查 | 批准版本、内网安装路径和固定样本实跑 |
-| T05、T30、T32 | 已实现并通过本地测试 | `skills/skill-security-review/`、只读交接、JSON Schema、Revision/Digest/覆盖一致性校验 | 公司内网模型标识、Claude Code 批准版本和实际运行方式 |
+| T05、T30、T32 | 已实现并通过本地测试 | `.claude/skills/skill-security-review/`、只读交接、JSON Schema、Revision/Digest/覆盖一致性校验 | 公司内网模型标识、Claude Code 批准版本和实际运行方式 |
 | T10、T11、T12 | 部分实现并通过本地测试 | 单仓库处理时冻结分支版本、单仓库 mirror、跨分支路径最近变化选择、不可变快照、SHA-256 Digest、同时间内容冲突处理 | Gerrit 小样本联调、容量参数校准；正式全量运行前补充“全批次统一截止时间”的远端版本冻结清单 |
 | T13 | 部分实现 | 稳定任务键、本地状态、幂等证据与候选导出 | 历史结果索引接入和跨批次结果复用 |
 | T33、T34、T35 | 已实现并通过本地测试 | 问题归一化去重、安全门禁、独立质量分、人工确认原因 | 用真实报告校准工具字段映射和规则门槛 |
@@ -161,10 +161,10 @@ T01 至 T06 在 T00 完成后可以并行准备；T20 和 T21 必须针对同一
 | 项目 | 内容 |
 |---|---|
 | 目标 | 确认 CSV 可以稳定读取，并把原始行转换成可追溯的台账记录。 |
-| 输入 | 用户提供的脱敏 CSV 样例或首批正式 CSV；字段 `skill_name`、`repo_name`、`branch`、`skill_path`、`lasted_commited`、`security_reviewed`、`status`。 |
+| 输入 | 用户提供的正式 CSV；字段 `skill_id`、`skill_name`、`repo_name`、`branch`、`skill_path`、`latest_commitid`、`security_reviewed`、`status`、`update_time`、`history_id`。旧七列格式继续兼容。 |
 | 输出 | CSV 输入快照；字段和编码检查报告；逐行 `source_row_id`；规范化记录；重复行、冲突行和无效行清单；`status` 映射表。 |
 | 依赖 | T00。 |
-| 验收标准 | 1. UTF-8、表头、分隔符和空值处理结果明确；2. 七个字段全部识别；3. `lasted_commited` 只进入 `inventory_revision`，不冒充最终 `source_revision`；4. `skill_path` 禁止绝对路径、`..` 越界、空字节和未规范化分隔符；5. 重复行不生成重复任务但保留所有来源行；6. 未知 `status` 不按有效状态处理；7. 原始 CSV 不被改写。 |
+| 验收标准 | 1. UTF-8、表头、分隔符和空值处理结果明确；2. 正式十列字段全部识别并保留追溯字段；3. `latest_commitid` 只进入 `inventory_revision`，不冒充最终 `source_revision`，旧 `lasted_commited` 仅兼容；4. `skill_path` 禁止绝对路径、`..` 越界、空字节和未规范化分隔符；5. 重复行不生成重复任务但保留所有来源行；6. 未知 `status` 不按有效状态处理；7. 原始 CSV 不被改写。 |
 | 可并行关系 | 可与 T02、T03、T04、T05、T06 并行；完成后是 T10 的前置。 |
 
 ### T02 Gerrit 仓库映射与 SSH 只读访问
@@ -186,7 +186,7 @@ T01 至 T06 在 T00 完成后可以并行准备；T20 和 T21 必须针对同一
 | 输入 | 本地 `release/hooks/ref-update`；当前 release 数据结构；CSV 导出样例；新增、修改、连续提交和删除 Skill 的代表性样本；如可提供则使用对应 Gerrit 提交记录。 |
 | 输出 | `latest_commitid → inventory_revision` 映射说明；Hook 参数取值验证记录；台账差异规则；问题和风险清单。 |
 | 依赖 | T00；建议同时具备 T01 的 CSV 样例。 |
-| 验收标准 | 1. 能证明样本中的 `lasted_commited` 是否对应更新后 Commit；2. 明确 `oldrev`、`newrev` 与当前 Hook 参数的对应关系；3. 发现 Hook 取值不确定时，批量流程仍以冻结的远端分支 HEAD 作为 `source_revision`；4. 不把 Hook 中的凭据或完整敏感值复制到报告；5. 本任务只做对账和记录，不擅自修改生产 Hook。 |
+| 验收标准 | 1. 能证明样本中的 `latest_commitid` 是否对应更新后 Commit；2. 明确 `oldrev`、`newrev` 与当前 Hook 参数的对应关系；3. 发现 Hook 取值不确定时，批量流程仍以冻结的远端分支 HEAD 作为 `source_revision`；4. 不把 Hook 中的凭据或完整敏感值复制到报告；5. 本任务只做对账和记录，不擅自修改生产 Hook。 |
 | 可并行关系 | 可与 T01、T02、T04、T05、T06 并行；完成后是 T10 的前置。 |
 
 ### T04 静态扫描工具环境与版本冻结
@@ -204,7 +204,7 @@ T01 至 T06 在 T00 完成后可以并行准备；T20 和 T21 必须针对同一
 
 | 项目 | 内容 |
 |---|---|
-| 目标 | 固定项目 `skills/skill-security-review/` 的版本、输入方式、输出 Schema 和 Claude Code 的只读执行边界。 |
+| 目标 | 固定项目 `.claude/skills/skill-security-review/` 的版本、输入方式、输出 Schema 和 Claude Code 的只读执行边界。 |
 | 输入 | 项目 AI 审查 Skill；`review-result.schema.json`；公司内网模型的调用方式；Claude Code 版本和可用参数；静态工具报告样例。 |
 | 输出 | AI 审查 Skill 版本记录；Claude Code 执行模板；AI 输入包目录约定；输出提取和校验规则；人工执行说明。 |
 | 依赖 | T00。 |
@@ -321,7 +321,7 @@ T01 至 T06 在 T00 完成后可以并行准备；T20 和 T21 必须针对同一
 | 项目 | 内容 |
 |---|---|
 | 目标 | 由指定人员通过 Claude Code 调用项目审查 Skill 和公司内网模型，完成第二层安全审查和质量评分。 |
-| 输入 | T30 的 AI 任务；项目 `skills/skill-security-review/`；公司内网模型；Claude Code 的只读权限配置。 |
+| 输入 | T30 的 AI 任务；项目 `.claude/skills/skill-security-review/`；公司内网模型；Claude Code 的只读权限配置。 |
 | 输出 | AI 原始返回；AI 执行日志；模型标识；审查 Skill 版本；输出时间和任务关联。 |
 | 依赖 | T30、T05。 |
 | 验收标准 | 1. AI 只读取 Skill、Manifest 和两份静态报告；2. 不执行目标脚本、命令、安装程序或 MCP；3. 不联网，不向公网模型发送内容；4. 输出包括安全结论和五个质量维度的分数、原因与证据；5. AI 明确无法判断时输出不确定，不能默认低风险；6. 中断、模型错误或输出截断保留为未完成，不伪装成通过；7. 每个结果仍需后续 Schema 和 Digest 校验。 |

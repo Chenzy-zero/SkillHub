@@ -1,0 +1,77 @@
+# 公司环境待填写配置。
+# 使用前复制为 review.company.toml；不要把真实内网地址、账号或路径提交到 Git。
+
+[batch]
+# 当前仓库中的正式测试清单。更换正式清单时填写绝对路径。
+inventory_csv = "../../test/skill_summary.csv"
+batch_id_prefix = "skill-review"
+included_statuses = ["ACTIVE"]
+
+[workspace]
+# TODO：确认 CentOS 扫描节点上的四个独立目录及权限。
+root = "/data/skill-review/work"
+evidence_root = "/data/skill-review/restricted-evidence"
+candidate_root = "/data/skill-review/private-candidates"
+manifest_root = "/data/skill-review/manifests"
+clean_after_repository = true
+keep_failed_workspace = false
+
+[gerrit]
+ssh_url_template = "ssh://{user}@{host}:{port}/{repo_name}.git"
+# TODO：填写 Gerrit 只读账号、主机和 SSH 端口。
+user = "FILL_GERRIT_READONLY_USER"
+host = "gerrit.example.com"
+port = 29418
+# 首批联调建议填写 1～3 个仓库；空数组表示允许清单中的全部仓库。
+allowed_repositories = []
+
+[status_mapping]
+"新增" = "ACTIVE"
+"修改" = "ACTIVE"
+"删除" = "DELETED"
+
+[quality]
+candidate_threshold = 70
+max_score = 100
+
+[ai]
+skill_path = "../../.claude/skills/skill-security-review"
+result_schema_path = "../../.claude/skills/skill-security-review/references/review-result.schema.json"
+# TODO：填写公司批准的规则版本和内网模型标识。
+policy_version = "pin-in-deployment"
+reviewer_model = "set-company-intranet-model-id"
+
+[scanners.cisco]
+enabled = true
+version = "2.0.13"
+timeout_seconds = 600
+# TODO：如安装目录不同，替换第一个参数。
+command = [
+  "/opt/skill-review/scanners/cisco/bin/skill-scanner",
+  "scan", "{skill_root}",
+  "--format", "json", "--compact",
+  "--output", "{output_file}",
+]
+
+[scanners.skillspector]
+enabled = true
+version = "2.5.1"
+timeout_seconds = 600
+# TODO：如安装目录不同，替换第一个参数。--no-llm 不得删除。
+command = [
+  "/opt/skill-review/scanners/skillspector/bin/skillspector",
+  "scan", "{skill_root}",
+  "--no-llm", "--format", "json",
+  "--output", "{output_file}",
+]
+
+[retry]
+max_attempts = 3
+backoff_seconds = 5
+max_backoff_seconds = 60
+
+[concurrency]
+# 当前编排器逐仓库执行；同一 Skill 的两套静态扫描并行。
+repositories = 1
+skills_per_repository = 1
+ai_reviews = 1

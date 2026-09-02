@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -46,6 +47,7 @@ from .git_source import (
     SELECTED,
     SKIPPED_SUPERSEDED_BRANCH,
     GitMirror,
+    GitRunner,
     GitSourceResolver,
     ResolvedSource,
 )
@@ -366,7 +368,23 @@ def prepare_repository(
     mirror_path = repo_root / "mirror.git"
     if mirror_sync is None:
         url = config.gerrit.repository_url(repository)
-        GitMirror(url, mirror_path).clone_or_fetch()
+        runner = None
+        if config.gerrit.ssh_identity_file is not None:
+            environment = os.environ.copy()
+            environment["GIT_SSH_COMMAND"] = " ".join(
+                shlex.quote(value)
+                for value in (
+                    "ssh",
+                    "-i",
+                    str(config.gerrit.ssh_identity_file),
+                    "-o",
+                    "IdentitiesOnly=yes",
+                    "-o",
+                    "BatchMode=yes",
+                )
+            )
+            runner = GitRunner(env=environment)
+        GitMirror(url, mirror_path, runner=runner or GitRunner()).clone_or_fetch()
     else:
         returned = Path(mirror_sync(repository, mirror_path)).resolve()
         if returned != mirror_path.resolve():

@@ -1,0 +1,24 @@
+{
+  "purpose": "Record provenance for the upstream-inspired checklist used by the local project Skill.",
+  "local_skill": "skill-security-review",
+  "status": "informed-by-not-copied",
+  "sources": [
+    {
+      "name": "openclaw-skills-security",
+      "owner": "UseAI-pro",
+      "url": "https://github.com/UseAI-pro/openclaw-skills-security",
+      "referenced_components": [
+        "skill-vetter",
+        "skill-auditor"
+      ],
+      "role": "background inspiration only"
+    }
+  ],
+  "local_authority": [
+    "SKILL.md",
+    "references/security-review.md",
+    "references/quality-review.md",
+    "references/review-result.schema.json"
+  ],
+  "network_use_during_review": false
+}

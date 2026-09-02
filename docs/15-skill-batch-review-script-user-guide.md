@@ -9,6 +9,8 @@
 > 配套设计：[`13-skill-batch-security-review-and-scoring-design.md`](13-skill-batch-security-review-and-scoring-design.md)
 >
 > 实施任务：[`14-skill-batch-review-implementation-tasks.md`](14-skill-batch-review-implementation-tasks.md)
+>
+> 快速入口：[`16-skill-batch-review-quick-start.md`](16-skill-batch-review-quick-start.md)
 
 ## 1. 文档目的
 
@@ -59,7 +61,8 @@
 
 ### 3.1 按仓库逐个执行
 
-当前命令一次只准备一个仓库。对于 100 多个仓库，应先生成仓库计划，然后按顺序重复以下流程：
+启动器一次只准备一个仓库。对于 100 多个仓库，先生成仓库计划，再由 `start` 和
+`advance` 按计划顺序重复以下流程：
 
 ```text
 准备仓库
@@ -70,11 +73,12 @@
 → 处理下一个仓库
 ```
 
-脚本当前没有提供“一条命令自动跑完全部仓库”的调度器。这是为了在首轮试运行中保留清晰的人工检查点。
+`batch-review/run.sh` 与 `run.cmd` 已负责记住当前进度、完成当前仓库并准备下一个仓库。
+AI 审查仍是明确的人工检查点，因此不会用一条无人值守命令自动跑完整个批次。
 
 ### 3.2 Claude Code 必须人工执行
 
-`prepare-repository` 只生成 AI 任务，不会启动 Claude Code。执行人员必须在公司内网模型环境中调用 `/skill-security-review`，再把纯 JSON 结果保存到约定目录。
+`prepare-repository` 只生成 AI 任务，不会启动 Claude Code。执行人员必须在公司内网模型环境中调用项目级 `/skill-security-review`，再把纯 JSON 结果保存到约定目录。
 
 ### 3.3 全批次统一截止时间尚未自动冻结
 
@@ -84,20 +88,25 @@
 
 ### 3.4 重试和并发配置尚未成为全自动调度
 
-配置中的 `[retry]` 和 `[concurrency]` 用于固定批次运行策略，但当前仓库级命令不会自动调度全部仓库，也不会按照这些值自动完成跨仓库重试。
+配置中的 `[retry]` 和 `[concurrency]` 用于固定批次运行策略。启动器会按计划逐仓库推进，
+但不会绕过每仓库 AI 检查点连续跑完整批次，也不会按照这些值自动完成跨仓库重试。
 
 当前已实现的并行行为只有：同一个 Skill 的 Cisco 与 SkillSpector 静态检查并行执行。
 
 ### 3.5 清理必须显式执行
 
-即使配置中 `clean_after_repository = true`，当前版本也不会在 `finalize-repository` 后自动删除工作区。必须单独运行 `cleanup-repository --confirm-cleanup`。
+使用底层 `finalize-repository` 时，仍需单独运行
+`cleanup-repository --confirm-cleanup`。使用启动器时，执行
+`advance --execute --confirm-cleanup` 会在结果持久化后清理当前仓库，再进入下一仓库；
+缺少确认参数时不会清理或推进。
 
 ## 4. 目录结构
 
 ```text
 batch-review/
 ├── config/
-│   └── review.example.toml          脱敏配置样例
+│   ├── review.example.toml          通用脱敏配置样例
+│   └── review.company.example.toml  公司环境待填写模板
 ├── examples/
 │   └── inventory.example.csv        七列 CSV 样例
 ├── src/skill_batch_review/
@@ -113,26 +122,36 @@ batch-review/
 │   ├── reporting.py                 批次报告
 │   └── orchestrator.py              单仓库两阶段流程
 ├── tests/                            本地测试
+├── tools/run_batch.py                逐仓库启动与续跑器
+├── run.sh                            Linux/CentOS 入口
+├── run.cmd                           Windows 入口
 ├── README.md                         快速使用说明
 └── pyproject.toml                    安装和依赖定义
 ```
 
-AI 审查 Skill 位于：
+AI 审查 Skill 位于 Claude Code 项目级自动发现目录：
 
 ```text
-skills/skill-security-review/
+.claude/skills/skill-security-review/
 ├── SKILL.md
 └── references/
     ├── security-review.md
     ├── quality-review.md
+    ├── upstream-vetter-checklist.md
+    ├── upstream-source.json
     └── review-result.schema.json
 ```
+
+该目录中的 `skill-security-review` 是公司维护的审查入口，参考
+UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是任何上游 Skill 的原样副本。
 
 ## 5. 运行环境要求
 
 ### 5.1 基础环境
 
-- Python 3.11 或更高版本；
+- 正式扫描节点推荐 Linux；当前确认使用 CentOS 7.9；
+- 批处理程序支持 Python 3.11 及以上，正式扫描节点统一使用 Python 3.12 或 3.13；
+- 不建议使用 Python 3.14 运行首批正式扫描；
 - Git 命令行；
 - 能访问公司 Gerrit 的网络环境；
 - Gerrit 专用只读 SSH 身份；
@@ -141,7 +160,11 @@ skills/skill-security-review/
 - 公司批准版本的 Claude Code；
 - 公司内网模型。
 
-### 5.2 Python 安装
+Windows 可以作为配置、发起和查看结果的操作端，但首批正式扫描不建议直接在 Windows 执行。原因是当前尚未在 Windows 验证 Git 符号链接、文件权限位、路径大小写和快照摘要是否与 Linux 一致。Windows 应通过 SSH 连接 CentOS 扫描节点执行以下命令。
+
+CentOS 7.9 已停止主流维护，扫描节点应隔离部署、使用只读 Gerrit 账号并限制出站网络。不要使用系统自带 Python；单独安装 Python 3.12 或 3.13。
+
+### 5.2 批处理程序安装
 
 在仓库根目录执行：
 
@@ -164,7 +187,72 @@ PYTHONPATH=src python3 -m skill_batch_review.cli --help
 
 本文后续统一使用 `skill-batch-review`。两种运行方式功能相同。
 
-### 5.3 扫描器检查
+### 5.3 从公司内网 pip 源安装扫描器
+
+扫描器使用两个隔离虚拟环境，避免 Cisco 与 SkillSpector 的依赖互相覆盖。安装脚本不会访问 GitHub，也不会安装被审查 Skill 的依赖。
+
+公司内网源必须先具备：
+
+```text
+cisco-ai-skill-scanner==2.0.13
+skillspector==2.5.1
+以及两者在 Python 3.12/3.13 下的全部二进制依赖包
+```
+
+Cisco 已公开发布 PyPI 包，可以由公司代理同步。SkillSpector 2.5.1 当前没有公开 PyPI 发布包，制品管理员必须在允许访问上游源码的受控构建环境中，基于批准的源码提交构建 wheel、记录 SHA-256 和许可证信息，再上传公司内网源。扫描节点不得从 GitHub 安装，也不得使用未固定的 `main` 分支。
+
+在仓库根目录执行：
+
+```bash
+python3.12 batch-review/tools/install_scanners.py \
+  --root /opt/skill-review/scanners
+```
+
+Windows 试运行节点如另装 Python 3.12，可使用：
+
+```powershell
+py -3.12 batch-review/tools/install_scanners.py `
+  --root C:\skill-review\scanners
+```
+
+Windows 输出的程序通常位于 `cisco\Scripts\skill-scanner.exe` 和 `skillspector\Scripts\skillspector.exe`。这只用于兼容性试跑；首批正式结果仍以 CentOS/Linux 节点为准。
+
+如果公司 pip 地址没有配置在 `pip.conf`，可以临时指定不含明文密码的地址：
+
+```bash
+python3.12 batch-review/tools/install_scanners.py \
+  --root /opt/skill-review/scanners \
+  --index-url https://pypi.company.example/simple \
+  --json
+```
+
+不要把带用户名、密码或 Token 的 URL 写入仓库、命令历史或日志。优先由运维在扫描账号的 `pip.conf` 中配置公司认证方式。
+
+脚本强制 `--only-binary=:all:`。如果内网源缺少适合 CentOS 7.9 和目标 Python 的 wheel，安装会停止，不会在扫描节点临时编译第三方源码。
+
+安装完成后，把脚本输出的绝对路径写入 `review.toml`。Linux 示例：
+
+```toml
+[scanners.cisco]
+enabled = true
+version = "2.0.13"
+timeout_seconds = 600
+command = [
+  "/opt/skill-review/scanners/cisco/bin/skill-scanner", "scan", "{skill_root}",
+  "--format", "json", "--compact", "--output", "{output_file}",
+]
+
+[scanners.skillspector]
+enabled = true
+version = "2.5.1"
+timeout_seconds = 600
+command = [
+  "/opt/skill-review/scanners/skillspector/bin/skillspector", "scan", "{skill_root}",
+  "--no-llm", "--format", "json", "--output", "{output_file}",
+]
+```
+
+### 5.4 扫描器检查
 
 确认命令可以找到：
 
@@ -182,7 +270,9 @@ skillspector scan <skill_root> --no-llm --format json --output <output_file>
 
 Cisco 配置不得增加 LLM、behavioral、VirusTotal 或 AI Defense 上传选项；SkillSpector 必须保留 `--no-llm`。
 
-### 5.4 Gerrit SSH 准备
+如果配置使用绝对路径，应直接执行两个绝对路径的 `--version`。SkillSpector 即使使用 `--no-llm` 仍会尝试把依赖名称和版本发送给 OSV.dev；公司环境不允许该出站访问时，应在网络层阻断，它会退回内置离线规则。该限制必须记录到扫描覆盖信息中。
+
+### 5.5 Gerrit SSH 准备
 
 运行前应确认：
 
@@ -198,18 +288,17 @@ Cisco 配置不得增加 LLM、behavioral、VirusTotal 或 AI Defense 上传选�
 
 ### 6.1 固定表头
 
-CSV 必须包含且只能包含以下七列：
+当前正式 CSV 使用以下字段：
 
 ```text
-skill_name,repo_name,branch,skill_path,lasted_commited,security_reviewed,status
+skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,update_time,history_id
 ```
 
 示例：
 
 ```csv
-skill_name,repo_name,branch,skill_path,lasted_commited,security_reviewed,status
-jira-query,team/Skill-CM,refs/heads/main,tools/jira-query,1111111111111111111111111111111111111111,否,active
-root-skill,team/Root-Skill,main,/,2222222222222222222222222222222222222222,否,active
+skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,update_time,history_id
+id-001,jira-query,team/Skill-CM,refs/heads/main,tools/jira-query,1111111111111111111111111111111111111111,否,新增,2026/8/31 10:00:00,1001
 ```
 
 ### 6.2 字段含义
@@ -220,13 +309,18 @@ root-skill,team/Root-Skill,main,/,2222222222222222222222222222222222222222,否,a
 | `repo_name` | Gerrit 项目路径 | 必须是规范化相对项目名，不接受 URL、绝对路径或 `..` |
 | `branch` | 来源分支 | `refs/heads/main` 会规范化为 `main` |
 | `skill_path` | `SKILL.md` 所在目录 | 使用 POSIX 相对路径；仓库根目录写 `/` 或 `.` |
-| `lasted_commited` | 当前台账 Commit 字段 | 导入后命名为 `inventory_revision`；必须是完整 40 或 64 位十六进制值 |
+| `latest_commitid` | 当前台账 Commit 字段 | 导入后命名为 `inventory_revision`；必须是完整 40 或 64 位十六进制值 |
 | `security_reviewed` | 旧台账审查提示 | 只保留，不作为首轮全量审查的跳过条件 |
 | `status` | 台账生命周期状态 | 必须在配置的 `status_mapping` 中出现 |
+| `skill_id` | 台账 Skill 标识 | 作为追溯字段保留，不替代 Source 身份和内容校验值 |
+| `update_time` | 台账更新时间 | 作为追溯字段保留，不直接决定 Git 中的最新内容 |
+| `history_id` | 台账历史记录标识 | 作为追溯字段保留 |
+
+旧清单的 `lasted_commited` 仍兼容，但不能与 `latest_commitid` 同时出现。两列同时出现会因版本来源不明确而拒绝导入。
 
 ### 6.3 重要规则
 
-- `lasted_commited` 不是最终审查版本；
+- `latest_commitid`（或兼容字段 `lasted_commited`）不是最终审查版本；
 - 脚本下载仓库后会重新冻结分支版本并与 CSV 对账；
 - `security_reviewed=是` 不会让该行跳过首轮全量审查；
 - 完全重复的 CSV 行只执行一次，但保留全部原始行号；
@@ -315,9 +409,9 @@ allowed_repositories = ["team/repo-a", "team/repo-b"]
 
 ```toml
 [status_mapping]
-"active" = "ACTIVE"
-"inactive" = "INACTIVE"
-"deleted" = "DELETED"
+"新增" = "ACTIVE"
+"修改" = "ACTIVE"
+"删除" = "DELETED"
 ```
 
 左侧必须覆盖真实 CSV 中可能出现的全部值。右侧是程序内部使用的状态。
@@ -342,8 +436,8 @@ max_score = 100
 
 ```toml
 [ai]
-skill_path = "/path/to/SkillHub/skills/skill-security-review"
-result_schema_path = "/path/to/SkillHub/skills/skill-security-review/references/review-result.schema.json"
+skill_path = "/path/to/SkillHub/.claude/skills/skill-security-review"
+result_schema_path = "/path/to/SkillHub/.claude/skills/skill-security-review/references/review-result.schema.json"
 policy_version = "skill-review-policy-v1"
 reviewer_model = "company-intranet-model-id"
 ```
@@ -778,7 +872,12 @@ batch-summary.json
 details.csv
 failures.json
 candidates.json
+skill-security-review-report.html
 ```
+
+`skill-security-review-report.html` 是可离线打开的管理报告，包含 Skill 清单、两套静态
+检查与 AI 审查状态、安全结论、质量得分、风险分布和脱敏问题明细。原始报告和完整证据
+不会嵌入 HTML，仍保留在受限证据区。
 
 报告是脱敏汇总，不替代受限证据。
 
@@ -1055,14 +1154,14 @@ python3 -W error -m unittest discover -s batch-review/tests -v
 
 ```bash
 python3 /path/to/skill-creator/scripts/quick_validate.py \
-  skills/skill-security-review
+  .claude/skills/skill-security-review
 ```
 
 验证 JSON Schema 语法：
 
 ```bash
 python3 -m json.tool \
-  skills/skill-security-review/references/review-result.schema.json \
+  .claude/skills/skill-security-review/references/review-result.schema.json \
   >/dev/null
 ```
 

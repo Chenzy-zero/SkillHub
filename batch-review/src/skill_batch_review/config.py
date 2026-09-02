@@ -152,6 +152,7 @@ class GerritConfig:
     host: str = "gerrit.example.com"
     port: int = 29418
     allowed_repositories: tuple[str, ...] = ()
+    ssh_identity_file: Path | None = None
 
     _allowed_fields = frozenset({"repo_name", "branch", "user", "host", "port"})
 
@@ -175,6 +176,9 @@ class GerritConfig:
         object.__setattr__(self, "host", _text(self.host, "gerrit.host"))
         repositories = tuple(_text(item, "gerrit.allowed_repositories") for item in self.allowed_repositories)
         object.__setattr__(self, "allowed_repositories", repositories)
+        if self.ssh_identity_file is not None:
+            identity = Path(self.ssh_identity_file).expanduser().resolve()
+            object.__setattr__(self, "ssh_identity_file", identity)
 
     def repository_url(self, repo_name: str, *, branch: str = "") -> str:
         repo = _text(repo_name, "repo_name")
@@ -522,6 +526,16 @@ def load_config(path: "str | Path") -> ReviewConfig:
         host=_text(gerrit_data.get("host"), "gerrit.host", default="gerrit.example.com"),
         port=_integer(gerrit_data.get("port"), "gerrit.port", default=29418, minimum=1),
         allowed_repositories=tuple(allowed_repositories_value),
+        ssh_identity_file=(
+            _path(
+                gerrit_data.get("ssh_identity_file"),
+                "gerrit.ssh_identity_file",
+                base_dir=base_dir,
+                default="unused",
+            )
+            if gerrit_data.get("ssh_identity_file") is not None
+            else None
+        ),
     )
 
     status_data = _section(root, "status_mapping")
@@ -555,13 +569,13 @@ def load_config(path: "str | Path") -> ReviewConfig:
             ai_data.get("skill_path"),
             "ai.skill_path",
             base_dir=base_dir,
-            default="../../skills/skill-security-review",
+            default="../../.claude/skills/skill-security-review",
         ),
         result_schema_path=_path(
             ai_data.get("result_schema_path"),
             "ai.result_schema_path",
             base_dir=base_dir,
-            default="../../skills/skill-security-review/references/review-result.schema.json",
+            default="../../.claude/skills/skill-security-review/references/review-result.schema.json",
         ),
         policy_version=_text(
             ai_data.get("policy_version"), "ai.policy_version", default="policy-not-pinned"

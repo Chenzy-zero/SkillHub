@@ -5,9 +5,11 @@ validates and normalises the values supplied by the CSV file; resolving a
 repository, branch, or commit belongs to the later snapshot stage.
 
 The source CSV is treated as evidence.  Its bytes are hashed before parsing,
-and the seven source columns are retained on every row.  Exact duplicate
-records are represented by one execution row while all physical CSV line
-numbers remain available for audit.
+and every recognised source column is retained on every row.  The current
+release table calls the revision column ``latest_commitid``; the older
+``lasted_commited`` spelling remains accepted for existing exports.  Exact
+duplicate records are represented by one execution row while all physical CSV
+line numbers remain available for audit.
 """
 
 from __future__ import annotations
@@ -26,9 +28,23 @@ from .models import ReviewTargetKey, SourceKey, normalize_branch, normalize_skil
 
 
 # Keep this order stable.  It is also the order used when calculating a row
-# identifier, so an ID does not change merely because a producer reordered the
-# columns in an otherwise equivalent CSV file.
+# identifier for the current seven-column format, so an ID does not change
+# merely because a producer reordered the columns in an otherwise equivalent
+# CSV file.
 INVENTORY_COLUMNS: tuple[str, ...] = (
+    "skill_name",
+    "repo_name",
+    "branch",
+    "skill_path",
+    "latest_commitid",
+    "security_reviewed",
+    "status",
+)
+
+# The first implementation used this typo in the public CSV example.  Keep it
+# as a named compatibility constant so callers that still generate the old
+# header can migrate without a data rewrite.
+LEGACY_INVENTORY_COLUMNS: tuple[str, ...] = (
     "skill_name",
     "repo_name",
     "branch",
@@ -37,6 +53,24 @@ INVENTORY_COLUMNS: tuple[str, ...] = (
     "security_reviewed",
     "status",
 )
+
+REVISION_COLUMNS: tuple[str, ...] = ("latest_commitid", "lasted_commited")
+CORE_INVENTORY_COLUMNS: tuple[str, ...] = (
+    "skill_name",
+    "repo_name",
+    "branch",
+    "skill_path",
+    "security_reviewed",
+    "status",
+)
+
+# These columns are emitted by the current release/ref-update inventory and
+# are evidence fields rather than execution controls.  They are explicitly
+# allow-listed so a misspelled required column cannot silently become an
+# ignored extra column.  Their original values are retained in ``raw`` and in
+# the serialised row dictionary.
+TRACE_COLUMNS: tuple[str, ...] = ("skill_id", "update_time", "history_id")
+OPTIONAL_INVENTORY_COLUMNS = frozenset(TRACE_COLUMNS)
 REQUIRED_COLUMNS = INVENTORY_COLUMNS
 
 # A full SHA-1 or SHA-256 is preferred, but abbreviated hexadecimal revisions
@@ -105,30 +139,56 @@ def validate_revision(revision: str) -> str:
     """
 
     if not isinstance(revision, str):
-        raise TypeError("lasted_commited must be a string")
+        raise TypeError("commit revision must be a string")
     value = revision.strip()
     if not _REVISION_RE.fullmatch(value):
-        raise ValueError("lasted_commited must be a full 40- or 64-character hex revision")
+        raise ValueError("commit revision must be a full 40- or 64-character hex revision")
     return value.lower()
 
 
 def _canonical_row_values(values: Mapping[str, str]) -> str:
-    # JSON avoids ambiguity when a cell itself contains a delimiter.  The
-    # order is fixed by INVENTORY_COLUMNS, not by dictionary iteration.
+    """Return the stable source-evidence representation used for row IDs.
+
+    ``values`` may come from either the current or legacy header and may be
+    ordered differently by the CSV producer.  Required fields are therefore
+    emitted in the canonical order, the two revision spellings are represented
+    by one semantic ``commit_revision`` field, and recognised trace fields are
+    sorted by name.  Including the trace values keeps two genuinely different
+    source records distinguishable while still making a column reorder stable.
+    """
+
+    missing = [column for column in CORE_INVENTORY_COLUMNS if column not in values]
+    if missing:
+        raise KeyError("missing inventory fields: " + ", ".join(missing))
+    revision_fields = [column for column in REVISION_COLUMNS if column in values]
+    if len(revision_fields) != 1:
+        raise KeyError("values must contain exactly one commit revision field")
+
+    ordered: list[tuple[str, str]] = [
+        (column, values[column]) for column in CORE_INVENTORY_COLUMNS
+    ]
+    ordered.append(("commit_revision", values[revision_fields[0]]))
+    ordered.extend(
+        (column, values[column])
+        for column in sorted(OPTIONAL_INVENTORY_COLUMNS.intersection(values))
+    )
+    # JSON avoids ambiguity when a cell itself contains a delimiter.
     return json.dumps(
-        [values[column] for column in INVENTORY_COLUMNS],
+        ordered,
         ensure_ascii=False,
         separators=(",", ":"),
     )
 
 
 def make_source_row_id(values: Mapping[str, str]) -> str:
-    """Create a stable ID from the seven original CSV cell values.
+    """Create a stable ID from the original CSV source-evidence cell values.
 
     The physical line number and source-file hash are deliberately excluded:
     moving a row or copying it into a new batch must not change its identity.
-    Consequently exact duplicate rows naturally share an ID and can be
-    grouped while retaining their individual line numbers.
+    Consequently exact duplicate rows naturally share an ID and can be grouped
+    while retaining their individual line numbers.  Current and legacy
+    revision column spellings produce the same ID when all semantic values are
+    equal.
     """
 
     canonical = _canonical_row_values(values).encode("utf-8")
@@ -140,8 +200,9 @@ class InventoryRow:
     """One normalised, validated source row.
 
     ``status`` is the mapped internal value; ``raw_status`` and
-    ``raw_values`` preserve what was present in the source CSV.  ``rows`` in
-    :class:`InventoryDocument` are de-duplicated execution rows, while
+    ``raw_values`` preserve what was present in the source CSV, including
+    recognised trace columns such as ``skill_id`` and ``history_id``.  ``rows``
+    in :class:`InventoryDocument` are de-duplicated execution rows, while
     ``source_row_numbers`` contains every original physical data-row number
     represented by the row.
     """
@@ -211,6 +272,26 @@ class InventoryRow:
         return dict(self.raw_values)
 
     @property
+    def inventory_revision_field(self) -> str:
+        """Return the source header used for ``inventory_revision``."""
+
+        raw = self.raw
+        for column in REVISION_COLUMNS:
+            if column in raw:
+                return column
+        # Rows are constructed only after header validation.  This guard keeps
+        # a malformed hand-built InventoryRow from failing with a cryptic
+        # ``StopIteration`` in callers.
+        raise InventoryError("inventory row has no commit revision field")
+
+    @property
+    def trace_values(self) -> dict[str, str]:
+        """Return retained non-control trace fields from the source row."""
+
+        raw = self.raw
+        return {column: raw[column] for column in TRACE_COLUMNS if column in raw}
+
+    @property
     def has_input_conflict(self) -> bool:
         return self.source_selection_status == "INPUT_CONFLICT"
 
@@ -223,9 +304,16 @@ class InventoryRow:
             "branch": self.branch,
             "skill_path": self.skill_path,
             "inventory_revision": self.inventory_revision,
+            "inventory_revision_field": self.inventory_revision_field,
             "security_reviewed": self.security_reviewed,
             "status": self.status,
             "raw_status": self.raw_status,
+            # Keep the complete source row in manifests.  The typed fields
+            # above are normalised execution inputs; this map is the audit
+            # evidence and includes skill_id/update_time/history_id when the
+            # source provided them.
+            "raw_values": self.raw,
+            "trace_values": self.trace_values,
             "source_key": self.source_key.to_dict(),
             "review_target_key": self.review_target_key.to_dict(),
             "source_selection_status": self.source_selection_status,
@@ -321,14 +409,29 @@ def _read_records(text: str) -> tuple[tuple[str, ...], list[tuple[int, tuple[str
         raise InventoryHeaderError(
             f"CSV header contains duplicate columns: {', '.join(duplicate_headers)}"
         )
-    missing = [column for column in INVENTORY_COLUMNS if column not in header]
-    unknown = [column for column in header if column not in INVENTORY_COLUMNS]
-    if missing or unknown or len(header) != len(INVENTORY_COLUMNS):
-        problems: list[str] = []
-        if missing:
-            problems.append("missing " + ", ".join(missing))
-        if unknown:
-            problems.append("unknown " + ", ".join(unknown))
+    missing = [column for column in CORE_INVENTORY_COLUMNS if column not in header]
+    revision_columns = [column for column in REVISION_COLUMNS if column in header]
+    unknown = [
+        column
+        for column in header
+        if column not in CORE_INVENTORY_COLUMNS
+        and column not in REVISION_COLUMNS
+        and column not in OPTIONAL_INVENTORY_COLUMNS
+    ]
+    problems: list[str] = []
+    if missing:
+        problems.append("missing " + ", ".join(missing))
+    if not revision_columns:
+        problems.append(
+            "missing one commit revision column: " + " or ".join(REVISION_COLUMNS)
+        )
+    elif len(revision_columns) > 1:
+        problems.append(
+            "use only one commit revision column: " + ", ".join(revision_columns)
+        )
+    if unknown:
+        problems.append("unknown " + ", ".join(unknown))
+    if problems:
         raise InventoryHeaderError("invalid CSV header: " + "; ".join(problems))
 
     records: list[tuple[int, tuple[str, ...]]] = []
@@ -373,35 +476,44 @@ def _build_row(
     status_mapping: Mapping[str, str],
 ) -> InventoryRow:
     raw = {column: values[index] for index, column in enumerate(header)}
-    # Keep all seven raw cells in fixed order for stable IDs and audit output.
-    raw_fixed = {column: raw[column] for column in INVENTORY_COLUMNS}
-    skill_name = _required_text(raw_fixed["skill_name"], row_number=row_number, field="skill_name")
-    repo_name = _required_text(raw_fixed["repo_name"], row_number=row_number, field="repo_name")
+    # Keep every recognised source cell for stable IDs and audit output.  The
+    # revision field itself is selected by semantic name so both CSV formats
+    # feed the same ``inventory_revision`` property.
+    skill_name = _required_text(raw["skill_name"], row_number=row_number, field="skill_name")
+    repo_name = _required_text(raw["repo_name"], row_number=row_number, field="repo_name")
 
-    raw_branch = _required_text(raw_fixed["branch"], row_number=row_number, field="branch")
+    raw_branch = _required_text(raw["branch"], row_number=row_number, field="branch")
     try:
         branch = normalize_branch(raw_branch)
     except (TypeError, ValueError) as exc:
         raise InventoryRowError(row_number, str(exc), field="branch") from exc
 
-    raw_path = _required_text(raw_fixed["skill_path"], row_number=row_number, field="skill_path")
+    raw_path = _required_text(raw["skill_path"], row_number=row_number, field="skill_path")
     try:
         skill_path = normalize_skill_path(raw_path)
     except (TypeError, ValueError) as exc:
         raise InventoryRowError(row_number, str(exc), field="skill_path") from exc
 
-    raw_revision = _required_text(
-        raw_fixed["lasted_commited"], row_number=row_number, field="lasted_commited"
-    )
+    revision_columns = [column for column in REVISION_COLUMNS if column in raw]
+    # Header validation guarantees exactly one.  Keep this check local as
+    # ``_build_row`` is intentionally easy to exercise in isolation.
+    if len(revision_columns) != 1:
+        raise InventoryRowError(
+            row_number,
+            "row must contain exactly one commit revision field",
+            field="latest_commitid",
+        )
+    revision_field = revision_columns[0]
+    raw_revision = _required_text(raw[revision_field], row_number=row_number, field=revision_field)
     try:
         inventory_revision = validate_revision(raw_revision)
     except (TypeError, ValueError) as exc:
-        raise InventoryRowError(row_number, str(exc), field="lasted_commited") from exc
+        raise InventoryRowError(row_number, str(exc), field=revision_field) from exc
 
     security_reviewed = _required_text(
-        raw_fixed["security_reviewed"], row_number=row_number, field="security_reviewed"
+        raw["security_reviewed"], row_number=row_number, field="security_reviewed"
     )
-    raw_status = _required_text(raw_fixed["status"], row_number=row_number, field="status")
+    raw_status = _required_text(raw["status"], row_number=row_number, field="status")
     if raw_status not in status_mapping:
         raise UnknownStatusError(row_number, raw_status, status_mapping.keys())
     mapped_status = status_mapping[raw_status]
@@ -411,7 +523,7 @@ def _build_row(
         )
     mapped_status = mapped_status.strip()
 
-    source_row_id = make_source_row_id(raw_fixed)
+    source_row_id = make_source_row_id(raw)
     return InventoryRow(
         source_row_id=source_row_id,
         source_row_numbers=(row_number,),
@@ -423,7 +535,7 @@ def _build_row(
         security_reviewed=security_reviewed,
         status=mapped_status,
         raw_status=raw_status,
-        raw_values=tuple((column, raw_fixed[column]) for column in INVENTORY_COLUMNS),
+        raw_values=tuple((column, raw[column]) for column in header),
     )
 
 
@@ -565,8 +677,13 @@ class InventoryLoader:
 
 
 __all__ = [
+    "CORE_INVENTORY_COLUMNS",
     "INVENTORY_COLUMNS",
+    "LEGACY_INVENTORY_COLUMNS",
+    "OPTIONAL_INVENTORY_COLUMNS",
     "REQUIRED_COLUMNS",
+    "REVISION_COLUMNS",
+    "TRACE_COLUMNS",
     "InventoryDocument",
     "InventoryError",
     "InventoryHeaderError",

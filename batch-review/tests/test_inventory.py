@@ -18,6 +18,7 @@ sys.path.insert(0, str(SRC_DIR))
 
 from skill_batch_review.inventory import (  # noqa: E402
     INVENTORY_COLUMNS,
+    LEGACY_INVENTORY_COLUMNS,
     InventoryHeaderError,
     InventoryLoader,
     InventoryRowError,
@@ -123,6 +124,89 @@ class InventoryParsingTests(unittest.TestCase):
         for header in cases:
             with self.subTest(header=header), self.assertRaises(InventoryHeaderError):
                 parse_inventory_csv(csv_text(inventory_row(), header=header), status_mapping=STATUS_MAP)
+
+    def test_legacy_revision_header_remains_compatible(self):
+        document = parse_inventory_csv(
+            csv_text(inventory_row(), header=LEGACY_INVENTORY_COLUMNS),
+            status_mapping=STATUS_MAP,
+        )
+        row = document.rows[0]
+        self.assertEqual(row.inventory_revision, ACTIVE)
+        self.assertEqual(row.inventory_revision_field, "lasted_commited")
+        self.assertEqual(row.raw["lasted_commited"], ACTIVE)
+
+        current = parse_inventory_csv(
+            csv_text(inventory_row(), header=INVENTORY_COLUMNS),
+            status_mapping=STATUS_MAP,
+        ).rows[0]
+        self.assertEqual(row.source_row_id, current.source_row_id)
+
+    def test_release_inventory_trace_columns_are_retained(self):
+        header = (
+            "skill_id",
+            "skill_name",
+            "repo_name",
+            "branch",
+            "skill_path",
+            "latest_commitid",
+            "security_reviewed",
+            "status",
+            "update_time",
+            "history_id",
+        )
+        values = (
+            "skill-001",
+            "demo",
+            "team/demo",
+            "master",
+            "skills/demo",
+            ACTIVE,
+            "否",
+            "新增",
+            "2026/08/31 10:00:00",
+            "7",
+        )
+        document = parse_inventory_csv(
+            csv_text(values, header=header),
+            status_mapping={"新增": "ACTIVE"},
+        )
+        row = document.rows[0]
+        self.assertEqual(row.inventory_revision, ACTIVE)
+        self.assertEqual(row.inventory_revision_field, "latest_commitid")
+        self.assertEqual(row.trace_values, {
+            "skill_id": "skill-001",
+            "update_time": "2026/08/31 10:00:00",
+            "history_id": "7",
+        })
+        self.assertEqual(row.to_dict()["raw_values"], dict(zip(header, values)))
+        self.assertEqual(row.to_dict()["trace_values"], row.trace_values)
+
+    def test_both_revision_spellings_are_rejected_as_ambiguous(self):
+        header = tuple(INVENTORY_COLUMNS) + ("lasted_commited",)
+        values = inventory_row() + (ACTIVE,)
+        with self.assertRaisesRegex(InventoryHeaderError, "only one commit revision"):
+            parse_inventory_csv(csv_text(values, header=header), status_mapping=STATUS_MAP)
+
+    def test_release_inventory_csv_is_readable_without_network(self):
+        path = Path(__file__).resolve().parents[2] / "test" / "skill_summary.csv"
+        document = load_inventory_csv(
+            path,
+            status_mapping={"新增": "ACTIVE", "修改": "ACTIVE", "删除": "DELETED"},
+        )
+        self.assertEqual(document.raw_row_count, 29)
+        self.assertEqual(document.row_count, 29)
+        self.assertEqual(
+            {row.raw_status for row in document.rows}, {"新增", "修改", "删除"}
+        )
+        self.assertEqual(
+            sum(row.status == "ACTIVE" for row in document.rows), 17
+        )
+        self.assertEqual(
+            sum(row.status == "DELETED" for row in document.rows), 12
+        )
+        first = document.rows[0]
+        self.assertEqual(first.raw["skill_id"], "3frxmfhn764fvevrx1st2b48neglyvc7")
+        self.assertEqual(first.raw["history_id"], "1")
 
     def test_required_values_and_record_width_are_rejected(self):
         blank_name = inventory_row(skill_name=" ")

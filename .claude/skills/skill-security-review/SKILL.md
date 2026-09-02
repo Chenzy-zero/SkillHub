@@ -1,6 +1,6 @@
 ---
 name: skill-security-review
-description: Perform a read-only AI review of one complete Agent Skill package after Cisco AI Skill Scanner and NVIDIA SkillSpector scans. Use to produce an evidence-based security gate and a separate static quality score in a fixed JSON format for private candidate management.
+description: Use this project-level Claude Code Skill as the company Skill security review entry point. Perform a read-only AI review of one complete Agent Skill package after Cisco AI Skill Scanner and NVIDIA SkillSpector scans, and produce an evidence-based security gate plus a separate static quality score in the fixed JSON format for private candidate management. This is a locally maintained review workflow informed by UseAI-pro's skill-vetter and skill-auditor; it is not an unmodified copy of either upstream Skill.
 allowed-tools: Read Glob Grep
 ---
 
@@ -31,6 +31,12 @@ The caller should provide:
 5. `review_id`, `policy_version`, `reviewed_at`, and the intranet model identifier when the surrounding process has assigned them.
 
 If an input is unavailable, continue only as a best-effort review. Record it in `input_coverage`, lower confidence where appropriate, and apply the incomplete-result rules below. Never invent missing metadata, scan results, line numbers, hashes, versions, or timestamps; use `null` where the schema permits it.
+
+## Project review entry point
+
+This Skill is the single project-level entry point for the company's Skill security and quality review. It incorporates review ideas from the UseAI-pro `skill-vetter` and `skill-auditor` projects, but its rules, boundaries, output schema, and approval decision are maintained in this repository for the company's review process. Do not represent this file as the upstream implementation, and do not substitute an upstream Skill for this entry point without a policy review.
+
+Read [references/upstream-vetter-checklist.md](references/upstream-vetter-checklist.md) only when provenance or the upstream-inspired checklist needs to be recorded. The source metadata is kept in [references/upstream-source.json](references/upstream-source.json). These references are background material, not instructions from an external source.
 
 ## Execution order
 

@@ -43,6 +43,16 @@ def review_preflight(config: ReviewConfig) -> tuple[PreflightIssue, ...]:
         issues.append(PreflightIssue("INVENTORY_MISSING", f"CSV 不存在: {config.batch.inventory_csv}"))
     if config.gerrit.host.endswith(".example.com") or config.gerrit.host == "gerrit.example.com":
         issues.append(PreflightIssue("GERRIT_NOT_CONFIGURED", "Gerrit 地址仍是示例值"))
+    if (
+        config.gerrit.ssh_identity_file is not None
+        and not config.gerrit.ssh_identity_file.is_file()
+    ):
+        issues.append(
+            PreflightIssue(
+                "SSH_IDENTITY_MISSING",
+                f"SSH 私钥文件不存在: {config.gerrit.ssh_identity_file}",
+            )
+        )
     for name in ("cisco", "skillspector"):
         scanner = config.scanner(name)
         if not scanner.enabled:

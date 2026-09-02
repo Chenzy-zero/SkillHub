@@ -69,12 +69,13 @@ class ReportingError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class BatchReportPaths:
-    """The four independent report files produced for one batch."""
+    """The machine-readable files and self-contained HTML report for one batch."""
 
     summary: Path
     details: Path
     failures: Path
     candidates: Path
+    html: Path
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -82,6 +83,7 @@ class BatchReportPaths:
             "details": str(self.details),
             "failures": str(self.failures),
             "candidates": str(self.candidates),
+            "html_report": str(self.html),
         }
 
 
@@ -627,7 +629,8 @@ def build_batch_summary(
         raise ReportingError("batch_id must not be empty")
     if not isinstance(candidate_threshold, int) or isinstance(candidate_threshold, bool) or not 0 <= candidate_threshold <= 100:
         raise ReportingError("candidate_threshold must be between 0 and 100")
-    rows = _materialize(records, batch_id=batch_id)
+    source_records = list(records)
+    rows = _materialize(source_records, batch_id=batch_id)
     repositories = {row["repo_name"] for row in rows if row["repo_name"]}
     digests = {row["skill_digest"] for row in rows if row["skill_digest"] and row["source_selection_status"] in {"", "SELECTED", "RECEIVED", "VALIDATING"}}
     security_counts = {status: 0 for status in SECURITY_DECISIONS}
@@ -731,7 +734,8 @@ def _independent_result(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def build_failure_records(records: Iterable[Mapping[str, Any]], *, batch_id: str) -> list[dict[str, Any]]:
-    rows = _materialize(records, batch_id=batch_id)
+    source_records = list(records)
+    rows = _materialize(source_records, batch_id=batch_id)
     return [_independent_result(row) for row in rows if row["is_failure"]]
 
 
@@ -749,6 +753,7 @@ def write_batch_reports(
     policy_version: str | None = None,
     generated_at: str | None = None,
     candidate_threshold: int = 70,
+    evidence_root: Path | None = None,
 ) -> BatchReportPaths:
     """Write summary, details, failures and candidates as separate files.
 
@@ -760,7 +765,8 @@ def write_batch_reports(
     output_dir = Path(output_dir)
     if output_dir.exists() and not output_dir.is_dir():
         raise ReportingError(f"report output is not a directory: {output_dir}")
-    rows = _materialize(records, batch_id=batch_id)
+    source_records = list(records)
+    rows = _materialize(source_records, batch_id=batch_id)
     # Convert normalized rows back through the same public shape: this avoids
     # ever putting an unredacted source mapping in any report.
     summary = build_batch_summary(
@@ -776,6 +782,7 @@ def write_batch_reports(
         details=output_dir / "details.csv",
         failures=output_dir / "failures.json",
         candidates=output_dir / "candidates.json",
+        html=output_dir / "skill-security-review-report.html",
     )
     _write_json(paths.summary, summary)
     # ``write_details_csv`` re-normalizes rows but remains deterministic.
@@ -787,6 +794,18 @@ def write_batch_reports(
     _write_json(
         paths.candidates,
         {"schema_version": "0.1", "batch_id": batch_id, "candidates": [_independent_result(row) for row in rows if _candidate(row)]},
+    )
+    from .html_reporting import write_html_report
+
+    write_html_report(
+        source_records,
+        paths.html,
+        batch_id=batch_id,
+        input_csv_sha256=input_csv_sha256,
+        policy_version=policy_version,
+        generated_at=generated_at,
+        candidate_threshold=candidate_threshold,
+        evidence_root=evidence_root,
     )
     return paths
 

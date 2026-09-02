@@ -1,0 +1,2 @@
+skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,update_time,history_id
+5ffd2efa6fa3c3a6c81c8f1fa0522d4d,skill-security-review,Chenzy-zero/SkillHub,main,skills/skill-security-review,5a0e8f6f22c55124d54c82342ad2c59df93d28ae,否,新增,2026-08-30T21:48:59+08:00,1

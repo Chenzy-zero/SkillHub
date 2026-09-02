@@ -97,11 +97,13 @@ class ReportingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             first = write_batch_reports(records, Path(temp_dir) / "first", batch_id="batch-1")
             second = write_batch_reports(records, Path(temp_dir) / "second", batch_id="batch-1")
-            self.assertEqual(first.as_dict().keys(), {"batch_summary", "details", "failures", "candidates"})
+            self.assertEqual(first.as_dict().keys(), {"batch_summary", "details", "failures", "candidates", "html_report"})
             self.assertEqual(first.summary.read_bytes(), second.summary.read_bytes())
             self.assertEqual(first.details.read_bytes(), second.details.read_bytes())
             self.assertEqual(first.failures.read_bytes(), second.failures.read_bytes())
             self.assertEqual(first.candidates.read_bytes(), second.candidates.read_bytes())
+            self.assertEqual(first.html.read_bytes(), second.html.read_bytes())
+            self.assertIn("Skill 安全审查报告", first.html.read_text(encoding="utf-8"))
 
             summary = json.loads(first.summary.read_text(encoding="utf-8"))
             self.assertEqual(summary["result_record_count"], 2)
@@ -143,6 +145,40 @@ class ReportingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             write_batch_reports([original], Path(temp_dir), batch_id="batch-1")
         self.assertEqual(json.dumps(original, sort_keys=True), snapshot)
+
+    def test_html_uses_only_redacted_findings_from_the_evidence_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            evidence = root / "evidence" / "batch" / "task"
+            evidence.mkdir(parents=True)
+            (evidence / "final-result.json").write_text(
+                json.dumps(
+                    {
+                        "findings": [
+                            {
+                                "severity": "HIGH",
+                                "title": "Credential pattern",
+                                "description": "token=do-not-render",
+                                "path": "SKILL.md",
+                                "line": 8,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            record = complete_record()
+            record["evidence_ref"] = str(evidence)
+            paths = write_batch_reports(
+                [record],
+                root / "reports",
+                batch_id="batch-1",
+                evidence_root=root / "evidence",
+            )
+            page = paths.html.read_text(encoding="utf-8")
+            self.assertIn("Credential pattern", page)
+            self.assertIn("[REDACTED]", page)
+            self.assertNotIn("do-not-render", page)
 
 
 if __name__ == "__main__":

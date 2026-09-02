@@ -15,6 +15,8 @@
 > 当前批量审查任务：`docs/14-skill-batch-review-implementation-tasks.md`
 >
 > 当前批量审查使用说明：`docs/15-skill-batch-review-script-user-guide.md`
+>
+> 当前批量审查快速入口：`docs/16-skill-batch-review-quick-start.md`
 
 ## 1. 当前项目范围
 
@@ -166,20 +168,21 @@ skill_name
 repo_name
 branch
 skill_path
-lasted_commited
+latest_commitid
 security_reviewed
 status
 ```
 
 已确认规则：
 
-- `lasted_commited` 只作为现有台账字段兼容，内部保存为 `inventory_revision`，不能直接当作最终审查版本；
+- 正式清单还包含 `skill_id`、`update_time`、`history_id` 追溯字段；程序完整保留但不把它们当作安全结论；
+- `latest_commitid` 内部保存为 `inventory_revision`，不能直接当作最终审查版本；旧拼写 `lasted_commited` 仅作为兼容字段，不能与新字段同时出现；
 - 审查前必须从 Gerrit 冻结实际来源版本，并与 CSV、分支和 Skill 路径对账；
 - Source 事实身份仍包含 branch，不删除多分支来源；批量审查选择视图按 `repo_name + normalized_skill_path` 比较各分支中该路径最近变化时间，只审常规最新候选；
 - 同时间但内容不同的分支版本不能静默任选，应分别检查并进入人工确认；
 - 同一仓库一次下载，但不同 Skill 可以绑定不同冻结 Revision；
 - Cisco AI Skill Scanner 与 NVIDIA SkillSpector 先对同一内容版本并行完成静态检查；
-- AI 审查使用 `skills/skill-security-review/`，由 Claude Code 调用公司内网模型执行；AI Skill 只读、不联网、不执行被审查内容；
+- AI 审查使用项目级 `.claude/skills/skill-security-review/`，由 Claude Code 调用公司内网模型执行；AI Skill 只读、不联网、不执行被审查内容；该入口参考 UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是上游副本；
 - 安全结论与质量得分分别保存。安全未通过或检查不完整时，质量高分不能放行；私密候选质量门槛当前为 70 分；
 - 通过内容只生成本地私密候选工作空间，不自动 Commit、Push 或上架；由负责人后续手动同步到私密 Git 中转仓库；
 - 原始报告进入受限证据区，不进入私密候选 Git 工作空间。
@@ -387,7 +390,8 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 - `docs/13-skill-batch-security-review-and-scoring-design.md`：存量 Skill 批量安全审查、质量评分与私密候选归档设计
 - `docs/14-skill-batch-review-implementation-tasks.md`：批量审查 T00–T53 实施任务、依赖和验收标准
 - `docs/15-skill-batch-review-script-user-guide.md`：批量审查脚本配置、逐仓库执行、AI 结果导入、报告、清理和排障说明
+- `docs/16-skill-batch-review-quick-start.md`：公司配置模板、一键启动器与 Claude Code Skill 触发说明
 - `batch-review/`：存量 Skill 批量审查程序、脱敏配置样例和本地测试
-- `skills/skill-security-review/`：供 Claude Code 使用的只读 AI 安全与质量审查 Skill
+- `.claude/skills/skill-security-review/`：供 Claude Code 自动发现和调用的项目级只读 AI 安全与质量审查入口（参考 `skill-vetter`/`skill-auditor`，非上游副本）
 
-当前 `batch-review/` 已实现逐仓库两阶段流程并通过本地模拟测试。真实批量运行前仍必须取得脱敏 CSV/status 枚举、Gerrit 只读 SSH 参数、批准的扫描器版本与路径、公司内网模型标识、目录权限和首批小样本仓库；不得用示例占位符直接运行。
+当前 `batch-review/` 已实现逐仓库两阶段流程，支持 `test/skill_summary.csv` 的正式字段和中文状态，并通过本地模拟测试。正式批量运行前仍必须取得 Gerrit 只读 SSH 参数、公司内网源中的固定版本扫描器 wheel、公司内网模型标识、目录权限和首批小样本仓库；扫描节点推荐 CentOS/Linux 与 Python 3.12/3.13，不得用示例占位符或 Python 3.14 直接运行首批正式扫描。
