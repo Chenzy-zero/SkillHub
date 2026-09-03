@@ -19,6 +19,7 @@ sys.path.insert(0, str(SRC_DIR))
 from skill_batch_review.inventory import (  # noqa: E402
     INVENTORY_COLUMNS,
     LEGACY_INVENTORY_COLUMNS,
+    InventoryError,
     InventoryHeaderError,
     InventoryLoader,
     InventoryRowError,
@@ -105,6 +106,7 @@ class InventoryParsingTests(unittest.TestCase):
 
         self.assertEqual(document.raw_csv_sha256, hashlib.sha256(raw).hexdigest())
         self.assertEqual(document.source_csv_sha256, document.raw_csv_sha256)
+        self.assertEqual(document.source_encoding, "utf-8-sig")
         self.assertEqual(document.headers, INVENTORY_COLUMNS)
         self.assertEqual(len(document.rows), 1)
         row = document.rows[0]
@@ -113,6 +115,39 @@ class InventoryParsingTests(unittest.TestCase):
         self.assertEqual(row.raw_status, "active")
         self.assertEqual(row.security_reviewed, "是")
         self.assertEqual(row.source_row_numbers, (2,))
+
+    def test_gbk_csv_is_auto_decoded_and_source_bytes_are_preserved(self):
+        text = csv_text(
+            inventory_row(skill_name="中文技能", security_reviewed="否", status="启用")
+        )
+        raw = text.encode("gbk")
+        document = parse_inventory_csv(
+            raw,
+            status_mapping={"启用": "ACTIVE"},
+        )
+
+        self.assertEqual(document.source_encoding, "gb18030")
+        self.assertEqual(document.raw_csv_sha256, hashlib.sha256(raw).hexdigest())
+        self.assertEqual(document.rows[0].skill_name, "中文技能")
+        self.assertEqual(document.rows[0].status, "ACTIVE")
+
+    def test_utf16_excel_csv_is_auto_decoded(self):
+        text = csv_text(
+            inventory_row(skill_name="Excel技能", security_reviewed="否", status="启用")
+        )
+        raw = text.encode("utf-16")
+        document = parse_inventory_csv(
+            raw,
+            status_mapping={"启用": "ACTIVE"},
+        )
+
+        self.assertEqual(document.source_encoding, "utf-16-le")
+        self.assertEqual(document.raw_csv_sha256, hashlib.sha256(raw).hexdigest())
+        self.assertEqual(document.rows[0].skill_name, "Excel技能")
+
+    def test_unknown_binary_encoding_is_rejected_clearly(self):
+        with self.assertRaisesRegex(InventoryError, "UTF-8, UTF-16 with BOM, or GBK/GB18030"):
+            parse_inventory_csv(b"\xff\xff\xff", status_mapping=STATUS_MAP)
 
     def test_header_must_contain_exactly_the_seven_fixed_columns(self):
         base = list(INVENTORY_COLUMNS)

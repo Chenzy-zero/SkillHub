@@ -14,6 +14,7 @@ line numbers remain available for audit.
 
 from __future__ import annotations
 
+import codecs
 import csv
 import hashlib
 import io
@@ -339,6 +340,7 @@ class InventoryDocument:
     raw_rows: tuple[InventoryRow, ...]
     raw_csv_sha256: str
     headers: tuple[str, ...] = INVENTORY_COLUMNS
+    source_encoding: str = "utf-8"
 
     @property
     def csv_sha256(self) -> str:
@@ -389,13 +391,37 @@ def _resolve_status_mapping(
     return mapping
 
 
-def _decode_csv(raw_bytes: bytes) -> str:
-    try:
-        # utf-8-sig accepts ordinary UTF-8 and removes exactly one leading BOM
-        # for parsing.  The original bytes remain unchanged for hashing.
-        return raw_bytes.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise InventoryError("CSV must be UTF-8 encoded") from exc
+def _decode_csv(raw_bytes: bytes) -> tuple[str, str]:
+    """Decode common Excel/Git CSV encodings without changing source bytes.
+
+    BOM-based encodings are authoritative.  Files without a BOM are decoded
+    as strict UTF-8 first, then GB18030, which is a superset of GBK/GB2312.
+    Deliberately avoiding probabilistic detection prevents a damaged file from
+    being silently interpreted as an unrelated legacy encoding.
+    """
+
+    bom_encodings = (
+        (codecs.BOM_UTF32_LE, "utf-32", "utf-32-le"),
+        (codecs.BOM_UTF32_BE, "utf-32", "utf-32-be"),
+        (codecs.BOM_UTF8, "utf-8-sig", "utf-8-sig"),
+        (codecs.BOM_UTF16_LE, "utf-16", "utf-16-le"),
+        (codecs.BOM_UTF16_BE, "utf-16", "utf-16-be"),
+    )
+    for bom, codec, label in bom_encodings:
+        if raw_bytes.startswith(bom):
+            try:
+                return raw_bytes.decode(codec), label
+            except UnicodeDecodeError as exc:
+                raise InventoryError(f"CSV has an invalid {label} byte sequence") from exc
+
+    for codec, label in (("utf-8", "utf-8"), ("gb18030", "gb18030")):
+        try:
+            return raw_bytes.decode(codec), label
+        except UnicodeDecodeError:
+            continue
+    raise InventoryError(
+        "CSV encoding is not supported; use UTF-8, UTF-16 with BOM, or GBK/GB18030"
+    )
 
 
 def _read_records(text: str) -> tuple[tuple[str, ...], list[tuple[int, tuple[str, ...]]]]:
@@ -600,7 +626,7 @@ def parse_inventory_csv(
         raise TypeError("source must be CSV text or bytes")
 
     raw_csv_sha256 = hashlib.sha256(raw_bytes).hexdigest()
-    text = _decode_csv(raw_bytes)
+    text, source_encoding = _decode_csv(raw_bytes)
     header, records = _read_records(text)
     parsed_rows = tuple(
         _build_row(row_number, header, values, mapping)
@@ -639,6 +665,7 @@ def parse_inventory_csv(
         raw_rows=raw_rows,
         raw_csv_sha256=raw_csv_sha256,
         headers=tuple(header),
+        source_encoding=source_encoding,
     )
 
 
@@ -648,7 +675,7 @@ def load_inventory_csv(
     *,
     status_map: Mapping[str, str] | None = None,
 ) -> InventoryDocument:
-    """Load and parse a UTF-8 CSV file from ``path``."""
+    """Load and parse a supported CSV file from ``path`` without rewriting it."""
 
     file_path = Path(path)
     try:

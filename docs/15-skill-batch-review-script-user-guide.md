@@ -351,7 +351,19 @@ id-001,jira-query,team/Skill-CM,refs/heads/main,tools/jira-query,111111111111111
 
 旧清单的 `lasted_commited` 仍兼容，但不能与 `latest_commitid` 同时出现。两列同时出现会因版本来源不明确而拒绝导入。
 
-### 6.3 重要规则
+### 6.3 CSV 编码兼容
+
+执行人员不需要提前把 CSV 手工转换为 UTF-8。程序按以下顺序自动识别：
+
+1. UTF-8 和 UTF-8 BOM；
+2. 带 BOM 的 UTF-16 LE/BE（Windows Excel 常见）；
+3. GB18030（兼容 GBK 和 GB2312）。
+
+程序只在内存中解码，不修改原始 CSV。批次清单和结果 JSON 同时保存
+`inventory_csv_encoding` 与原文件 SHA-256，确保来源可追溯。没有 BOM 的 UTF-16 或其他
+未知编码会被拒绝，不使用概率猜测，避免中文或路径被静默解码成错误内容。
+
+### 6.4 重要规则
 
 - `latest_commitid`（或兼容字段 `lasted_commited`）不是最终审查版本；
 - 脚本下载仓库后会重新冻结分支版本并与 CSV 对账；
@@ -359,7 +371,7 @@ id-001,jira-query,team/Skill-CM,refs/heads/main,tools/jira-query,111111111111111
 - 完全重复的 CSV 行只执行一次，但保留全部原始行号；
 - 同一来源出现不同 Commit 或不同状态时会标记输入冲突；
 - 未知 `status` 会直接阻止导入，不会默认当作有效；
-- 原始 CSV 会计算 SHA-256，脚本不会改写它。
+- 原始 CSV 会计算 SHA-256 并记录识别编码，脚本不会改写它。
 
 ## 7. 配置文件说明
 
@@ -1152,6 +1164,7 @@ workspace.root 中的对应 Skill 快照
 正式处理几百个 Skill 前，建议选择 2～5 个仓库并逐项确认：
 
 - [ ] CSV 原始 SHA-256 已记录；
+- [ ] CSV 识别编码已记录且中文、仓库名和 Skill 路径显示正常；
 - [ ] 状态映射经过业务确认；
 - [ ] Gerrit 使用只读 SSH；
 - [ ] 仓库白名单仅包含试运行目标；

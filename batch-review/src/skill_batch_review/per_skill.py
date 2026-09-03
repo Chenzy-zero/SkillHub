@@ -647,6 +647,7 @@ def write_skill_result_tables(
             "schema_version": "1.0",
             "batch_id": batch_id,
             "inventory_csv_sha256": inventory.raw_csv_sha256,
+            "inventory_csv_encoding": inventory.source_encoding,
             "result_count": len(results),
             "skills": [dict(results[row.source_row_id]) for row in inventory.rows if row.source_row_id in results],
         },

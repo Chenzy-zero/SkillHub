@@ -60,6 +60,9 @@ cp batch-review/config/review.company.example.toml \
 配置中不要填写 Git 密码、SSH 私钥、模型密钥或 pip 密码。认证信息使用服务器已有的
 SSH 配置、环境变量或公司的密钥管理方式提供。
 
+CSV 可直接使用 UTF-8、UTF-8 BOM、带 BOM 的 UTF-16 或 GBK/GB18030，无需在 Excel 中
+另存转换。程序不会修改源文件，并会在批次记录中保存识别编码和原始 SHA-256。
+
 ## 3. 安装
 
 批处理程序支持 Python 3.11～3.14；扫描器安装支持 Python 3.12～3.14。Windows 和 Linux

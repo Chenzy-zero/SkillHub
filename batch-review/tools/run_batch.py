@@ -155,6 +155,7 @@ def _new_state(config: ReviewConfig, batch_id: str) -> dict[str, Any]:
         "config_sha256": _sha256(config.path),
         "inventory_csv": str(config.batch.inventory_csv),
         "inventory_csv_sha256": inventory.raw_csv_sha256,
+        "inventory_csv_encoding": inventory.source_encoding,
         "source_row_count": inventory.raw_row_count,
         "execution_record_count": inventory.row_count,
         "current_repository": None,

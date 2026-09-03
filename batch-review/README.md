@@ -28,7 +28,7 @@ CSV 台账
 
 ## 1. 已实现模块
 
-- 七列 CSV 的严格读取、原始文件摘要、去重、冲突和状态映射；
+- CSV 的 UTF-8/UTF-16/GBK 自动识别、原始文件摘要、严格读取、去重、冲突和状态映射；
 - 仓库级执行计划，只处理配置中明确列入 `included_statuses` 的状态；
 - Gerrit SSH 地址受控生成、单仓库 mirror、处理仓库时冻结分支版本并完成 Commit 对账；
 - 按 `repo_name + skill_path` 比较路径最近变更时间，保留跨分支事实；
@@ -110,6 +110,10 @@ skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewe
 ```
 
 旧字段 `lasted_commited` 继续兼容，但不能与 `latest_commitid` 同时出现。版本字段仅作为 `inventory_revision` 提示，实际审查版本在仓库下载后重新冻结为 `source_revision`。
+
+CSV 不要求人工转换为 UTF-8。程序自动识别 UTF-8、UTF-8 BOM、带 BOM 的 UTF-16，以及
+Windows Excel 常见的 GBK/GB18030；原文件不会被改写，识别出的编码和原始文件 SHA-256
+会写入批次记录。其他编码会明确报错，避免错误猜测导致字段内容被静默改坏。
 
 ### 内网 pip 安装静态扫描器
 

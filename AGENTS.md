@@ -184,6 +184,7 @@ status
 已确认规则：
 
 - 正式清单还包含 `skill_id`、`update_time`、`history_id` 追溯字段；程序完整保留但不把它们当作安全结论；
+- CSV 自动兼容 UTF-8、UTF-8 BOM、带 BOM 的 UTF-16 和 GBK/GB18030；程序不得改写原文件，批次记录必须同时保存识别编码和原始文件 SHA-256；
 - `latest_commitid` 内部保存为 `inventory_revision`，不能直接当作最终审查版本；旧拼写 `lasted_commited` 仅作为兼容字段，不能与新字段同时出现；
 - 审查前必须从 Gerrit 冻结实际来源版本，并与 CSV、分支和 Skill 路径对账；
 - Source 事实身份仍包含 branch，不删除多分支来源；批量审查选择视图按 `repo_name + normalized_skill_path` 比较各分支中该路径最近变化时间，只审常规最新候选；
