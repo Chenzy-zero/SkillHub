@@ -456,6 +456,10 @@ def _policy_version(record: Mapping[str, Any]) -> str:
     return _text(_first(record, ("review_policy_version",), ("policy_version",), ("ai_review", "policy_version"), default=""))
 
 
+def _reuse_value(record: Mapping[str, Any], key: str) -> str:
+    return _text(_first(record, (key,), ("reuse", key), default=""))
+
+
 def _status_values(record: Mapping[str, Any]) -> list[str]:
     statuses: list[str] = []
     for key in ("status", "task_status", "snapshot_status", "static_status", "ai_status", "candidate_status"):
@@ -554,6 +558,13 @@ def _normalized_record(record: Mapping[str, Any], *, batch_id: str) -> dict[str,
         "source_selection_status": selection,
         "review_policy_version": _policy_version(record),
         "reviewed_at": _reviewed_at(record),
+        "reuse_status": _reuse_value(record, "status") if _upper(record.get("status")) == "RESULT_REUSED" else _reuse_value(record, "reuse_status"),
+        "reused_from_batch_id": _reuse_value(record, "reused_from_batch_id"),
+        "reused_from_task_id": _reuse_value(record, "reused_from_task_id"),
+        "reused_from_evidence_ref": _reuse_value(record, "reused_from_evidence_ref"),
+        "reuse_reason": _reuse_value(record, "reason") or _reuse_value(record, "reuse_reason"),
+        "content_compare_method": _reuse_value(record, "comparison_method"),
+        "timestamp_ignored": bool(record.get("timestamp_ignored")),
         "failure_reason": _text(_first(record, ("failure_reason",), ("error_message",), ("error",), default="")),
         "retry_required": _needs_retry(record),
         "is_failure": _is_failure(record),
@@ -589,6 +600,13 @@ DETAIL_FIELDS = (
     "source_selection_status",
     "review_policy_version",
     "reviewed_at",
+    "reuse_status",
+    "reused_from_batch_id",
+    "reused_from_task_id",
+    "reused_from_evidence_ref",
+    "reuse_reason",
+    "content_compare_method",
+    "timestamp_ignored",
     "failure_reason",
     "retry_required",
 )
@@ -664,6 +682,7 @@ def build_batch_summary(
         "security_decision_counts": security_counts,
         "quality_level_distribution": quality_counts,
         "candidate_count": candidate_count,
+        "reused_result_count": sum(row["reuse_status"] == "RESULT_REUSED" for row in rows),
         "failure_count": failure_count,
         "retry_pending_count": retry_count,
         "tool_failure_or_incomplete_count": sum(

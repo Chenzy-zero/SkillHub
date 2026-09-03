@@ -121,6 +121,9 @@ class WorkspaceConfig:
     evidence_root: Path
     candidate_root: Path
     manifest_root: Path
+    git_download_root: Path
+    skills_root: Path
+    results_root: Path
     clean_after_repository: bool = True
     keep_failed_workspace: bool = False
 
@@ -379,6 +382,9 @@ class ReviewConfig:
             "evidence_root": str(self.workspace.evidence_root),
             "candidate_root": str(self.workspace.candidate_root),
             "manifest_root": str(self.workspace.manifest_root),
+            "git_download_root": str(self.workspace.git_download_root),
+            "skills_root": str(self.workspace.skills_root),
+            "results_root": str(self.workspace.results_root),
             "gerrit_url_template": self.gerrit.ssh_url_template,
             "scanners": {
                 name: {"enabled": item.enabled, "version": item.version}
@@ -477,6 +483,24 @@ def load_config(path: "str | Path") -> ReviewConfig:
             base_dir=base_dir,
             default=".batch-review/manifests",
         ),
+        git_download_root=_path(
+            workspace_data.get("git_download_root"),
+            "workspace.git_download_root",
+            base_dir=base_dir,
+            default=".batch-review/git_download",
+        ),
+        skills_root=_path(
+            workspace_data.get("skills_root"),
+            "workspace.skills_root",
+            base_dir=base_dir,
+            default=".batch-review/skills",
+        ),
+        results_root=_path(
+            workspace_data.get("results_root"),
+            "workspace.results_root",
+            base_dir=base_dir,
+            default=".batch-review/results",
+        ),
         clean_after_repository=_bool(
             workspace_data.get("clean_after_repository"),
             "workspace.clean_after_repository",
@@ -492,6 +516,8 @@ def load_config(path: "str | Path") -> ReviewConfig:
         "evidence_root": workspace.evidence_root,
         "candidate_root": workspace.candidate_root,
         "manifest_root": workspace.manifest_root,
+        "skills_root": workspace.skills_root,
+        "results_root": workspace.results_root,
     }
     for name, protected in protected_roots.items():
         if protected == workspace.root or protected.is_relative_to(workspace.root):
@@ -509,6 +535,16 @@ def load_config(path: "str | Path") -> ReviewConfig:
                 raise ConfigError(
                     f"workspace.{left_name} and workspace.{right_name} must be separate directories"
                 )
+
+    for name, protected in protected_roots.items():
+        if (
+            protected == workspace.git_download_root
+            or protected.is_relative_to(workspace.git_download_root)
+            or workspace.git_download_root.is_relative_to(protected)
+        ):
+            raise ConfigError(
+                f"workspace.{name} and workspace.git_download_root must be separate directories"
+            )
 
     gerrit_data = _section(root, "gerrit")
     allowed_repositories_value = gerrit_data.get("allowed_repositories", [])

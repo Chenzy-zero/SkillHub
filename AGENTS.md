@@ -17,6 +17,12 @@
 > 当前批量审查使用说明：`docs/15-skill-batch-review-script-user-guide.md`
 >
 > 当前批量审查快速入口：`docs/16-skill-batch-review-quick-start.md`
+>
+> 当前逐 Skill 需求：`docs/17-per-skill-review-requirements.md`
+>
+> 当前逐 Skill 设计：`docs/18-per-skill-review-design.md`
+>
+> 当前逐 Skill 任务：`docs/19-per-skill-review-implementation-tasks.md`
 
 ## 1. 当前项目范围
 
@@ -391,6 +397,9 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 - `docs/14-skill-batch-review-implementation-tasks.md`：批量审查 T00–T53 实施任务、依赖和验收标准
 - `docs/15-skill-batch-review-script-user-guide.md`：批量审查脚本配置、逐仓库执行、AI 结果导入、报告、清理和排障说明
 - `docs/16-skill-batch-review-quick-start.md`：公司配置模板、一键启动器与 Claude Code Skill 触发说明
+- `docs/17-per-skill-review-requirements.md`：逐 Skill 下载、归档、结果和筛选需求
+- `docs/18-per-skill-review-design.md`：逐 Skill partial fetch、目录、复用和 JSON/CSV 设计
+- `docs/19-per-skill-review-implementation-tasks.md`：逐 Skill 审查实施任务与验收场景
 - `batch-review/`：存量 Skill 批量审查程序、脱敏配置样例和本地测试
 - `.claude/skills/skill-security-review/`：供 Claude Code 自动发现和调用的项目级只读 AI 安全与质量审查入口（参考 `skill-vetter`/`skill-auditor`，非上游副本）
 

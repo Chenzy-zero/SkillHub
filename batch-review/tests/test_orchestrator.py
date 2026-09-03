@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from skill_batch_review.config import load_config
@@ -27,7 +28,11 @@ SCHEMA = REPO_ROOT / ".claude/skills/skill-security-review/references/review-res
 
 
 class ScannerRunner:
+    def __init__(self):
+        self.call_count = 0
+
     def run(self, argv, *, timeout_seconds, cwd=None, env=None):
+        self.call_count += 1
         command = tuple(argv)
         output = Path(command[command.index("--output") + 1])
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -267,6 +272,135 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
         )
         self.assertFalse(prepared.mirror_path.exists())
         self.assertTrue(Path(results[0]["candidate"]["package_path"]).is_dir())
+
+    def test_same_root_name_and_identical_content_reuses_only_approved_result(self) -> None:
+        source, revision = self.make_source_repository()
+        config = self.config()
+        runner = ScannerRunner()
+        adapters = {
+            "cisco": CiscoSkillScannerAdapter(runner=runner, tool_version="1.0"),
+            "skillspector": SkillSpectorAdapter(runner=runner, tool_version="1.0"),
+        }
+
+        def sync(_repository: str, destination: Path) -> Path:
+            subprocess.run(
+                ["git", "clone", "--mirror", str(source), str(destination)],
+                check=True,
+                capture_output=True,
+            )
+            return destination
+
+        first_rows = plan_repositories(
+            self.inventory(revision), included_statuses=config.batch.included_statuses
+        )[1].included_rows
+        first = prepare_repository(
+            config,
+            batch_id="batch-source",
+            repository="team/repo",
+            rows=first_rows,
+            mirror_sync=sync,
+            adapters=adapters,
+        )
+        self.assertEqual(runner.call_count, 2)
+        ai_results = self.root / "ai-results-source"
+        ai_results.mkdir()
+        task = first.tasks[0]
+        (ai_results / f"{task.task_id}.json").write_text(
+            json.dumps(valid_ai_result(task.task_id, revision, task.snapshot.skill_digest)),
+            encoding="utf-8",
+        )
+        finalize_repository(
+            config,
+            batch_id="batch-source",
+            repository_index=first.index_path,
+            ai_results_dir=ai_results,
+        )
+
+        copy_csv = (
+            "skill_name,repo_name,branch,skill_path,lasted_commited,security_reviewed,status\n"
+            f"renamed-display,team/repo-copy,main,skills/sample,{revision},否,active\n"
+        )
+        copy_inventory = parse_inventory_csv(copy_csv, status_mapping={"active": "ACTIVE"})
+        copy_rows = plan_repositories(
+            copy_inventory, included_statuses=config.batch.included_statuses
+        )[0].included_rows
+        second = prepare_repository(
+            config,
+            batch_id="batch-reuse",
+            repository="team/repo-copy",
+            rows=copy_rows,
+            mirror_sync=sync,
+            adapters=adapters,
+        )
+        self.assertEqual(len(second.tasks), 0)
+        self.assertEqual(len(second.reused_tasks), 1)
+        self.assertEqual(runner.call_count, 2, "reused content must not run either scanner")
+        reused_results = finalize_repository(
+            config,
+            batch_id="batch-reuse",
+            repository_index=second.index_path,
+            ai_results_dir=self.root / "unused-ai-results",
+        )
+        self.assertEqual(reused_results[0]["reuse_status"], "RESULT_REUSED")
+        self.assertEqual(reused_results[0]["reused_from_task_id"], task.task_id)
+        self.assertEqual(reused_results[0]["security_decision"], "PASS")
+        self.assertEqual(reused_results[0]["candidate_status"], "EXPORTED_LOCAL")
+
+        changed_policy_config = replace(
+            config, ai=replace(config.ai, policy_version="policy-2")
+        )
+        policy_csv = (
+            "skill_name,repo_name,branch,skill_path,lasted_commited,security_reviewed,status\n"
+            f"sample,team/repo-policy,main,skills/sample,{revision},否,active\n"
+        )
+        policy_inventory = parse_inventory_csv(policy_csv, status_mapping={"active": "ACTIVE"})
+        policy_rows = plan_repositories(
+            policy_inventory, included_statuses=changed_policy_config.batch.included_statuses
+        )[0].included_rows
+        policy_changed = prepare_repository(
+            changed_policy_config,
+            batch_id="batch-policy-changed",
+            repository="team/repo-policy",
+            rows=policy_rows,
+            mirror_sync=sync,
+            adapters=adapters,
+        )
+        self.assertEqual(len(policy_changed.reused_tasks), 0)
+        self.assertEqual(len(policy_changed.tasks), 1)
+        self.assertEqual(runner.call_count, 4, "changed policy must force a full review")
+
+        (source / "skills/sample/guide.txt").write_text("changed bytes\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+        subprocess.run(
+            ["git", "-C", str(source), "commit", "-m", "change skill"],
+            check=True,
+            capture_output=True,
+        )
+        changed_revision = subprocess.run(
+            ["git", "-C", str(source), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        changed_csv = (
+            "skill_name,repo_name,branch,skill_path,lasted_commited,security_reviewed,status\n"
+            f"sample,team/repo-changed,main,skills/sample,{changed_revision},否,active\n"
+        )
+        changed_inventory = parse_inventory_csv(changed_csv, status_mapping={"active": "ACTIVE"})
+        changed_rows = plan_repositories(
+            changed_inventory, included_statuses=config.batch.included_statuses
+        )[0].included_rows
+        changed = prepare_repository(
+            config,
+            batch_id="batch-changed",
+            repository="team/repo-changed",
+            rows=changed_rows,
+            mirror_sync=sync,
+            adapters=adapters,
+        )
+        self.assertEqual(len(changed.reused_tasks), 0)
+        self.assertEqual(len(changed.tasks), 1)
+        self.assertEqual(runner.call_count, 6, "same root name with changed content must scan")
 
 
 if __name__ == "__main__":

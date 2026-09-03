@@ -11,6 +11,36 @@
 > 实施任务：[`14-skill-batch-review-implementation-tasks.md`](14-skill-batch-review-implementation-tasks.md)
 >
 > 快速入口：[`16-skill-batch-review-quick-start.md`](16-skill-batch-review-quick-start.md)
+>
+> 逐 Skill 设计：[`18-per-skill-review-design.md`](18-per-skill-review-design.md)
+
+## 当前默认启动方式
+
+`batch-review/run.sh` 和 `run.cmd` 已切换为逐 Skill 启动器。CSV 中每个纳入行必须有唯一
+`skill_id`，并由上游保证是需要审查的最终版本。默认流程为：
+
+```text
+逐 Skill partial fetch
+→ 只导出 skill_path
+→ skills/<skill_id>/<skill_name>/
+→ 静态与 AI 审查或结果复用
+→ skills/<skill_id>/review-result.json
+→ results/<batch_id>/skill-review-results.csv/json
+→ 清理当前 git_download
+```
+
+新增配置：
+
+```toml
+[workspace]
+git_download_root = "/data/skill-review/git_download"
+skills_root = "/data/skill-review/skills"
+results_root = "/data/skill-review/results"
+```
+
+Gerrit 必须支持 `--filter=blob:none`。服务端忽略过滤时程序返回
+`PARTIAL_CLONE_UNSUPPORTED`，不会静默退回完整仓库下载。可选清单字段统一使用
+`product_line`、`user_name`、`user_email`。
 
 ## 1. 文档目的
 
@@ -59,22 +89,22 @@
 
 ## 3. 当前版本的执行限制
 
-### 3.1 按仓库逐个执行
+### 3.1 默认按 Skill 逐个执行
 
-启动器一次只准备一个仓库。对于 100 多个仓库，先生成仓库计划，再由 `start` 和
-`advance` 按计划顺序重复以下流程：
+默认启动器一次只准备一个 CSV Skill。由 `start` 和 `advance` 按输入顺序重复以下流程：
 
 ```text
-准备仓库
-→ 完成该仓库全部 AI 审查
+准备一个 Skill
+→ 完成该 Skill 的 AI 审查或确认复用
 → 导入结果
-→ 核对证据和候选
-→ 清理该仓库工作区
-→ 处理下一个仓库
+→ 写入单项和批次结果
+→ 清理该 Skill 的 git_download
+→ 处理下一个 Skill
 ```
 
-`batch-review/run.sh` 与 `run.cmd` 已负责记住当前进度、完成当前仓库并准备下一个仓库。
+`batch-review/run.sh` 与 `run.cmd` 已负责记住当前进度、完成当前 Skill 并准备下一个 Skill。
 AI 审查仍是明确的人工检查点，因此不会用一条无人值守命令自动跑完整个批次。
+原来的 `skill-batch-review prepare-repository/finalize-repository` 保留为兼容入口。
 
 ### 3.2 Claude Code 必须人工执行
 
@@ -876,7 +906,9 @@ skill-security-review-report.html
 ```
 
 `skill-security-review-report.html` 是可离线打开的管理报告，包含 Skill 清单、两套静态
-检查与 AI 审查状态、安全结论、质量得分、风险分布和脱敏问题明细。原始报告和完整证据
+检查与 AI 审查状态、安全结论、质量得分、风险分布、结果复用数量和脱敏问题明细。
+被复用的 Skill 会显示 `RESULT_REUSED`、复用原因、原批次、原任务、内容比较方式和
+“忽略时间戳”说明。原始报告和完整证据
 不会嵌入 HTML，仍保留在受限证据区。
 
 报告是脱敏汇总，不替代受限证据。
@@ -951,6 +983,11 @@ skill-security-review-report.html
 ```
 
 普通仓库索引只保存必要的引用和脱敏摘要；完整 finding、扫描 stdout/stderr 和 AI 原始结果保存在受限证据区。
+
+已通过结果的复用索引位于 `<manifest_root>/_approved-result-reuse/`。运行程序会先按 Skill
+Root 目录名称定位候选，再使用快照阶段已有的整包 SHA-256 Digest 比对；时间戳不参与
+摘要。只有安全和质量都通过、扫描器配置、策略、AI Skill、模型、Schema、质量门槛均
+一致且原证据仍存在时，才跳过静态扫描和 AI 审查。名称相同但内容不同会正常重审。
 
 ## 10. 安全结论说明
 

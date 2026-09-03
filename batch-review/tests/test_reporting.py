@@ -116,6 +116,27 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(len(candidates["candidates"]), 2)
             self.assertEqual(candidates["candidates"][0]["reviewed_source_revision"], REVISION)
 
+    def test_reused_result_is_counted_and_explained_in_html(self) -> None:
+        record = complete_record()
+        record.update(
+            {
+                "reuse_status": "RESULT_REUSED",
+                "reused_from_batch_id": "batch-source",
+                "reused_from_task_id": "task-source",
+                "comparison_method": "CANONICAL_SKILL_PACKAGE_SHA256",
+                "timestamp_ignored": True,
+                "reason": "Skill Root 名称相同，且规范化包内容摘要完全一致；文件时间戳不参与比较。",
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_batch_reports([record], Path(temp_dir), batch_id="batch-reuse")
+            summary = json.loads(paths.summary.read_text(encoding="utf-8"))
+            page = paths.html.read_text(encoding="utf-8")
+            self.assertEqual(summary["reused_result_count"], 1)
+            self.assertIn("RESULT_REUSED", page)
+            self.assertIn("batch-source", page)
+            self.assertIn("忽略时间戳", page)
+
     def test_failures_and_candidates_are_disjoint_derived_lists(self) -> None:
         good = complete_record("good")
         failed = complete_record("failed")

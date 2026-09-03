@@ -13,6 +13,9 @@ root = "/data/skill-review/work"
 evidence_root = "/data/skill-review/restricted-evidence"
 candidate_root = "/data/skill-review/private-candidates"
 manifest_root = "/data/skill-review/manifests"
+git_download_root = "/data/skill-review/git_download"
+skills_root = "/data/skill-review/skills"
+results_root = "/data/skill-review/results"
 clean_after_repository = true
 keep_failed_workspace = false
 

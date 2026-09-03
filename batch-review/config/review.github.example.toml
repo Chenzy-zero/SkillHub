@@ -11,6 +11,9 @@ root = "../.batch-review/github-validation/work"
 evidence_root = "../.batch-review/github-validation/restricted-evidence"
 candidate_root = "../.batch-review/github-validation/private-candidates"
 manifest_root = "../.batch-review/github-validation/manifests"
+git_download_root = "../.batch-review/github-validation/git_download"
+skills_root = "../.batch-review/github-validation/skills"
+results_root = "../.batch-review/github-validation/results"
 clean_after_repository = true
 keep_failed_workspace = true
 

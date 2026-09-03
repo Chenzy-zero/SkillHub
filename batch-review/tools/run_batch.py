@@ -141,6 +141,7 @@ def _new_state(config: ReviewConfig, batch_id: str) -> dict[str, Any]:
             "repository_index": None,
             "result_index": None,
             "task_ids": [],
+            "reused_task_ids": [],
         }
         for plan in plans
     ]
@@ -274,6 +275,7 @@ def _prepare_next(
     entry["status"] = "WAITING_FOR_AI"
     entry["repository_index"] = str(prepared.index_path)
     entry["task_ids"] = [task.task_id for task in prepared.tasks]
+    entry["reused_task_ids"] = [task.task_id for task in prepared.reused_tasks]
     state["current_repository"] = repository
     state["status"] = "WAITING_FOR_AI"
     _save_state(config, state)

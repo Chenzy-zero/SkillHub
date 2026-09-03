@@ -53,6 +53,14 @@ from .git_source import (
 )
 from .inventory import InventoryDocument, InventoryRow
 from .review_policy import PolicyResult, evaluate_policy
+from .result_reuse import (
+    COMPARE_METHOD,
+    REUSE_STATUS,
+    build_review_fingerprint,
+    find_reusable_result,
+    publish_reusable_result,
+    skill_root_name,
+)
 from .scanners import CiscoSkillScannerAdapter, ScannerAdapter, SkillSpectorAdapter
 from .snapshot import PackageEntry, SnapshotResult, export_skill_snapshot
 
@@ -106,13 +114,35 @@ class PreparedTask:
 
 
 @dataclass(frozen=True, slots=True)
+class ReusedTask:
+    task_id: str
+    source: ResolvedSource
+    snapshot: SnapshotResult
+    reuse_record: Mapping[str, Any]
+    evidence_root: Path
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "source": self.source.to_dict(),
+            "snapshot": self.snapshot.manifest_dict(),
+            "snapshot_path": str(self.snapshot.snapshot_path),
+            "reuse_record": dict(self.reuse_record),
+            "evidence_root": str(self.evidence_root),
+            "status": REUSE_STATUS,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class RepositoryPreparation:
     repository: str
     mirror_path: Path
     source_records: tuple[ResolvedSource, ...]
     tasks: tuple[PreparedTask, ...]
+    reused_tasks: tuple[ReusedTask, ...]
     conflicts: tuple[Mapping[str, Any], ...]
     pre_ai_results: tuple[Mapping[str, Any], ...]
+    review_fingerprint: Mapping[str, Any]
     index_path: Path
 
     def to_dict(self) -> dict[str, Any]:
@@ -122,8 +152,10 @@ class RepositoryPreparation:
             "mirror_path": str(self.mirror_path),
             "source_records": [record.to_dict() for record in self.source_records],
             "tasks": [task.to_dict() for task in self.tasks],
+            "reused_tasks": [task.to_dict() for task in self.reused_tasks],
             "conflicts": [dict(conflict) for conflict in self.conflicts],
             "pre_ai_results": [dict(result) for result in self.pre_ai_results],
+            "review_fingerprint": dict(self.review_fingerprint),
             "status": "WAITING_FOR_AI_REVIEW" if self.tasks else "NO_AI_TASKS",
         }
 
@@ -408,6 +440,7 @@ def prepare_repository(
 
     resolved_records, conflicts = _resolve_equal_time_conflicts(source_result.records, snapshots)
     active_adapters = dict(adapters or _default_adapters(config))
+    review_fingerprint = build_review_fingerprint(config, active_adapters)
     pre_ai_results: list[Mapping[str, Any]] = []
     conflict_rows = {
         candidate["source_row_id"]
@@ -439,6 +472,7 @@ def prepare_repository(
                 )
             )
     tasks: list[PreparedTask] = []
+    reused_tasks: list[ReusedTask] = []
     for record in resolved_records:
         if not record.selected:
             continue
@@ -468,6 +502,19 @@ def prepare_repository(
             )
             evidence.write_json("final-result.json", pre_result)
             pre_ai_results.append(pre_result)
+            continue
+        root_name = skill_root_name(record.row.skill_path, record.row.skill_name)
+        reusable = find_reusable_result(
+            config,
+            root_name=root_name,
+            skill_digest=snapshot.skill_digest,
+            review_fingerprint=review_fingerprint,
+        )
+        if reusable is not None:
+            reuse_record, _ = reusable
+            reused_tasks.append(
+                ReusedTask(task_id, record, snapshot, reuse_record, evidence.task_root)
+            )
             continue
         scans = _run_static_scans(
             active_adapters,
@@ -532,8 +579,10 @@ def prepare_repository(
         mirror_path,
         resolved_records,
         tuple(tasks),
+        tuple(reused_tasks),
         conflicts,
         tuple(pre_ai_results),
+        review_fingerprint,
         index_path,
     )
     _atomic_json(index_path, preparation.to_dict())
@@ -636,6 +685,140 @@ def _result_summary(
         "evidence_ref": evidence_ref,
         "status": "COMPLETED",
     }
+
+
+def _current_subject(source: Mapping[str, Any], snapshot: Any) -> dict[str, Any]:
+    source_key = source.get("source_key")
+    if not isinstance(source_key, Mapping):
+        raise OrchestrationError("reused task has no source identity")
+    return {
+        "skill_name": source_key.get("skill_name"),
+        "repo_name": source_key.get("repository"),
+        "branch": source_key.get("branch"),
+        "skill_path": source_key.get("skill_path"),
+        "inventory_revision": source.get("inventory_revision"),
+        "source_revision": snapshot.source_revision,
+        "skill_digest_sha256": snapshot.skill_digest,
+    }
+
+
+def _finalize_reused_task(
+    config: ReviewConfig,
+    *,
+    batch_id: str,
+    task: Mapping[str, Any],
+    review_fingerprint: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    task_id = task.get("task_id")
+    source = task.get("source")
+    reuse_record = task.get("reuse_record")
+    if not isinstance(task_id, str) or not isinstance(source, Mapping) or not isinstance(reuse_record, Mapping):
+        raise OrchestrationError("repository index contains a malformed reused task")
+    snapshot = _snapshot_from_task(task)
+    source_key = source.get("source_key")
+    if not isinstance(source_key, Mapping):
+        raise OrchestrationError(f"reused task {task_id} has no source identity")
+    root_name = skill_root_name(str(source_key.get("skill_path") or ""), str(source_key.get("skill_name") or ""))
+    reusable = find_reusable_result(
+        config,
+        root_name=root_name,
+        skill_digest=snapshot.skill_digest,
+        review_fingerprint=review_fingerprint,
+    )
+    if reusable is None or reusable[0].get("source_task_id") != reuse_record.get("source_task_id"):
+        raise OrchestrationError(f"approved reuse source is no longer valid for task {task_id}")
+    approved_record, approved = reusable
+    evidence = EvidenceStore(
+        config.workspace.evidence_root,
+        batch_id,
+        task_id,
+        candidate_root=config.workspace.candidate_root,
+    )
+    notice = {
+        "reuse_status": REUSE_STATUS,
+        "comparison_method": COMPARE_METHOD,
+        "timestamp_ignored": True,
+        "skill_root_name": root_name,
+        "skill_digest": snapshot.skill_digest,
+        "review_fingerprint": dict(review_fingerprint),
+        "reused_from_batch_id": approved_record.get("source_batch_id"),
+        "reused_from_task_id": approved_record.get("source_task_id"),
+        "reused_from_source": approved_record.get("source"),
+        "reused_from_evidence_ref": approved_record.get("source_evidence_ref"),
+        "reason": "Skill Root 名称相同，且规范化包内容摘要完全一致；文件时间戳不参与比较。",
+    }
+    notice_ref = evidence.write_json("result-reuse.json", notice)
+    quality_score = approved.get("quality_score")
+    approved_ai = approved.get("ai_review") if isinstance(approved.get("ai_review"), Mapping) else {}
+    approved_quality = (
+        approved_ai.get("quality_review")
+        if isinstance(approved_ai.get("quality_review"), Mapping)
+        else {}
+    )
+    candidate = export_private_candidate(
+        snapshot,
+        candidate_root=config.workspace.candidate_root,
+        repository=str(source_key["repository"]),
+        skill_path=str(source_key["skill_path"]),
+        source_revision=snapshot.source_revision,
+        skill_digest=snapshot.skill_digest,
+        eligible=True,
+        branch=str(source_key["branch"]),
+        skill_name=str(source_key["skill_name"]),
+        security_decision="PASS",
+        quality_score=int(quality_score),
+        evidence_ref=str(notice_ref.path),
+        evidence_root=config.workspace.evidence_root,
+    ).to_dict()
+    subject = _current_subject(source, snapshot)
+    final_evidence = {
+        "schema_version": "0.1",
+        "task_id": task_id,
+        "source": dict(source),
+        "subject": subject,
+        "static_reports": approved.get("static_reports", []),
+        "ai_review": approved_ai,
+        "security_decision": "PASS",
+        "quality_decision": "PASS",
+        "quality_score": quality_score,
+        "quality_review": approved_quality,
+        "candidate_eligible": True,
+        "candidate_status": "EXPORTED_LOCAL",
+        "candidate": candidate,
+        "findings": approved.get("findings", []),
+        "review_policy_version": approved.get("review_policy_version") or approved_ai.get("policy_version"),
+        "reviewed_at": approved.get("reviewed_at") or approved_ai.get("reviewed_at"),
+        "review_fingerprint": dict(review_fingerprint),
+        **notice,
+        "evidence_ref": str(evidence.task_root),
+        "status": "COMPLETED",
+    }
+    evidence.write_json("final-result.json", final_evidence)
+    scans = approved.get("static_reports") if isinstance(approved.get("static_reports"), list) else []
+    security = approved_ai.get("security_review") if isinstance(approved_ai.get("security_review"), Mapping) else {}
+    return {
+        "schema_version": "0.1",
+        "task_id": task_id,
+        "source_row_id": source.get("source_row_id"),
+        "subject": subject,
+        "source_selection_status": source.get("source_selection_status"),
+        "skill_last_change_revision": source.get("skill_last_change_revision"),
+        "static_reports": [_scan_summary(item) for item in scans if isinstance(item, Mapping)],
+        "ai_review": {"status": "COMPLETED", "security_review": {"verdict": security.get("verdict"), "max_severity": security.get("max_severity")}},
+        "security_decision": "PASS",
+        "quality_decision": "PASS",
+        "quality_score": quality_score,
+        "quality_review": {"score": approved_quality.get("score"), "verdict": approved_quality.get("verdict"), "dimensions": approved_quality.get("dimensions", [])},
+        "candidate_status": "EXPORTED_LOCAL",
+        "candidate": candidate,
+        "review_policy_version": final_evidence.get("review_policy_version"),
+        "reviewed_at": final_evidence.get("reviewed_at"),
+        **notice,
+        "evidence_ref": str(evidence.task_root),
+        "status": "COMPLETED",
+    }
+
+
 def finalize_repository(
     config: ReviewConfig,
     *,
@@ -651,12 +834,27 @@ def finalize_repository(
         raise OrchestrationError(f"cannot read repository index: {exc}") from exc
     if index.get("repository") is None or not isinstance(index.get("tasks"), list):
         raise OrchestrationError("repository index is malformed")
+    reused_tasks = index.get("reused_tasks", [])
+    review_fingerprint = index.get("review_fingerprint")
+    if not isinstance(reused_tasks, list) or not isinstance(review_fingerprint, Mapping):
+        raise OrchestrationError("repository index reuse metadata is malformed")
     pre_ai_results = index.get("pre_ai_results", [])
     if not isinstance(pre_ai_results, list) or any(
         not isinstance(item, Mapping) for item in pre_ai_results
     ):
         raise OrchestrationError("repository index pre_ai_results are malformed")
     results: list[Mapping[str, Any]] = [dict(item) for item in pre_ai_results]
+    for task in reused_tasks:
+        if not isinstance(task, Mapping):
+            raise OrchestrationError("repository index contains a malformed reused task")
+        results.append(
+            _finalize_reused_task(
+                config,
+                batch_id=batch_id,
+                task=task,
+                review_fingerprint=review_fingerprint,
+            )
+        )
     for task in index["tasks"]:
         task_id = task.get("task_id")
         if not isinstance(task_id, str):
@@ -740,10 +938,22 @@ def finalize_repository(
             **policy.to_dict(),
             "candidate_status": "EXPORTED_LOCAL" if candidate else "NOT_ELIGIBLE",
             "candidate": candidate,
+            "review_fingerprint": dict(review_fingerprint),
             "evidence_ref": str(evidence.task_root),
             "status": "COMPLETED",
         }
         evidence.write_json("final-result.json", final_evidence)
+        publish_reusable_result(
+            config,
+            batch_id=batch_id,
+            task_id=task_id,
+            root_name=skill_root_name(str(source_key["skill_path"]), str(source_key["skill_name"])),
+            skill_digest=snapshot.skill_digest,
+            review_fingerprint=review_fingerprint,
+            source_evidence_ref=str(evidence.task_root),
+            source=source,
+            final_result=final_evidence,
+        )
         results.append(
             _result_summary(
                 task_id=task_id,
@@ -788,7 +998,11 @@ def cleanup_repository_workspace(
     if document.get("repository") != repository or not isinstance(document.get("results"), list):
         raise OrchestrationError("repository result index does not match cleanup target")
     original = json.loads(Path(repository_index).read_text(encoding="utf-8"))
-    expected = {task["task_id"] for task in original.get("tasks", [])}
+    expected = {
+        task["task_id"]
+        for group in (original.get("tasks", []), original.get("reused_tasks", []))
+        for task in group
+    }
     completed = {
         result.get("task_id")
         for result in document["results"]
@@ -815,6 +1029,7 @@ def cleanup_repository_workspace(
 __all__ = [
     "OrchestrationError",
     "PreparedTask",
+    "ReusedTask",
     "RepositoryPlan",
     "RepositoryPreparation",
     "cleanup_repository_workspace",

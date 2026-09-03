@@ -13,6 +13,9 @@ root = "../.batch-review/work"
 evidence_root = "../.batch-review/evidence"
 candidate_root = "../.batch-review/candidates"
 manifest_root = "../.batch-review/manifests"
+git_download_root = "../.batch-review/git_download"
+skills_root = "../.batch-review/skills"
+results_root = "../.batch-review/results"
 clean_after_repository = true
 keep_failed_workspace = false
 

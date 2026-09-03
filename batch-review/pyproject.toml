@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skill-batch-review"
 version = "0.2.0"
-description = "Repository-at-a-time batch Skill security review and local candidate workflow"
+description = "One-Skill-at-a-time download, security review, reuse and result workflow"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["jsonschema>=4.21"]

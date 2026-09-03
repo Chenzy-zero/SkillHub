@@ -69,7 +69,14 @@ CORE_INVENTORY_COLUMNS: tuple[str, ...] = (
 # allow-listed so a misspelled required column cannot silently become an
 # ignored extra column.  Their original values are retained in ``raw`` and in
 # the serialised row dictionary.
-TRACE_COLUMNS: tuple[str, ...] = ("skill_id", "update_time", "history_id")
+TRACE_COLUMNS: tuple[str, ...] = (
+    "skill_id",
+    "update_time",
+    "history_id",
+    "product_line",
+    "user_name",
+    "user_email",
+)
 OPTIONAL_INVENTORY_COLUMNS = frozenset(TRACE_COLUMNS)
 REQUIRED_COLUMNS = INVENTORY_COLUMNS
 

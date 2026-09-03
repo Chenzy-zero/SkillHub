@@ -1,6 +1,6 @@
 # Skill 批量安全审查快速使用说明
 
-本文用于第一次配置和日常逐仓库执行。完整字段、输出结构和故障处理见
+本文用于第一次配置和日常逐 Skill 执行。完整字段、输出结构和故障处理见
 [`15-skill-batch-review-script-user-guide.md`](./15-skill-batch-review-script-user-guide.md)。
 
 ## 1. 运行方式
@@ -9,11 +9,12 @@
 
 ```text
 run.sh / run.cmd
-  ├─ 读取 CSV、下载仓库、冻结版本
+  ├─ 读取 CSV，逐 Skill 执行 Blobless Partial Fetch
+  ├─ 只导出目标 Skill 到 skills/<skill_id>/<skill_name>
   ├─ 运行 Cisco AI Skill Scanner 与 SkillSpector
   ├─ 生成 AI 审查交接文件
-  ├─ 校验 AI 结果、汇总结论、生成候选
-  └─ 确认结果持久化后清理当前仓库
+  ├─ 校验 AI 结果，生成单项 JSON 和批次 CSV/JSON
+  └─ 确认结果持久化后清理当前 Skill 的 git_download
 
 /skill-security-review
   └─ 只负责读取一个交接文件和 Skill 快照，输出一份 AI 审查 JSON
@@ -35,7 +36,7 @@ cp batch-review/config/review.company.example.toml \
 | 配置项 | 填写内容 |
 |---|---|
 | `batch.inventory_csv` | Skill 清单路径；仓库内测试清单默认是 `test/skill_summary.csv` |
-| `workspace.*` | 临时区、受限证据区、候选区和清单区的绝对路径 |
+| `workspace.*` | 临时区、受限证据区、清单区、`git_download_root`、`skills_root` 和 `results_root` 的绝对路径 |
 | `gerrit.user/host/port` | Gerrit 只读 SSH 参数 |
 | `gerrit.allowed_repositories` | 首批联调的 1～3 个仓库；正式批次确认后再放开 |
 | `status_mapping` | CSV 中各状态对应 `ACTIVE`、`DELETED` 等内部状态 |
@@ -85,9 +86,10 @@ batch-review\run.cmd plan --config batch-review\config\review.company.toml --bat
 ```
 
 `plan` 只读取配置和 CSV，并在 `workspace.manifest_root` 下生成本地执行计划。它不访问
-Gerrit，也不运行扫描器。计划中的仓库数、排除项和状态应先人工核对。
+Gerrit，也不运行扫描器。计划中的 Skill 数、排除项和状态应先人工核对。逐 Skill 模式要求
+每个纳入行具有唯一且非空的 `skill_id`。
 
-## 5. 启动第一个仓库
+## 5. 启动第一个 Skill
 
 `start` 会访问 Gerrit 并实际运行两套静态扫描器，因此必须显式写 `--execute`：
 
@@ -98,14 +100,13 @@ Gerrit，也不运行扫描器。计划中的仓库数、排除项和状态应�
   --execute
 ```
 
-脚本会一次只下载一个仓库，处理该仓库内本轮选中的全部 Skill，并生成：
+脚本会使用 partial fetch 一次只获取一个 Skill，并生成：
 
-- `ai-review-queue.json`：机器可读的待审任务；
-- `AI_REVIEW_NEXT_STEPS.md`：当前仓库逐项 handoff 和结果保存路径；
+- `ai-review-current.json`：当前 Skill 的 handoff 和结果保存路径；
 - 静态扫描报告、Skill 摘要和冻结版本信息。
 
 `start` 会继续使用 `plan` 已生成的同一批次和固定配置；如果没有预先执行 `plan`，它也会先
-创建计划再准备第一个仓库。批次创建后不得修改该批次使用的配置文件；配置变化应新建批次。
+创建计划再准备第一个 Skill。批次创建后不得修改该批次使用的配置文件；配置变化应新建批次。
 
 ## 6. 调用 AI 审查 Skill
 
@@ -118,7 +119,7 @@ Gerrit，也不运行扫描器。计划中的仓库数、排除项和状态应�
 然后为队列中的每个任务提供以下要求：
 
 ```text
-读取 AI_REVIEW_NEXT_STEPS.md 中本任务对应的 handoff JSON。
+读取 ai-review-current.json 中的 handoff JSON。
 严格按 handoff、项目 Skill 和结果 Schema 审查；不要联网，不要执行被审查内容，
 不要修改快照。只返回 JSON，并将结果保存到该任务的 expected_result 路径。
 ```
@@ -126,7 +127,7 @@ Gerrit，也不运行扫描器。计划中的仓库数、排除项和状态应�
 每个任务必须生成一份独立 JSON。不能把聊天说明、Markdown 代码围栏或多个结果混入同一
 文件；批处理程序会校验 Schema、Digest、规则版本和任务身份，不接受不匹配的结果。
 
-## 7. 完成当前仓库并进入下一个仓库
+## 7. 完成当前 Skill 并进入下一个 Skill
 
 确认当前队列的所有 AI JSON 已保存后执行：
 
@@ -140,14 +141,16 @@ Gerrit，也不运行扫描器。计划中的仓库数、排除项和状态应�
 
 该命令按以下顺序执行：
 
-1. 检查当前仓库的 AI 结果是否齐全；
+1. 检查当前 Skill 的 AI 结果是否齐全；
 2. 校验并合并静态结果与 AI 结果；
-3. 生成审查结论和符合门槛的本地私密候选；
-4. 确认持久化结果存在后，清理当前仓库临时工作区；
-5. 下载并准备下一个仓库。
+3. 在 `skills/<skill_id>/review-result.json` 写入单项结果；
+4. 更新 `results/<batch_id>/` 下的 CSV 和 JSON；
+5. 清理当前 Skill 的 `git_download` 临时目录；
+6. 下载并准备下一个 Skill。
 
-若 AI 结果缺失，命令停止并列出缺失路径，不会清理、不会跳过，也不会进入下一个仓库。
-每完成一次 AI 审查就再次执行同一条 `advance` 命令，直至批次完成并生成汇总报告。
+若 AI 结果缺失，命令停止并列出缺失路径，不会清理、不会跳过，也不会进入下一个 Skill。
+每完成一次 AI 审查就再次执行同一条 `advance` 命令，直至批次完成。HTML 视觉改版后续进行，
+本阶段以单项 JSON 和批次 CSV/JSON 为正式输出。
 
 ## 8. 查看进度
 
@@ -162,12 +165,12 @@ Windows 将 `./batch-review/run.sh` 替换为 `batch-review\run.cmd`。如果 Wi
 
 ## 9. 一键启动的边界
 
-`start` 是第一个仓库的单命令启动入口，`advance` 是每个后续仓库的单命令续跑入口。两者
+`start` 是第一个 Skill 的单命令启动入口，`advance` 是每个后续 Skill 的单命令续跑入口。两者
 之间必须由公司内网模型完成 AI 审查，因此不能安全地做成完全无人值守的一条命令。这个暂停点
 用于防止 AI 结果缺失、结果串批或未经确认就删除临时证据。
 
-程序不会自动 Commit、Push 或上架 SkillHub。通过的内容只写入本地私密候选目录，后续由
-负责人手动同步到私密 Git 中转仓库。
+程序不会自动 Commit、Push 或上架 SkillHub。全部纳管内容写入 `skills_root`，安全通过与否
+由各 `skill_id` 下的 JSON 及批次结果表表示；后续同步动作仍由负责人决定。
 
 ## 10. 使用 GitHub 仓库做联调
 
