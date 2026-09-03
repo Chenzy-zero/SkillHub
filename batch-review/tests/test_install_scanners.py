@@ -42,6 +42,26 @@ class ScannerInstallerTests(unittest.TestCase):
         self.assertIn("--only-binary", command)
         self.assertEqual(command[-1], "cisco-ai-skill-scanner==2.0.13")
 
+    def test_windows_cisco_has_one_pinned_source_build_exception(self):
+        command = MODULE._uv_install_command(
+            Path("resolver/uv"),
+            Path("scanner/python.exe"),
+            MODULE.SCANNERS[0],
+            platform_name="nt",
+        )
+        self.assertIn("--only-binary", command)
+        self.assertEqual(command.count("--no-binary"), 1)
+        self.assertIn("win-unicode-console", command)
+        self.assertEqual(command[-1], "win-unicode-console==0.5")
+
+        linux_command = MODULE._uv_install_command(
+            Path("resolver/uv"),
+            Path("scanner/python"),
+            MODULE.SCANNERS[0],
+            platform_name="posix",
+        )
+        self.assertNotIn("--no-binary", linux_command)
+
     def test_explicit_index_has_priority_over_environment(self):
         with patch.dict(MODULE.os.environ, {"PIP_INDEX_URL": "https://env.example/simple"}):
             value = MODULE._configured_index_url(

@@ -23,6 +23,8 @@ from typing import Sequence
 
 SUPPORTED_PYTHON = {(3, 12), (3, 13), (3, 14)}
 UV_VERSION = "0.12.9"
+WINDOWS_SOURCE_BUILD_PACKAGE = "win-unicode-console"
+WINDOWS_SOURCE_BUILD_REQUIREMENT = "win-unicode-console==0.5"
 
 
 @dataclass(frozen=True)
@@ -124,8 +126,14 @@ def _ensure_uv(*, root: Path, index_url: str | None) -> tuple[Path, dict[str, st
     return executable.resolve(), package_environment
 
 
-def _uv_install_command(uv: Path, python: Path, package: ScannerPackage) -> tuple[str, ...]:
-    return (
+def _uv_install_command(
+    uv: Path,
+    python: Path,
+    package: ScannerPackage,
+    *,
+    platform_name: str | None = None,
+) -> tuple[str, ...]:
+    command = [
         str(uv),
         "pip",
         "install",
@@ -135,7 +143,20 @@ def _uv_install_command(uv: Path, python: Path, package: ScannerPackage) -> tupl
         ":all:",
         "--upgrade",
         package.requirement,
-    )
+    ]
+    platform_value = os.name if platform_name is None else platform_name
+    if platform_value == "nt" and package.name == "cisco":
+        # oletools -> pcodedmp requires this legacy Windows-only package, for
+        # which PyPI publishes no wheel.  Keep the exception exact and local;
+        # every other direct and transitive package remains wheel-only.
+        command.extend(
+            (
+                "--no-binary",
+                WINDOWS_SOURCE_BUILD_PACKAGE,
+                WINDOWS_SOURCE_BUILD_REQUIREMENT,
+            )
+        )
+    return tuple(command)
 
 
 def install_scanner(

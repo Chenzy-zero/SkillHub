@@ -83,8 +83,9 @@ python3.12 batch-review/tools/install_scanners.py \
 
 扫描节点不能访问 GitHub也不使用 Docker。安装脚本先从当前 pip 配置的内网源安装固定版
 `uv==0.12.9`，再用 uv 解析两个固定版本扫描器并建立独立环境。这样可规避 pip 的
-`resolution-too-deep`，不需要手动指定间接依赖版本。安装完成后，把输出的可执行文件路径
-填回配置。
+`resolution-too-deep`，不需要手动指定间接依赖版本。Windows 下仅固定的
+`win-unicode-console==0.5` 允许从源码构建，因为上游没有发布 wheel；其余包仍为 wheel-only。
+安装完成后，把输出的可执行文件路径填回配置。
 
 ## 4. 首次检查，不联网、不扫描
 

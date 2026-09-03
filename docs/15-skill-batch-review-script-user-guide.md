@@ -269,8 +269,11 @@ python3.12 batch-review/tools/install_scanners.py \
 不要把带用户名、密码或 Token 的 URL 写入仓库、命令历史或日志。优先由运维在扫描账号的 `pip.conf` 中配置公司认证方式。
 
 脚本会从显式 `--index-url`、`PIP_INDEX_URL` 或现有 `pip.ini`/`pip.conf` 读取同一个包源，
-再安全地传给 uv；不会访问 GitHub。脚本强制只安装 wheel。如果内网源缺少适合 CentOS 7.9
-和目标 Python 的 wheel，安装会停止，不会在扫描节点临时编译第三方源码。
+再安全地传给 uv；不会访问 GitHub。默认强制只安装 wheel。Windows 下 Cisco 的依赖链
+`oletools → pcodedmp → win-unicode-console` 存在一个上游未发布 wheel 的例外，因此安装器仅
+允许固定的 `win-unicode-console==0.5` 从源码包在隔离构建环境中生成 wheel。该例外不扩展到
+其他包；Linux/CentOS 仍保持全部 wheel。公司包源需要同步这个固定版本的源码制品并完成内部
+审核。如果其他依赖缺少 wheel，安装仍会停止。
 
 遇到截图中的错误后无需删除 `.scanner-tools`，拉取本次修复并再次双击 `review.cmd` 即可；
 安装过程是可重复执行的。
