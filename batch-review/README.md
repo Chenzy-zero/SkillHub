@@ -123,7 +123,10 @@ Windows Excel 常见的 GBK/GB18030；原文件不会被改写，识别出的编
 python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
 ```
 
-脚本为两套工具分别建立虚拟环境，并强制只安装 wheel。安装完成后，将输出的两个可执行文件绝对路径填写到 `scanners.*.command[0]`。完整步骤见 `docs/15-skill-batch-review-script-user-guide.md`。
+脚本先通过当前 pip 源安装固定版 `uv==0.12.9`，再由 uv 为两套工具分别建立和解析隔离环境，
+避免 pip 在 Cisco 的大型依赖树上触发 `resolution-too-deep`。Cisco 与 SkillSpector 顶层版本仍
+分别固定为 2.0.13 和 2.5.1，并强制只安装 wheel。安装完成后，将输出的两个可执行文件绝对
+路径填写到 `scanners.*.command[0]`。完整步骤见 `docs/15-skill-batch-review-script-user-guide.md`。
 
 ## 4. 标准执行顺序
 

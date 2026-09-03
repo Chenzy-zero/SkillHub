@@ -24,10 +24,30 @@ class ScannerInstallerTests(unittest.TestCase):
             [package.requirement for package in MODULE.SCANNERS],
             ["cisco-ai-skill-scanner==2.0.13", "skillspector==2.5.1"],
         )
+        self.assertEqual(MODULE.UV_VERSION, "0.12.9")
 
     def test_index_url_is_passed_by_environment_not_command_line(self):
         environment = MODULE._pip_environment("https://mirror.example/simple")
         self.assertEqual(environment["PIP_INDEX_URL"], "https://mirror.example/simple")
+        self.assertEqual(environment["UV_INDEX_URL"], "https://mirror.example/simple")
+
+    def test_uv_installs_exact_scanner_version_into_selected_environment(self):
+        command = MODULE._uv_install_command(
+            Path("resolver/uv"),
+            Path("scanner/python"),
+            MODULE.SCANNERS[0],
+        )
+        self.assertEqual(command[0:3], ("resolver/uv", "pip", "install"))
+        self.assertIn("--python", command)
+        self.assertIn("--only-binary", command)
+        self.assertEqual(command[-1], "cisco-ai-skill-scanner==2.0.13")
+
+    def test_explicit_index_has_priority_over_environment(self):
+        with patch.dict(MODULE.os.environ, {"PIP_INDEX_URL": "https://env.example/simple"}):
+            value = MODULE._configured_index_url(
+                Path("unused-python"), "https://explicit.example/simple"
+            )
+        self.assertEqual(value, "https://explicit.example/simple")
 
     def test_platform_executable_layout(self):
         environment = Path("scanner-env")

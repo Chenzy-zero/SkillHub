@@ -191,6 +191,7 @@ status
 - 同时间但内容不同的分支版本不能静默任选，应分别检查并进入人工确认；
 - 同一仓库一次下载，但不同 Skill 可以绑定不同冻结 Revision；
 - Cisco AI Skill Scanner 与 NVIDIA SkillSpector 先对同一内容版本并行完成静态检查；
+- 扫描器安装入口先经公司 pip 源安装固定版 `uv==0.12.9`，再用 uv 解析固定版本扫描器，避免 pip 对 Cisco 大型间接依赖树产生 `resolution-too-deep`；不得因此改用 GitHub 或未批准的包源；
 - AI 审查使用项目级 `.claude/skills/skill-security-review/`，由 Claude Code 调用公司内网模型执行；AI Skill 只读、不联网、不执行被审查内容；该入口参考 UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是上游副本；
 - 安全结论与质量得分分别保存。安全未通过或检查不完整时，质量高分不能放行；私密候选质量门槛当前为 70 分；
 - 通过内容只生成本地私密候选工作空间，不自动 Commit、Push 或上架；由负责人后续手动同步到私密 Git 中转仓库；

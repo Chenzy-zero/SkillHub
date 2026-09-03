@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Install the two approved scanners into isolated virtual environments.
 
-The script is intentionally compatible with Windows and Linux and only calls
-pip.  It never clones a Git repository.  The configured pip index must already
-contain both pinned packages, including the internally republished
-``skillspector`` wheel.
+The script is intentionally compatible with Windows and Linux.  It bootstraps
+a pinned uv wheel through pip, then uses uv's resolver for the scanner dependency
+graphs.  It never clones a Git repository.  The configured package index must
+already contain uv and both pinned scanner packages, including the internally
+republished ``skillspector`` wheel.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from typing import Sequence
 
 
 SUPPORTED_PYTHON = {(3, 12), (3, 13), (3, 14)}
+UV_VERSION = "0.12.9"
 
 
 @dataclass(frozen=True)
@@ -68,45 +70,99 @@ def _pip_environment(index_url: str | None) -> dict[str, str]:
     environment.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
     if index_url:
         environment["PIP_INDEX_URL"] = index_url
+        environment["UV_INDEX_URL"] = index_url
     return environment
+
+
+def _configured_index_url(python: Path, explicit: str | None) -> str | None:
+    """Reuse an explicit URL, environment value, or pip.ini/pip.conf default."""
+
+    if explicit:
+        return explicit
+    environment_value = os.environ.get("PIP_INDEX_URL", "").strip()
+    if environment_value:
+        return environment_value
+    for key in ("global.index-url", "install.index-url"):
+        completed = subprocess.run(
+            (str(python), "-m", "pip", "config", "get", key),
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        value = completed.stdout.strip()
+        if completed.returncode == 0 and value:
+            return value
+    return None
+
+
+def _ensure_uv(*, root: Path, index_url: str | None) -> tuple[Path, dict[str, str]]:
+    installer_environment = root / "_installer"
+    installer_python = _venv_python(installer_environment)
+    if not installer_python.is_file():
+        installer_environment.parent.mkdir(parents=True, exist_ok=True)
+        venv.EnvBuilder(with_pip=True, clear=False, symlinks=False).create(installer_environment)
+
+    resolved_index = _configured_index_url(installer_python, index_url)
+    package_environment = _pip_environment(resolved_index)
+    _run(
+        (
+            str(installer_python),
+            "-m",
+            "pip",
+            "install",
+            "--only-binary=:all:",
+            "--no-deps",
+            "--upgrade",
+            f"uv=={UV_VERSION}",
+        ),
+        env=package_environment,
+    )
+    executable = _venv_executable(installer_environment, "uv")
+    if not executable.is_file():
+        raise InstallError(f"uv executable was not created: {executable}")
+    _run((str(executable), "--version"), env=package_environment)
+    return executable.resolve(), package_environment
+
+
+def _uv_install_command(uv: Path, python: Path, package: ScannerPackage) -> tuple[str, ...]:
+    return (
+        str(uv),
+        "pip",
+        "install",
+        "--python",
+        str(python),
+        "--only-binary",
+        ":all:",
+        "--upgrade",
+        package.requirement,
+    )
 
 
 def install_scanner(
     package: ScannerPackage,
     *,
     root: Path,
-    index_url: str | None,
+    uv: Path,
+    package_environment: dict[str, str],
 ) -> Path:
     environment = root / package.name
     environment.parent.mkdir(parents=True, exist_ok=True)
     if not _venv_python(environment).is_file():
         venv.EnvBuilder(with_pip=True, clear=False, symlinks=False).create(environment)
 
-    pip_environment = _pip_environment(index_url)
     python = _venv_python(environment)
-    _run(
-        (
-            str(python),
-            "-m",
-            "pip",
-            "install",
-            "--only-binary=:all:",
-            "--upgrade",
-            package.requirement,
-        ),
-        env=pip_environment,
-    )
+    _run(_uv_install_command(uv, python, package), env=package_environment)
 
     executable = _venv_executable(environment, package.executable)
     if not executable.is_file():
         raise InstallError(f"scanner executable was not created: {executable}")
-    _run((str(executable), "--version"), env=pip_environment)
+    _run((str(executable), "--version"), env=package_environment)
     return executable.resolve()
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="从公司 pip 源安装固定版本的 Cisco 与 SkillSpector。"
+        description="从公司 Python 包源安装固定版本的 uv、Cisco 与 SkillSpector。"
     )
     parser.add_argument(
         "--root",
@@ -140,21 +196,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = args.root.expanduser().resolve()
     installed: dict[str, str] = {}
     try:
+        uv, package_environment = _ensure_uv(root=root, index_url=args.index_url)
         for package in SCANNERS:
             installed[package.name] = str(
-                install_scanner(package, root=root, index_url=args.index_url)
+                install_scanner(
+                    package,
+                    root=root,
+                    uv=uv,
+                    package_environment=package_environment,
+                )
             )
     except (InstallError, OSError) as exc:
         print(f"扫描器安装失败: {exc}", file=sys.stderr)
         print(
-            "请确认公司 pip 源已同步 cisco-ai-skill-scanner==2.0.13，"
-            "并已人工构建和上传 skillspector==2.5.1 wheel 及其依赖。",
+            f"请确认公司 pip 源已同步 uv=={UV_VERSION}、"
+            "cisco-ai-skill-scanner==2.0.13，并已人工构建和上传 "
+            "skillspector==2.5.1 wheel 及其依赖。",
             file=sys.stderr,
         )
         return 1
 
     payload = {
         "python": f"{version[0]}.{version[1]}",
+        "resolver": f"uv=={UV_VERSION}",
         "root": str(root),
         "scanners": installed,
     }

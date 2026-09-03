@@ -227,12 +227,19 @@ PYTHONPATH=src python3 -m skill_batch_review.cli --help
 公司内网源必须先具备：
 
 ```text
+uv==0.12.9
 cisco-ai-skill-scanner==2.0.13
 skillspector==2.5.1
 以及两者在目标 Python 3.12～3.14 下的全部二进制依赖包
 ```
 
 Cisco 已公开发布 PyPI 包，可以由公司代理同步。SkillSpector 2.5.1 当前没有公开 PyPI 发布包，制品管理员必须在允许访问上游源码的受控构建环境中，基于批准的源码提交构建 wheel、记录 SHA-256 和许可证信息，再上传公司内网源。扫描节点不得从 GitHub 安装，也不得使用未固定的 `main` 分支。
+
+安装器不会直接让 pip 解析 Cisco 的完整依赖树。它只用 pip 从同一包源安装固定版本
+`uv==0.12.9`，随后通过 uv 安装固定版本 Cisco 和 SkillSpector。这样可避免 pip 在
+`onnxruntime`、`litellm`、`jmespath` 等间接依赖上长时间回溯并报
+`resolution-too-deep`。如果只在命令中重复指定 `cisco-ai-skill-scanner==2.0.13`，不能解决
+该问题，因为顶层版本原本就已经固定。
 
 在仓库根目录执行：
 
@@ -261,7 +268,12 @@ python3.12 batch-review/tools/install_scanners.py \
 
 不要把带用户名、密码或 Token 的 URL 写入仓库、命令历史或日志。优先由运维在扫描账号的 `pip.conf` 中配置公司认证方式。
 
-脚本强制 `--only-binary=:all:`。如果内网源缺少适合 CentOS 7.9 和目标 Python 的 wheel，安装会停止，不会在扫描节点临时编译第三方源码。
+脚本会从显式 `--index-url`、`PIP_INDEX_URL` 或现有 `pip.ini`/`pip.conf` 读取同一个包源，
+再安全地传给 uv；不会访问 GitHub。脚本强制只安装 wheel。如果内网源缺少适合 CentOS 7.9
+和目标 Python 的 wheel，安装会停止，不会在扫描节点临时编译第三方源码。
+
+遇到截图中的错误后无需删除 `.scanner-tools`，拉取本次修复并再次双击 `review.cmd` 即可；
+安装过程是可重复执行的。
 
 安装完成后，把脚本输出的绝对路径写入 `review.toml`。Linux 示例：
 
