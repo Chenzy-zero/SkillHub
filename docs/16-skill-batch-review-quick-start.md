@@ -5,6 +5,17 @@
 
 ## 1. 运行方式
 
+### 推荐：首次初始化后使用免参数入口
+
+Windows 首次双击 `batch-review\init.cmd`，之后始终双击 `batch-review\review.cmd`。
+Linux/CentOS 首次执行 `./batch-review/init.sh`，之后始终执行 `./batch-review/review.sh`。
+
+初始化入口会创建真实的本机配置 `batch-review/config/review.local.toml`；该文件被 Git 忽略，
+已有文件默认不会被覆盖。`review` 入口会自动记住配置文件和批次号，根据真实状态提示并执行
+当前唯一的下一步。Claude Code 中可输入 `/ask-cc` 查看相同状态，无需记忆命令、路径和参数。
+
+下面的参数化命令主要用于理解流程和运维排障。
+
 整套流程不能只用一个 AI Skill 完成，职责分为两部分：
 
 ```text
@@ -30,6 +41,9 @@ AI Skill 不下载仓库、不调用静态扫描器、不清理目录，也不�
 cp batch-review/config/review.company.example.toml \
   batch-review/config/review.company.toml
 ```
+
+使用推荐初始化入口时无需手工执行上述复制命令，程序会自动创建
+`batch-review/config/review.local.toml` 并告诉执行人员还需要填写哪些字段。
 
 真实配置文件已被 `.gitignore` 忽略。至少填写下列内容：
 

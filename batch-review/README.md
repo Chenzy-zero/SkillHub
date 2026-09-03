@@ -57,6 +57,28 @@ python -m pip install -e '.[dev]'
 PYTHONPATH=src python -m skill_batch_review.cli --help
 ```
 
+### 首次使用的推荐入口
+
+不再要求操作人员手工复制配置、记录批次号或拼接命令参数。
+
+Windows 第一次双击：
+
+```text
+batch-review\init.cmd
+```
+
+Linux/CentOS 第一次执行：
+
+```bash
+./batch-review/init.sh
+```
+
+初始化会生成被 Git 忽略的 `batch-review/config/review.local.toml` 和本机操作状态，已有配置
+默认绝不覆盖。检查配置后，Windows 始终双击 `batch-review\review.cmd`，Linux/CentOS 始终执行
+`./batch-review/review.sh`。该入口会读取真实状态并只提供当前可执行的下一步。
+
+在 Claude Code 中输入 `/ask-cc` 可以只读检查同一状态；它不会修改配置、执行扫描或清理目录。
+
 ## 3. 配置
 
 复制 `config/review.example.toml`，再填写公司内网的真实值。以下值必须由负责人确认，不能沿用示例占位符：
@@ -96,6 +118,18 @@ python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
 脚本为两套工具分别建立虚拟环境，并强制只安装 wheel。安装完成后，将输出的两个可执行文件绝对路径填写到 `scanners.*.command[0]`。完整步骤见 `docs/15-skill-batch-review-script-user-guide.md`。
 
 ## 4. 标准执行顺序
+
+推荐使用免参数入口：
+
+```text
+首次运行 init.cmd / init.sh
+→ 后续始终运行 review.cmd / review.sh
+→ 等待 AI 时在 Claude Code 输入 /ask-cc
+→ 按提示调用 /skill-security-review
+→ 再次运行 review 入口
+```
+
+以下带参数命令保留用于自动化运维和故障排查，普通执行人员无需记忆：
 
 日常操作可直接使用跨平台启动器：
 

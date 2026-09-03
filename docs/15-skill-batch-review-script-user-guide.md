@@ -42,6 +42,10 @@ Gerrit 必须支持 `--filter=blob:none`。服务端忽略过滤时程序返回
 `PARTIAL_CLONE_UNSUPPORTED`，不会静默退回完整仓库下载。可选清单字段统一使用
 `product_line`、`user_name`、`user_email`。
 
+面向普通操作人员的默认入口进一步简化为：首次使用 `init.cmd`/`init.sh`，之后始终使用
+`review.cmd`/`review.sh`。免参数入口自动保存本机配置路径和当前批次号，并根据状态调用底层
+逐 Skill 启动器。原 `run.sh`/`run.cmd` 继续作为带参数的运维入口。
+
 ## 1. 文档目的
 
 本文面向实际执行批量审查的 CM、安全人员和平台维护人员，说明如何使用 `batch-review/` 完成以下工作：

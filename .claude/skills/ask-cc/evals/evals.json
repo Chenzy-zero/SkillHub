@@ -1,0 +1,23 @@
+{
+  "skill_name": "ask-cc",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我第一次打开这个项目，不知道先配置什么。/ask-cc",
+      "expected_output": "读取真实项目状态，仅给出初始化或配置的唯一下一步。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "静态扫描是不是跑完了？我接下来该做什么？",
+      "expected_output": "读取活动批次和当前 Skill；若等待 AI，定位交接文件并指向 /skill-security-review。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "这批 Skill 都审完了吗，结果去哪里看？",
+      "expected_output": "基于批次状态回答是否完成；完成时展示结果 CSV/JSON 路径。",
+      "files": []
+    }
+  ]
+}

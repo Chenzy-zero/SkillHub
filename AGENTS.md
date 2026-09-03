@@ -23,6 +23,8 @@
 > 当前逐 Skill 设计：`docs/18-per-skill-review-design.md`
 >
 > 当前逐 Skill 任务：`docs/19-per-skill-review-implementation-tasks.md`
+>
+> 当前初始化与免参数操作说明：`docs/20-project-initialization-and-guided-operation.md`
 
 ## 1. 当前项目范围
 
@@ -400,7 +402,9 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 - `docs/17-per-skill-review-requirements.md`：逐 Skill 下载、归档、结果和筛选需求
 - `docs/18-per-skill-review-design.md`：逐 Skill partial fetch、目录、复用和 JSON/CSV 设计
 - `docs/19-per-skill-review-implementation-tasks.md`：逐 Skill 审查实施任务与验收场景
+- `docs/20-project-initialization-and-guided-operation.md`：首次初始化、状态判断、双击入口和 ask-cc 使用说明
 - `batch-review/`：存量 Skill 批量审查程序、脱敏配置样例和本地测试
 - `.claude/skills/skill-security-review/`：供 Claude Code 自动发现和调用的项目级只读 AI 安全与质量审查入口（参考 `skill-vetter`/`skill-auditor`，非上游副本）
+- `.claude/skills/ask-cc/`：只读分析当前项目状态并给出唯一下一步的 Claude Code 项目级入口
 
 当前 `batch-review/` 已实现逐仓库两阶段流程，支持 `test/skill_summary.csv` 的正式字段和中文状态，并通过本地模拟测试。正式批量运行前仍必须取得 Gerrit 只读 SSH 参数、公司内网源中的固定版本扫描器 wheel、公司内网模型标识、目录权限和首批小样本仓库；扫描节点推荐 CentOS/Linux 与 Python 3.12/3.13，不得用示例占位符或 Python 3.14 直接运行首批正式扫描。
