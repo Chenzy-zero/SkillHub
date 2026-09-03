@@ -193,6 +193,9 @@ class ProjectSetupTests(unittest.TestCase):
         ):
             content = (BATCH_REVIEW_DIR / name).read_text(encoding="utf-8")
             self.assertIn("3.14", content, name)
+            if name.endswith(".cmd"):
+                self.assertIn("sys.version_info[:2] in", content, name)
+                self.assertNotIn("sys.version_info[:2] <", content, name)
 
 
 if __name__ == "__main__":
