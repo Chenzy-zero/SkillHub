@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Sequence
 
 
-SUPPORTED_PYTHON = {(3, 12), (3, 13)}
+SUPPORTED_PYTHON = {(3, 12), (3, 13), (3, 14)}
 
 
 @dataclass(frozen=True)

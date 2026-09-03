@@ -8,6 +8,7 @@ crosses those boundaries.
 
 from __future__ import annotations
 
+import hashlib
 import shlex
 import string
 from dataclasses import dataclass, field
@@ -250,7 +251,35 @@ class AIConfig:
     skill_path: Path
     result_schema_path: Path
     policy_version: str
-    reviewer_model: str
+    reviewer_model: str = "claude-code-session"
+
+
+def derive_ai_policy_version(skill_path: Path) -> str:
+    """Hash maintained review rules without timestamps or evaluation files."""
+
+    root = skill_path.expanduser().resolve()
+    candidates: list[Path] = []
+    anchor = root / "SKILL.md"
+    if anchor.is_file() and not anchor.is_symlink():
+        candidates.append(anchor)
+    references = root / "references"
+    if references.is_dir() and not references.is_symlink():
+        candidates.extend(
+            path
+            for path in references.rglob("*")
+            if path.is_file() and not path.is_symlink()
+        )
+    if not candidates:
+        return "skill-policy-unavailable"
+    digest = hashlib.sha256()
+    for path in sorted(candidates, key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        content = path.read_bytes()
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return f"skill-policy-sha256:{digest.hexdigest()}"
 
 
 @dataclass(frozen=True)
@@ -600,24 +629,29 @@ def load_config(path: "str | Path") -> ReviewConfig:
     )
 
     ai_data = _section(root, "ai")
+    ai_skill_path = _path(
+        ai_data.get("skill_path"),
+        "ai.skill_path",
+        base_dir=base_dir,
+        default="../../.claude/skills/skill-security-review",
+    )
+    configured_policy = ai_data.get("policy_version")
+    policy_version = (
+        _text(configured_policy, "ai.policy_version")
+        if configured_policy not in (None, "", "auto")
+        else derive_ai_policy_version(ai_skill_path)
+    )
     ai = AIConfig(
-        skill_path=_path(
-            ai_data.get("skill_path"),
-            "ai.skill_path",
-            base_dir=base_dir,
-            default="../../.claude/skills/skill-security-review",
-        ),
+        skill_path=ai_skill_path,
         result_schema_path=_path(
             ai_data.get("result_schema_path"),
             "ai.result_schema_path",
             base_dir=base_dir,
             default="../../.claude/skills/skill-security-review/references/review-result.schema.json",
         ),
-        policy_version=_text(
-            ai_data.get("policy_version"), "ai.policy_version", default="policy-not-pinned"
-        ),
+        policy_version=policy_version,
         reviewer_model=_text(
-            ai_data.get("reviewer_model"), "ai.reviewer_model", default="model-not-configured"
+            ai_data.get("reviewer_model"), "ai.reviewer_model", default="claude-code-session"
         ),
     )
 
@@ -706,5 +740,6 @@ __all__ = [
     "ScannerConfig",
     "StatusMapping",
     "WorkspaceConfig",
+    "derive_ai_policy_version",
     "load_config",
 ]

@@ -128,6 +128,25 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "approved local static"):
             load_config(self.write_config(invalid))
 
+    def test_policy_version_is_derived_and_model_needs_no_configuration(self) -> None:
+        base = Path(self.tempdir.name)
+        skill = base / ".claude/skills/skill-security-review"
+        references = skill / "references"
+        references.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: review\n---\n", encoding="utf-8")
+        (references / "rules.md").write_text("rule one\n", encoding="utf-8")
+        (references / "review-result.schema.json").write_text("{}\n", encoding="utf-8")
+        automatic = CONFIG.replace('policy_version = "policy-1"\n', "").replace(
+            'reviewer_model = "intranet-model"\n', ""
+        )
+        path = self.write_config(automatic)
+        first = load_config(path)
+        self.assertRegex(first.ai.policy_version, r"^skill-policy-sha256:[a-f0-9]{64}$")
+        self.assertEqual(first.ai.reviewer_model, "claude-code-session")
+        (references / "rules.md").write_text("rule two\n", encoding="utf-8")
+        second = load_config(path)
+        self.assertNotEqual(first.ai.policy_version, second.ai.policy_version)
+
     def test_evidence_and_candidates_cannot_be_cleaned_with_workspace(self) -> None:
         invalid = CONFIG.replace('evidence_root = "evidence"', 'evidence_root = "work/evidence"')
         with self.assertRaisesRegex(ConfigError, "outside workspace.root"):

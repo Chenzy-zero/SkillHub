@@ -21,10 +21,6 @@ class PreflightIssue:
 
 _PLACEHOLDERS = {
     "configured",
-    "pin-in-deployment",
-    "policy-not-pinned",
-    "model-not-configured",
-    "set-company-intranet-model-id",
 }
 
 
@@ -69,10 +65,6 @@ def review_preflight(config: ReviewConfig) -> tuple[PreflightIssue, ...]:
         issues.append(
             PreflightIssue("AI_SCHEMA_MISSING", f"AI 结果 Schema 不存在: {config.ai.result_schema_path}")
         )
-    if config.ai.policy_version in _PLACEHOLDERS:
-        issues.append(PreflightIssue("POLICY_NOT_PINNED", "审查规则版本尚未固定"))
-    if config.ai.reviewer_model in _PLACEHOLDERS:
-        issues.append(PreflightIssue("AI_MODEL_NOT_CONFIGURED", "公司内网模型标识尚未配置"))
     return tuple(issues)
 
 

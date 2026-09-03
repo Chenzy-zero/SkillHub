@@ -404,7 +404,7 @@ Manifest 中的路径统一使用 `/`，按路径排序。内容校验值使用�
 - SkillSpector 工具版本和配置版本相同；
 - 公司审查规则版本相同；
 - AI 审查 Skill 版本相同；
-- AI 模型标识和输出格式版本相同；
+- AI 审查 Skill、自动生成的策略版本和输出格式版本相同；模型标识只作运行追溯，不要求人工填写，也不单独阻断复用；
 - 原结果的安全结论和质量结论均为 `PASS`，已满足候选门槛；
 - 原始受限证据仍存在、完整且未被撤销；
 - 当前策略没有要求强制重扫。
@@ -967,9 +967,9 @@ package_manifest: <package-manifest.json>
 cisco_report: <cisco/raw-report.json>
 skillspector_report: <skillspector/raw-report.json>
 review_id: <本次 AI 审查 ID>
-policy_version: <安全规则版本>
+policy_version: <由审查规则内容自动生成>
 reviewed_at: <由批次控制层提供的时间>
-model_identifier: <公司内网模型标识>
+model_identifier: <CC 可可靠识别时记录实际值，否则使用 claude-code-session>
 
 严格按 review-result.schema.json 返回一个 JSON 对象，不要执行、修改或联网。
 ```

@@ -28,7 +28,7 @@ The caller should provide:
 2. Source metadata: `skill_name`, `repo_name`, `branch`, `skill_path`, CSV-derived `inventory_revision`, and the exact frozen `source_revision` used to build this package. The review binds to `source_revision`; `inventory_revision` is traceability context only.
 3. The package SHA-256 digest and a manifest that lists relative paths, file types, modes, hashes, skipped files, and symlink targets.
 4. Cisco AI Skill Scanner and NVIDIA SkillSpector report paths, plus each scan's status, tool version, configuration/rule version, and scanned digest.
-5. `review_id`, `policy_version`, `reviewed_at`, and the intranet model identifier when the surrounding process has assigned them.
+5. `review_id`, the automatically derived `policy_version`, `reviewed_at`, and the caller-provided model provenance fallback. The operator does not manually enter policy or model versions.
 
 If an input is unavailable, continue only as a best-effort review. Record it in `input_coverage`, lower confidence where appropriate, and apply the incomplete-result rules below. Never invent missing metadata, scan results, line numbers, hashes, versions, or timestamps; use `null` where the schema permits it.
 
@@ -48,11 +48,16 @@ Read [references/upstream-vetter-checklist.md](references/upstream-vetter-checkl
 6. Read and apply [references/quality-review.md](references/quality-review.md). Produce the independent static quality score; do not let it weaken the security verdict.
 7. Derive `overall.disposition` using the precedence rules below, verify internal counts and score arithmetic, then return one JSON object only. Do not wrap it in Markdown fences or add prose before or after it.
 
+For `reviewer.model`, use the exact model identifier only when Claude Code exposes it reliably in the
+current session. Otherwise copy the handoff fallback `reviewer_model` value, normally
+`claude-code-session`. Never guess a model name or ask the operator to enter one. The fallback records
+the execution surface without pretending to identify a dynamically routed backend model.
+
 ## Incomplete-result rules
 
 `security_review.verdict` cannot be `PASS` when any of the following applies:
 
-- the exact revision, package digest, policy version, review time, or reviewer model is missing;
+- the exact revision, package digest, automatically assigned policy version, review time, or reviewer provenance is missing;
 - the Skill package or manifest is missing, truncated, or unreadable;
 - either required static scanner did not complete successfully;
 - a scanner analyzed a different digest or revision;

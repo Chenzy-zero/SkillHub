@@ -54,8 +54,6 @@ cp batch-review/config/review.company.example.toml \
 | `gerrit.user/host/port` | Gerrit 只读 SSH 参数 |
 | `gerrit.allowed_repositories` | 首批联调的 1～3 个仓库；正式批次确认后再放开 |
 | `status_mapping` | CSV 中各状态对应 `ACTIVE`、`DELETED` 等内部状态 |
-| `ai.policy_version` | 本次审查规则版本 |
-| `ai.reviewer_model` | 公司内网模型标识 |
 | `scanners.*.version` | 公司内网源实际批准的固定版本 |
 | `scanners.*.command[0]` | 两个扫描器可执行文件的绝对路径 |
 
@@ -64,8 +62,8 @@ SSH 配置、环境变量或公司的密钥管理方式提供。
 
 ## 3. 安装
 
-正式扫描节点建议使用 CentOS/Linux 与 Python 3.12 或 3.13。Windows 可以做配置和小样本
-验证；Python 3.14 暂不用于首批正式扫描。
+批处理程序支持 Python 3.11～3.14；扫描器安装支持 Python 3.12～3.14。Windows 和 Linux
+入口会自动选择可用兼容版本。CentOS 7.9 使用 Python 3.14 前应确认内网源具备兼容 wheel。
 
 先从公司的 pip 内网源安装批处理程序：
 
@@ -174,8 +172,8 @@ Gerrit，也不运行扫描器。计划中的 Skill 数、排除项和状态应�
   --batch-id baseline-20260901
 ```
 
-Windows 将 `./batch-review/run.sh` 替换为 `batch-review\run.cmd`。如果 Windows 上的 Python
-不由 `py -3.12` 管理，可把 `SKILL_REVIEW_PYTHON` 设置为 Python 3.12 可执行文件的完整路径。
+Windows 将 `./batch-review/run.sh` 替换为 `batch-review\run.cmd`。入口会依次查找 Python
+3.14、3.13、3.12 和 3.11；如需固定解释器，可设置 `SKILL_REVIEW_PYTHON` 为完整路径。
 
 ## 9. 一键启动的边界
 
@@ -203,8 +201,9 @@ python3.12 batch-review/tools/discover_git_skills.py \
 
 - GitHub 或正式 Gerrit 的 SSH 地址、端口、只读身份和仓库白名单；
 - Cisco 与 SkillSpector 可执行文件路径；
-- 公司批准的模型标识；
-- 本次固定策略版本。
+- AI 审查 Skill 和结果 Schema 的路径。
+
+策略版本由审查规则内容自动计算；模型由 Claude Code 会话记录，无需填写。
 
 GitHub 受限网络可使用 `ssh.github.com:443`。正式切换 Gerrit 时只需替换源站段、CSV、
 工作目录和工具路径，台账字段及后续命令不变。`*.local.toml` 已被 Git 忽略。

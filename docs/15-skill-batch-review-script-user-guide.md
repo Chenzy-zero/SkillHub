@@ -184,8 +184,7 @@ UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是任何上游 Skill �
 ### 5.1 基础环境
 
 - 正式扫描节点推荐 Linux；当前确认使用 CentOS 7.9；
-- 批处理程序支持 Python 3.11 及以上，正式扫描节点统一使用 Python 3.12 或 3.13；
-- 不建议使用 Python 3.14 运行首批正式扫描；
+- 批处理程序支持 Python 3.11～3.14，扫描器安装支持 Python 3.12～3.14；
 - Git 命令行；
 - 能访问公司 Gerrit 的网络环境；
 - Gerrit 专用只读 SSH 身份；
@@ -196,7 +195,7 @@ UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是任何上游 Skill �
 
 Windows 可以作为配置、发起和查看结果的操作端，但首批正式扫描不建议直接在 Windows 执行。原因是当前尚未在 Windows 验证 Git 符号链接、文件权限位、路径大小写和快照摘要是否与 Linux 一致。Windows 应通过 SSH 连接 CentOS 扫描节点执行以下命令。
 
-CentOS 7.9 已停止主流维护，扫描节点应隔离部署、使用只读 Gerrit 账号并限制出站网络。不要使用系统自带 Python；单独安装 Python 3.12 或 3.13。
+CentOS 7.9 已停止主流维护，扫描节点应隔离部署、使用只读 Gerrit 账号并限制出站网络。不要使用系统自带 Python；单独安装 Python 3.12、3.13 或 3.14。使用 3.14 时必须确认公司内网源具备兼容的二进制 wheel。
 
 ### 5.2 批处理程序安装
 
@@ -230,7 +229,7 @@ PYTHONPATH=src python3 -m skill_batch_review.cli --help
 ```text
 cisco-ai-skill-scanner==2.0.13
 skillspector==2.5.1
-以及两者在 Python 3.12/3.13 下的全部二进制依赖包
+以及两者在目标 Python 3.12～3.14 下的全部二进制依赖包
 ```
 
 Cisco 已公开发布 PyPI 包，可以由公司代理同步。SkillSpector 2.5.1 当前没有公开 PyPI 发布包，制品管理员必须在允许访问上游源码的受控构建环境中，基于批准的源码提交构建 wheel、记录 SHA-256 和许可证信息，再上传公司内网源。扫描节点不得从 GitHub 安装，也不得使用未固定的 `main` 分支。
@@ -242,10 +241,10 @@ python3.12 batch-review/tools/install_scanners.py \
   --root /opt/skill-review/scanners
 ```
 
-Windows 试运行节点如另装 Python 3.12，可使用：
+Windows 试运行节点可以使用 Python 3.12～3.14，例如：
 
 ```powershell
-py -3.12 batch-review/tools/install_scanners.py `
+py -3.14 batch-review/tools/install_scanners.py `
   --root C:\skill-review\scanners
 ```
 
@@ -472,18 +471,15 @@ max_score = 100
 [ai]
 skill_path = "/path/to/SkillHub/.claude/skills/skill-security-review"
 result_schema_path = "/path/to/SkillHub/.claude/skills/skill-security-review/references/review-result.schema.json"
-policy_version = "skill-review-policy-v1"
-reviewer_model = "company-intranet-model-id"
 ```
 
 | 配置 | 说明 |
 |---|---|
 | `skill_path` | Claude Code 使用的项目 AI 审查 Skill |
 | `result_schema_path` | AI 最终 JSON 的严格 Schema |
-| `policy_version` | 本批次审查规则版本，不能使用占位值 |
-| `reviewer_model` | 公司内网模型的明确标识 |
-
-程序不会根据 `reviewer_model` 自动调用模型。该值用于绑定和校验审查记录。
+`policy_version` 由上述审查 Skill 的 `SKILL.md` 和 `references/` 内容自动计算，文件时间戳和
+`evals/` 不参与。Claude Code 能可靠取得实际模型时写入实际标识，否则使用
+`claude-code-session` 作为运行入口追溯。操作人员不填写这两个字段。
 
 ### 7.7 `[scanners.*]`
 
@@ -577,7 +573,7 @@ skill-batch-review preflight /secure/skill-review/review.toml
 - 两套扫描器命令是否能在本机找到；
 - 扫描器版本是否仍是占位值；
 - AI Skill 和 JSON Schema 是否存在；
-- 策略版本和模型标识是否仍是占位值。
+- AI 规则文件和结果 Schema 是否存在。
 
 `preflight` 不验证 Gerrit 网络、SSH 权限、主机指纹和扫描器对真实样本的兼容性，这些需要在小批量联调中验证。
 
@@ -1048,13 +1044,7 @@ Root 目录名称定位候选，再使用快照阶段已有的整包 SHA-256 Dig
 
 处理：填写实际固定版本。版本变化应产生新的批次或任务版本，不能回写旧结论。
 
-### 11.6 `POLICY_NOT_PINNED` / `AI_MODEL_NOT_CONFIGURED`
-
-原因：AI 策略版本或内网模型标识仍是占位值。
-
-处理：由项目负责人确认本批次实际值。
-
-### 11.7 仓库不存在、权限不足或 SSH 失败
+### 11.6 仓库不存在、权限不足或 SSH 失败
 
 检查：
 

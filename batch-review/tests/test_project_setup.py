@@ -83,8 +83,6 @@ class ProjectSetupTests(unittest.TestCase):
                 [ai]
                 skill_path = "{ai_skill}"
                 result_schema_path = "{schema}"
-                policy_version = "policy-v1"
-                reviewer_model = "intranet-model"
                 [scanners.cisco]
                 enabled = true
                 version = "2.0.13"
@@ -181,11 +179,20 @@ class ProjectSetupTests(unittest.TestCase):
         skill_root = BATCH_REVIEW_DIR.parent / ".claude" / "skills" / "ask-cc"
         content = (skill_root / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("name: ask-cc", content)
-        self.assertIn("project_status.py --json", content)
+        self.assertIn("status.sh --json", content)
         self.assertIn("Do not run `init`, `plan`, `start`, `advance`", content)
         evals = json.loads((skill_root / "evals" / "evals.json").read_text(encoding="utf-8"))
         self.assertEqual(evals["skill_name"], "ask-cc")
         self.assertEqual(len(evals["evals"]), 3)
+
+    def test_initialization_accepts_python_314_and_launchers_prefer_it(self):
+        self.assertIn((3, 14), init_project.SUPPORTED_PYTHON)
+        for name in (
+            "init.cmd", "review.cmd", "run.cmd", "status.cmd",
+            "init.sh", "review.sh", "run.sh", "status.sh",
+        ):
+            content = (BATCH_REVIEW_DIR / name).read_text(encoding="utf-8")
+            self.assertIn("3.14", content, name)
 
 
 if __name__ == "__main__":

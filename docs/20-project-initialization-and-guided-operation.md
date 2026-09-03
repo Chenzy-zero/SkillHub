@@ -34,7 +34,7 @@ batch-review\init.cmd
 
 初始化程序执行以下操作：
 
-1. 检查当前解释器是否为 Python 3.12 或 3.13；
+1. 自动选择 Python 3.11～3.14；安装扫描器时要求 Python 3.12～3.14；
 2. 让执行人员选择公司 Gerrit 或 GitHub 验证环境；
 3. 从对应模板生成 `batch-review/config/review.local.toml`；
 4. 将临时目录和扫描器目录调整成本机路径；
@@ -120,8 +120,10 @@ batch-review/.batch-review/operator-state.json
 普通执行不需要下面的命令。需要自动化接入或排查时，可以直接读取状态：
 
 ```bash
-python3.12 batch-review/tools/project_status.py
-python3.12 batch-review/tools/project_status.py --json
+./batch-review/review.sh
 ```
+
+需要机器可读状态时，可使用任意兼容解释器运行
+`batch-review/tools/project_status.py --json`。
 
 原来的 `run.sh`、`run.cmd` 和 `run_skill_batch.py` 保留，不改变已有自动化接口。

@@ -20,7 +20,7 @@ REPOSITORY_ROOT = BATCH_REVIEW_DIR.parent
 CONFIG_DIR = BATCH_REVIEW_DIR / "config"
 DEFAULT_CONFIG = CONFIG_DIR / "review.local.toml"
 OPERATOR_STATE = BATCH_REVIEW_DIR / ".batch-review" / "operator-state.json"
-SUPPORTED_PYTHON = {(3, 12), (3, 13)}
+SUPPORTED_PYTHON = {(3, 11), (3, 12), (3, 13), (3, 14)}
 
 
 def _utc_now() -> str:
@@ -108,7 +108,6 @@ def _localize_template(text: str, *, profile: str) -> str:
         "FILL_SKILLSPECTOR_EXECUTABLE": _scanner_executable("skillspector", "skillspector"),
     }
     if profile == "github":
-        replacements["FILL_APPROVED_MODEL_ID"] = "claude-code-validation"
         key = _find_ssh_key()
         if key:
             replacements["FILL_GITHUB_READONLY_SSH_KEY_PATH"] = str(key)
@@ -170,7 +169,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     version = sys.version_info[:2]
     if version not in SUPPORTED_PYTHON:
-        print("初始化需要 Python 3.12 或 3.13；请勿使用 Python 3.14。", file=sys.stderr)
+        print("初始化需要 Python 3.11～3.14。", file=sys.stderr)
         return 2
     args = _parser().parse_args(argv)
     try:
@@ -189,7 +188,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if created:
         print(f"下一步先打开并检查配置文件：{config_path}")
         if profile == "company":
-            print("填写 Gerrit 只读地址/账号、CSV 路径、仓库白名单和公司内网模型标识。")
+            print("填写 Gerrit 只读地址/账号、CSV 路径和仓库白名单。")
         else:
             print("检查 GitHub SSH 私钥路径；其余验证参数已经按本机目录生成。")
     print("完成配置后，只需双击 batch-review/review.cmd；Linux/CentOS 执行 batch-review/review.sh。")

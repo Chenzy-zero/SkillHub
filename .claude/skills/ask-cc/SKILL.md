@@ -18,13 +18,14 @@ Act as the read-only project guide for this repository. Determine the real curre
 
 ## Required procedure
 
-1. From the repository root, run exactly one read-only status command:
+1. From the repository root, run exactly one read-only status command appropriate for the platform:
 
    ```text
-   python3.12 batch-review/tools/project_status.py --json
+   Linux/CentOS/macOS: ./batch-review/status.sh --json
+   Windows: batch-review\status.cmd --json
    ```
 
-   On Windows, use `py -3.12` only if `python3.12` is unavailable.
+   These wrappers automatically select Python 3.14, 3.13, 3.12, or 3.11.
 
 2. Read the returned `state`, `summary`, `issues`, `inventory`, `current_skill`, `batch_id`, `next_action`, and `next_instruction`.
 3. When `next_action` is `AI_REVIEW`, read:
@@ -34,6 +35,11 @@ Act as the read-only project guide for this repository. Determine the real curre
    Confirm that the handoff and expected result paths exist. Then tell the user to invoke `/skill-security-review` with the handoff JSON. Do not perform the security review inside `ask-cc`, because the dedicated Skill has stricter read-only evidence rules.
 4. For other states, use [references/workflow.md](references/workflow.md) to explain what the state means. Prefer the parameter-free entry points `init.cmd`/`init.sh` and `review.cmd`/`review.sh`; do not make the user copy the underlying command with a config path and batch ID.
 5. If status checking fails or a state is inconsistent, report the exact file or check that failed and stop. Do not repair or delete state automatically.
+
+Do not ask the operator to configure an AI policy version or model identifier. The batch program derives
+the policy version from the maintained review rules. `/skill-security-review` records the exact current
+Claude Code model only when it is reliably available, otherwise it uses the supplied
+`claude-code-session` provenance fallback.
 
 ## Response format
 

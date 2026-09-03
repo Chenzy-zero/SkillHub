@@ -1,10 +1,9 @@
 @echo off
-setlocal
-
+setlocal EnableDelayedExpansion
 set "SCRIPT_DIR=%~dp0"
 
 if defined SKILL_REVIEW_PYTHON (
-  "%SKILL_REVIEW_PYTHON%" "%SCRIPT_DIR%tools\run_skill_batch.py" %*
+  "%SKILL_REVIEW_PYTHON%" "%SCRIPT_DIR%tools\project_status.py" %*
   exit /b %ERRORLEVEL%
 )
 
@@ -16,13 +15,13 @@ for %%V in (3.14 3.13 3.12 3.11) do (
 )
 
 if defined SKILL_REVIEW_PYTHON_VERSION (
-  py -%SKILL_REVIEW_PYTHON_VERSION% "%SCRIPT_DIR%tools\run_skill_batch.py" %*
+  py -!SKILL_REVIEW_PYTHON_VERSION! "%SCRIPT_DIR%tools\project_status.py" %*
   exit /b %ERRORLEVEL%
 )
 
 python -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)" >nul 2>&1
 if not errorlevel 1 (
-  python "%SCRIPT_DIR%tools\run_skill_batch.py" %*
+  python "%SCRIPT_DIR%tools\project_status.py" %*
   exit /b %ERRORLEVEL%
 )
 

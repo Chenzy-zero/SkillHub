@@ -37,8 +37,11 @@ class ScannerInstallerTests(unittest.TestCase):
         else:
             self.assertEqual(path, environment / "bin" / "skillspector")
 
-    def test_python_314_is_rejected_before_installation(self):
-        with patch.object(MODULE.sys, "version_info", (3, 14, 0)):
+    def test_python_314_is_supported(self):
+        self.assertIn((3, 14), MODULE.SUPPORTED_PYTHON)
+
+    def test_python_311_is_rejected_before_installation(self):
+        with patch.object(MODULE.sys, "version_info", (3, 11, 0)):
             self.assertEqual(MODULE.main(["--root", "unused"]), 2)
 
 

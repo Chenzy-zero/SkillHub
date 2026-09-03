@@ -80,7 +80,6 @@ def build_review_fingerprint(
         },
         "ai": {
             "policy_version": config.ai.policy_version,
-            "reviewer_model": config.ai.reviewer_model,
             "review_skill_digest": _directory_digest(config.ai.skill_path),
             "result_schema_sha256": _file_digest(config.ai.result_schema_path),
         },

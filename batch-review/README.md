@@ -44,7 +44,8 @@ CSV 台账
 
 ## 2. 安装
 
-批处理程序要求 Python 3.11 或更高版本。正式扫描节点推荐 CentOS/Linux 与 Python 3.12 或 3.13；Windows 仅作为操作端，首批正式扫描不使用 Python 3.14：
+批处理程序支持 Python 3.11～3.14，扫描器安装支持 Python 3.12～3.14。Windows 和 Linux
+入口会自动优先选择已安装的较新兼容版本：
 
 ```bash
 cd batch-review
@@ -87,8 +88,11 @@ Linux/CentOS 第一次执行：
 - `batch.included_statuses`：本轮允许进入队列的映射后生命周期状态；
 - `gerrit.*`：只读 SSH 地址、账号、端口和仓库白名单；
 - `scanners.*.version`：批准并固定的工具版本；
-- `ai.policy_version`、`ai.reviewer_model`：审查规则和公司内网模型标识；
 - `workspace.*`：临时工作区、受限证据区、私密候选区和清单区。
+
+AI 策略版本由 `.claude/skills/skill-security-review/` 中的规则内容自动计算 SHA-256；模型由
+Claude Code 会话在能可靠识别时记录实际值，否则记录 `claude-code-session`。两者都不要求
+操作人员填写。
 
 两套静态命令固定为本地静态模式：
 
@@ -109,7 +113,7 @@ skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewe
 
 ### 内网 pip 安装静态扫描器
 
-扫描节点不能访问 GitHub且不使用 Docker。公司 pip 源必须先同步 `cisco-ai-skill-scanner==2.0.13`，并上传内部审核构建的 `skillspector==2.5.1` wheel 及全部二进制依赖。随后使用 Python 3.12 或 3.13 执行：
+扫描节点不能访问 GitHub且不使用 Docker。公司 pip 源必须先同步 `cisco-ai-skill-scanner==2.0.13`，并上传内部审核构建的 `skillspector==2.5.1` wheel 及全部二进制依赖。随后使用 Python 3.12、3.13 或 3.14 执行：
 
 ```bash
 python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
@@ -244,7 +248,7 @@ results/<batch_id>/skill-review-results.json
 
 ## 7. 当前真实运行前置
 
-代码、本地模拟链路和真实 CSV plan-only 导入已经可运行。正式连接公司环境前仍需提供或确认：Gerrit 只读 SSH 参数、公司内网源中的 SkillSpector wheel、公司内网模型标识、目录权限与保留周期、全批次统一截止时间的版本冻结方式，以及首批小样本仓库。缺少这些输入时不能开始真实批量审查。
+代码、本地模拟链路和真实 CSV plan-only 导入已经可运行。正式连接公司环境前仍需提供或确认：Gerrit 只读 SSH 参数、公司内网源中的 SkillSpector wheel、目录权限与保留周期、全批次统一截止时间的版本冻结方式，以及首批小样本仓库。缺少这些输入时不能开始真实批量审查。
 
 ## 8. 测试
 
