@@ -279,6 +279,11 @@ python3.12 batch-review/tools/install_scanners.py \
 `skill-scanner.exe --version` 或 `skillspector.exe --version`。这是为了避免某些上游命令行入口在解析
 `--version` 之前就加载可选组件，从而意外发起网络请求。版本是否符合固定值仍会严格校验。
 
+Cisco 2.0.13 的命令行会在启动时加载可选 LLM 模块，其 LiteLLM 依赖默认尝试从
+GitHub 读取模型价格表，即使实际扫描命令没有启用 LLM。本项目的 Cisco 扫描适配器会强制设置
+`LITELLM_LOCAL_MODEL_COST_MAP=True`，使其使用已安装包内自带的备用数据，不需要人工配置，也不允许外部
+环境值覆盖该限制。
+
 遇到截图中的错误后无需删除 `.scanner-tools`，拉取本次修复并再次双击 `review.cmd` 即可；
 安装过程是可重复执行的。
 

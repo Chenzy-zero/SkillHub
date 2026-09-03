@@ -1037,6 +1037,7 @@ class ScannerAdapter:
     scanner_kind = "scanner"
     executable_name = "scanner"
     static_flags: tuple[str, ...] = ()
+    static_environment: tuple[tuple[str, str], ...] = ()
 
     def __init__(
         self,
@@ -1077,8 +1078,20 @@ class ScannerAdapter:
             "max_capture_bytes": self.max_capture_bytes,
             "max_report_bytes": self.max_report_bytes,
             "static_flags": list(self.static_flags),
+            "static_environment": dict(self.static_environment),
             "tool_version": self.tool_version,
         }
+
+    def _execution_environment(
+        self,
+        environment: Mapping[str, str] | None,
+    ) -> Mapping[str, str] | None:
+        if not self.static_environment:
+            return environment
+        effective = os.environ.copy() if environment is None else dict(environment)
+        # Governance-required values take priority over ambient caller values.
+        effective.update(self.static_environment)
+        return effective
 
     @property
     def config_digest(self) -> str:
@@ -1177,7 +1190,7 @@ class ScannerAdapter:
                 command,
                 timeout_seconds=effective_timeout,
                 cwd=cwd,
-                env=env,
+                env=self._execution_environment(env),
             )
         except Exception as exc:  # runner adapters must not turn tool errors into passes
             execution = CommandExecution(
@@ -1355,6 +1368,10 @@ class CiscoSkillScannerAdapter(ScannerAdapter):
     # Deliberately no --use-llm, --use-behavioral, --use-virustotal, or
     # --use-aidefense flags.  Those capabilities remain disabled by omission.
     static_flags = ("--format", "json", "--compact")
+    # Cisco imports its optional LiteLLM analyzer while loading the CLI even
+    # when --use-llm is absent.  LiteLLM otherwise fetches its model cost map
+    # from GitHub at import time.  Force the bundled map for air-gapped scans.
+    static_environment = (("LITELLM_LOCAL_MODEL_COST_MAP", "True"),)
 
     def build_command(self, skill_root: Path, output_file: Path) -> tuple[str, ...]:
         return (

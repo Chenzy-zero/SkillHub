@@ -182,6 +182,12 @@ class ScannerAdapterTests(unittest.TestCase):
         self.assertEqual(result.command_digest, result.command_digest)
         self.assertEqual(result.config_digest, result.scanner_config_digest)
         self.assertEqual(len(runner.calls), 1)
+        scanner_environment = runner.calls[0]["env"]
+        self.assertIsInstance(scanner_environment, dict)
+        self.assertEqual(
+            scanner_environment["LITELLM_LOCAL_MODEL_COST_MAP"],
+            "True",
+        )
 
     def test_cisco_nonzero_with_valid_report_is_not_a_pass(self) -> None:
         runner = FakeRunner(

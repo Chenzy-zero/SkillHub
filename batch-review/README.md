@@ -131,6 +131,9 @@ python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
 包元数据，不会为了查询版本启动扫描器。完整步骤见
 `docs/15-skill-batch-review-script-user-guide.md`。
 
+执行 Cisco 本地静态扫描时，程序会强制 LiteLLM 读取随包数据，防止 Cisco 命令行在
+加载未启用的 LLM 组件时向 GitHub 请求价格表。
+
 ## 4. 标准执行顺序
 
 推荐使用免参数入口：
