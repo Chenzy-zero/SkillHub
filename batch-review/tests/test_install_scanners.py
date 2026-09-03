@@ -62,6 +62,16 @@ class ScannerInstallerTests(unittest.TestCase):
         )
         self.assertNotIn("--no-binary", linux_command)
 
+    def test_scanner_version_check_uses_distribution_metadata(self):
+        command = MODULE._metadata_version_command(
+            Path("scanner/python.exe"),
+            MODULE.SCANNERS[0],
+        )
+        self.assertEqual(command[0:2], ("scanner/python.exe", "-c"))
+        self.assertIn("importlib.metadata", command[2])
+        self.assertEqual(command[-2:], ("cisco-ai-skill-scanner", "2.0.13"))
+        self.assertNotIn("skill-scanner", command[0])
+
     def test_explicit_index_has_priority_over_environment(self):
         with patch.dict(MODULE.os.environ, {"PIP_INDEX_URL": "https://env.example/simple"}):
             value = MODULE._configured_index_url(

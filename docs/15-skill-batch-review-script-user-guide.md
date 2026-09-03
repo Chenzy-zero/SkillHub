@@ -275,6 +275,10 @@ python3.12 batch-review/tools/install_scanners.py \
 其他包；Linux/CentOS 仍保持全部 wheel。公司包源需要同步这个固定版本的源码制品并完成内部
 审核。如果其他依赖缺少 wheel，安装仍会停止。
 
+安装器完成后使用 Python 包元数据核对实际版本，不会启动
+`skill-scanner.exe --version` 或 `skillspector.exe --version`。这是为了避免某些上游命令行入口在解析
+`--version` 之前就加载可选组件，从而意外发起网络请求。版本是否符合固定值仍会严格校验。
+
 遇到截图中的错误后无需删除 `.scanner-tools`，拉取本次修复并再次双击 `review.cmd` 即可；
 安装过程是可重复执行的。
 
@@ -318,7 +322,9 @@ skillspector scan <skill_root> --no-llm --format json --output <output_file>
 
 Cisco 配置不得增加 LLM、behavioral、VirusTotal 或 AI Defense 上传选项；SkillSpector 必须保留 `--no-llm`。
 
-如果配置使用绝对路径，应直接执行两个绝对路径的 `--version`。SkillSpector 即使使用 `--no-llm` 仍会尝试把依赖名称和版本发送给 OSV.dev；公司环境不允许该出站访问时，应在网络层阻断，它会退回内置离线规则。该限制必须记录到扫描覆盖信息中。
+不要手工执行扫描器的 `--version` 作为安装验收；重新执行上述安装器即可通过包元数据
+完成无网络版本校验。SkillSpector 即使使用 `--no-llm` 仍会尝试把依赖名称和版本发送给 OSV.dev；公司
+环境不允许该出站访问时，应在网络层阻断，它会退回内置离线规则。该限制必须记录到扫描覆盖信息中。
 
 ### 5.5 Gerrit SSH 准备
 

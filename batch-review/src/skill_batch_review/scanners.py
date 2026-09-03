@@ -1094,25 +1094,16 @@ class ScannerAdapter:
         )
 
     def detect_version(self, *, timeout_seconds: float | None = None) -> ToolVersionRecord:
-        """Optionally probe ``--version``; this never reads the Skill Root."""
+        """Return pinned version metadata without starting scanner code.
 
-        command = (self.executable, "--version")
-        execution = self.runner.run(
-            command,
-            timeout_seconds=timeout_seconds or self.timeout_seconds,
-        )
-        version = next(
-            (line.strip() for line in (execution.stdout + "\n" + execution.stderr).splitlines() if line.strip()),
-            None,
-        )
-        return ToolVersionRecord(
-            scanner=self.scanner_name,
-            executable=self.executable,
-            configured_version=self.tool_version,
-            detected_version=version,
-            version_command=command,
-            version_exit_code=execution.returncode,
-        )
+        Kept for API compatibility.  Console entry points are deliberately not
+        invoked for version discovery because their imports may initialize
+        optional packages before parsing ``--version``.  Installation validates
+        the pinned distribution using ``importlib.metadata`` instead.
+        """
+
+        del timeout_seconds
+        return self.version_record()
 
     def scan(
         self,

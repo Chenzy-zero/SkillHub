@@ -159,6 +159,35 @@ def _uv_install_command(
     return tuple(command)
 
 
+def _metadata_version_command(
+    python: Path,
+    package: ScannerPackage,
+) -> tuple[str, ...]:
+    """Build an offline version check that does not import scanner code.
+
+    Some scanner console entry points import optional analyzers before argument
+    parsing.  Starting the executable merely to ask for ``--version`` can
+    therefore initialize third-party packages and unexpectedly access the
+    network.  Distribution metadata is sufficient to verify the pinned wheel
+    that uv installed and has no scanner import side effects.
+    """
+
+    program = (
+        "import importlib.metadata as metadata, sys; "
+        "actual = metadata.version(sys.argv[1]); "
+        "expected = sys.argv[2]; "
+        "print(f'{sys.argv[1]} {actual}'); "
+        "raise SystemExit(0 if actual == expected else 1)"
+    )
+    return (
+        str(python),
+        "-c",
+        program,
+        package.distribution,
+        package.version,
+    )
+
+
 def install_scanner(
     package: ScannerPackage,
     *,
@@ -177,7 +206,7 @@ def install_scanner(
     executable = _venv_executable(environment, package.executable)
     if not executable.is_file():
         raise InstallError(f"scanner executable was not created: {executable}")
-    _run((str(executable), "--version"), env=package_environment)
+    _run(_metadata_version_command(python, package), env=package_environment)
     return executable.resolve()
 
 

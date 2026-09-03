@@ -115,6 +115,21 @@ class ScannerAdapterTests(unittest.TestCase):
         self.assertFalse(any("virustotal" in item.lower() for item in cisco_command))
         self.assertFalse(any("aidefense" in item.lower() for item in cisco_command))
 
+    def test_version_record_never_starts_scanner_entry_point(self) -> None:
+        runner = FakeRunner()
+        adapter = CiscoSkillScannerAdapter(
+            executable="scanner/skill-scanner.exe",
+            tool_version="2.0.13",
+            runner=runner,
+        )
+
+        record = adapter.detect_version()
+
+        self.assertEqual(record.version, "2.0.13")
+        self.assertEqual(record.version_command, ())
+        self.assertIsNone(record.version_exit_code)
+        self.assertEqual(runner.calls, [])
+
     def test_summary_includes_hidden_files_and_does_not_follow_symlink(self) -> None:
         outside = self.base / "outside.txt"
         outside.write_text("outside", encoding="utf-8")

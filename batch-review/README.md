@@ -127,7 +127,8 @@ python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
 避免 pip 在 Cisco 的大型依赖树上触发 `resolution-too-deep`。Cisco 与 SkillSpector 顶层版本仍
 分别固定为 2.0.13 和 2.5.1。默认只安装 wheel；Windows 下仅对 Cisco 依赖链缺少 wheel 的
 `win-unicode-console==0.5` 开放单包源码构建例外，其余包仍禁止源码构建。安装完成后，将输出
-的两个可执行文件绝对路径填写到 `scanners.*.command[0]`。完整步骤见
+的两个可执行文件绝对路径填写到 `scanners.*.command[0]`。安装自检只读取 Python
+包元数据，不会为了查询版本启动扫描器。完整步骤见
 `docs/15-skill-batch-review-script-user-guide.md`。
 
 ## 4. 标准执行顺序
