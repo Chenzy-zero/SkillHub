@@ -406,9 +406,11 @@ def _smoke_command(
     package: ScannerPackage,
     executable: Path,
     skill_root: Path,
-    output_file: Path,
+    output_file: Path | None,
 ) -> tuple[str, ...]:
     if package.name == "cisco":
+        if output_file is None:
+            raise InstallError("Cisco smoke test requires an output file")
         return (
             str(executable),
             "scan",
@@ -419,16 +421,17 @@ def _smoke_command(
             "--output",
             str(output_file),
         )
-    return (
+    command = [
         str(executable),
         "scan",
         str(skill_root),
         "--no-llm",
         "--format",
         "json",
-        "--output",
-        str(output_file),
-    )
+    ]
+    if output_file is not None:
+        command.extend(("--output", str(output_file)))
+    return tuple(command)
 
 
 def _smoke_environment(base: dict[str, str], cache_root: Path) -> dict[str, str]:
@@ -484,12 +487,43 @@ def _smoke_scanner(
             )
         if "cl100k_base.tiktoken" in combined or "ConnectionError" in combined:
             raise InstallError(f"{package.name} static smoke test attempted network access")
+        report_text: str | None = None
         try:
-            report = json.loads(output.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise InstallError(f"{package.name} static smoke test produced no valid JSON: {exc}") from exc
+            report_text = output.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            # Some Windows SkillSpector installations complete the scan but do
+            # not materialize Typer's --output Path. Verify the same engine via
+            # its documented JSON stdout mode before rejecting the environment.
+            if package.name == "skillspector":
+                try:
+                    fallback = subprocess.run(
+                        _smoke_command(package, executable, SCANNER_SMOKE_SKILL, None),
+                        env=environment,
+                        check=False,
+                        text=True,
+                        capture_output=True,
+                        timeout=90,
+                    )
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    raise InstallError(
+                        f"skillspector JSON stdout smoke fallback could not run: {exc}"
+                    ) from exc
+                fallback_combined = f"{fallback.stdout}\n{fallback.stderr}"
+                if fallback.returncode in allowed_codes:
+                    report_text = fallback.stdout.strip()
+                combined = f"{combined}\nstdout fallback:\n{fallback_combined}"
+        try:
+            report = json.loads(report_text) if report_text is not None else None
+        except (TypeError, UnicodeError, json.JSONDecodeError) as exc:
+            raise InstallError(
+                f"{package.name} static smoke test produced no valid JSON: {exc}; "
+                f"scanner output: {combined[-2000:]}"
+            ) from exc
         if not isinstance(report, (dict, list)):
-            raise InstallError(f"{package.name} static smoke report has an invalid JSON root")
+            raise InstallError(
+                f"{package.name} static smoke report has an invalid JSON root; "
+                f"scanner output: {combined[-2000:]}"
+            )
 
 
 def _write_health_record(root: Path, installed: dict[str, str]) -> None:

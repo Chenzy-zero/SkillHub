@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -130,10 +131,41 @@ class ScannerInstallerTests(unittest.TestCase):
         spector = MODULE._smoke_command(
             MODULE.SCANNERS[1], Path("spector"), Path("skill"), Path("spector.json")
         )
+        spector_stdout = MODULE._smoke_command(
+            MODULE.SCANNERS[1], Path("spector"), Path("skill"), None
+        )
         self.assertNotIn("--use-llm", cisco)
         self.assertIn("--no-llm", spector)
         self.assertEqual(cisco[-1], "cisco.json")
         self.assertEqual(spector[-1], "spector.json")
+        self.assertNotIn("--output", spector_stdout)
+
+    def test_skillspector_smoke_falls_back_to_json_stdout_on_windows_output_issue(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            fixture = root / "fixture"
+            fixture.mkdir()
+            (fixture / "SKILL.md").write_text("# smoke\n", encoding="utf-8")
+            executions = [
+                MODULE.subprocess.CompletedProcess(("skillspector",), 0, "", ""),
+                MODULE.subprocess.CompletedProcess(
+                    ("skillspector",), 0, '{"findings": []}', ""
+                ),
+            ]
+            with (
+                patch.object(MODULE, "SCANNER_SMOKE_SKILL", fixture),
+                patch.object(MODULE.subprocess, "run", side_effect=executions) as run,
+            ):
+                MODULE._smoke_scanner(
+                    MODULE.SCANNERS[1],
+                    Path("skillspector"),
+                    root=root,
+                    package_environment={},
+                )
+
+            self.assertEqual(run.call_count, 2)
+            self.assertIn("--output", run.call_args_list[0].args[0])
+            self.assertNotIn("--output", run.call_args_list[1].args[0])
 
     def test_index_url_is_passed_by_environment_not_command_line(self):
         environment = MODULE._pip_environment("https://mirror.example/simple")
