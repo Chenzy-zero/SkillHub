@@ -26,6 +26,27 @@ class ScannerInstallerTests(unittest.TestCase):
         )
         self.assertEqual(MODULE.UV_VERSION, "0.12.9")
 
+    def test_bundled_skillspector_wheel_matches_official_digest(self):
+        package = MODULE.SCANNERS[1]
+        requirement = MODULE._install_requirement(package)
+        self.assertTrue(requirement.endswith("skillspector-2.5.1-py3-none-any.whl"))
+        self.assertEqual(
+            MODULE._sha256(Path(requirement)),
+            "56196f2f8689cc6e7f565181f06db5e489ba010ef0e5da19855d99043a5f6415",
+        )
+
+    def test_uv_uses_bundled_skillspector_wheel(self):
+        package = MODULE.SCANNERS[1]
+        requirement = MODULE._install_requirement(package)
+        command = MODULE._uv_install_command(
+            Path("resolver/uv"),
+            Path("scanner/python"),
+            package,
+            requirement=requirement,
+        )
+        self.assertEqual(command[-1], requirement)
+        self.assertNotEqual(command[-1], package.requirement)
+
     def test_index_url_is_passed_by_environment_not_command_line(self):
         environment = MODULE._pip_environment("https://mirror.example/simple")
         self.assertEqual(environment["PIP_INDEX_URL"], "https://mirror.example/simple")

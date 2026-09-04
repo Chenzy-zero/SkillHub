@@ -74,7 +74,7 @@ CSV 可直接使用 UTF-8、UTF-8 BOM、带 BOM 的 UTF-16 或 GBK/GB18030，无
 python3.12 -m pip install -e './batch-review'
 ```
 
-在公司内网源已经同步两个固定版本 wheel 后，安装静态扫描器：
+在公司内网源已经同步固定版本 Cisco、uv 和全部依赖后，安装静态扫描器：
 
 ```bash
 python3.12 batch-review/tools/install_scanners.py \
@@ -83,7 +83,8 @@ python3.12 batch-review/tools/install_scanners.py \
 
 扫描节点不能访问 GitHub也不使用 Docker。安装脚本先从当前 pip 配置的内网源安装固定版
 `uv==0.12.9`，再用 uv 解析两个固定版本扫描器并建立独立环境。这样可规避 pip 的
-`resolution-too-deep`，不需要手动指定间接依赖版本。Windows 下仅固定的
+`resolution-too-deep`，不需要手动指定间接依赖版本。SkillSpector 使用仓库自带且已校验
+SHA-256 的 NVIDIA 2.5.1 官方 wheel，不需要在执行机访问 GitHub。Windows 下仅固定的
 `win-unicode-console==0.5` 允许从源码构建，因为上游没有发布 wheel；其余包仍为 wheel-only。
 安装完成后，把输出的可执行文件路径填回配置。
 

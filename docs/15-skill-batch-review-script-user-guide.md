@@ -229,11 +229,14 @@ PYTHONPATH=src python3 -m skill_batch_review.cli --help
 ```text
 uv==0.12.9
 cisco-ai-skill-scanner==2.0.13
-skillspector==2.5.1
-以及两者在目标 Python 3.12～3.14 下的全部二进制依赖包
+以及两套扫描器在目标 Python 3.12～3.14 下的全部二进制依赖包
 ```
 
-Cisco 已公开发布 PyPI 包，可以由公司代理同步。SkillSpector 2.5.1 当前没有公开 PyPI 发布包，制品管理员必须在允许访问上游源码的受控构建环境中，基于批准的源码提交构建 wheel、记录 SHA-256 和许可证信息，再上传公司内网源。扫描节点不得从 GitHub 安装，也不得使用未固定的 `main` 分支。
+Cisco 已公开发布 PyPI 包，可以由公司代理同步。SkillSpector 2.5.1 没有发布到 PyPI，但 NVIDIA 的
+v2.5.1 官方 Release 提供了通用 wheel。项目已将该原始制品放在
+`batch-review/packages/skillspector-2.5.1-py3-none-any.whl`，并在安装前固定校验 SHA-256
+`56196f2f8689cc6e7f565181f06db5e489ba010ef0e5da19855d99043a5f6415`。扫描节点无需访问 GitHub，
+也无需重新构建或在公司源发布 SkillSpector 顶层包。
 
 安装器不会直接让 pip 解析 Cisco 的完整依赖树。它只用 pip 从同一包源安装固定版本
 `uv==0.12.9`，随后通过 uv 安装固定版本 Cisco 和 SkillSpector。这样可避免 pip 在
@@ -269,7 +272,8 @@ python3.12 batch-review/tools/install_scanners.py \
 不要把带用户名、密码或 Token 的 URL 写入仓库、命令历史或日志。优先由运维在扫描账号的 `pip.conf` 中配置公司认证方式。
 
 脚本会从显式 `--index-url`、`PIP_INDEX_URL` 或现有 `pip.ini`/`pip.conf` 读取同一个包源，
-再安全地传给 uv；不会访问 GitHub。默认强制只安装 wheel。Windows 下 Cisco 的依赖链
+再安全地传给 uv；不会访问 GitHub。SkillSpector 顶层 wheel 优先从项目 `packages/` 读取，
+依赖仍从公司源解析。默认强制只安装 wheel。Windows 下 Cisco 的依赖链
 `oletools → pcodedmp → win-unicode-console` 存在一个上游未发布 wheel 的例外，因此安装器仅
 允许固定的 `win-unicode-console==0.5` 从源码包在隔离构建环境中生成 wheel。该例外不扩展到
 其他包；Linux/CentOS 仍保持全部 wheel。公司包源需要同步这个固定版本的源码制品并完成内部

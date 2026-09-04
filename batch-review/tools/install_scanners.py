@@ -4,13 +4,15 @@
 The script is intentionally compatible with Windows and Linux.  It bootstraps
 a pinned uv wheel through pip, then uses uv's resolver for the scanner dependency
 graphs.  It never clones a Git repository.  The configured package index must
-already contain uv and both pinned scanner packages, including the internally
-republished ``skillspector`` wheel.
+already contain uv, Cisco, and all transitive dependencies.  The pinned
+official ``skillspector`` wheel is shipped with this repository and verified
+before use.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -25,6 +27,7 @@ SUPPORTED_PYTHON = {(3, 12), (3, 13), (3, 14)}
 UV_VERSION = "0.12.9"
 WINDOWS_SOURCE_BUILD_PACKAGE = "win-unicode-console"
 WINDOWS_SOURCE_BUILD_REQUIREMENT = "win-unicode-console==0.5"
+BUNDLED_PACKAGES_DIR = Path(__file__).resolve().parents[1] / "packages"
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,8 @@ class ScannerPackage:
     distribution: str
     version: str
     executable: str
+    bundled_filename: str | None = None
+    bundled_sha256: str | None = None
 
     @property
     def requirement(self) -> str:
@@ -41,7 +46,14 @@ class ScannerPackage:
 
 SCANNERS = (
     ScannerPackage("cisco", "cisco-ai-skill-scanner", "2.0.13", "skill-scanner"),
-    ScannerPackage("skillspector", "skillspector", "2.5.1", "skillspector"),
+    ScannerPackage(
+        "skillspector",
+        "skillspector",
+        "2.5.1",
+        "skillspector",
+        "skillspector-2.5.1-py3-none-any.whl",
+        "56196f2f8689cc6e7f565181f06db5e489ba010ef0e5da19855d99043a5f6415",
+    ),
 )
 
 
@@ -132,6 +144,7 @@ def _uv_install_command(
     package: ScannerPackage,
     *,
     platform_name: str | None = None,
+    requirement: str | None = None,
 ) -> tuple[str, ...]:
     command = [
         str(uv),
@@ -142,7 +155,7 @@ def _uv_install_command(
         "--only-binary",
         ":all:",
         "--upgrade",
-        package.requirement,
+        requirement or package.requirement,
     ]
     platform_value = os.name if platform_name is None else platform_name
     if platform_value == "nt" and package.name == "cisco":
@@ -157,6 +170,31 @@ def _uv_install_command(
             )
         )
     return tuple(command)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _install_requirement(package: ScannerPackage) -> str:
+    """Prefer and verify an approved wheel shipped with this repository."""
+
+    if not package.bundled_filename:
+        return package.requirement
+    wheel = BUNDLED_PACKAGES_DIR / package.bundled_filename
+    if not wheel.is_file():
+        raise InstallError(f"bundled scanner wheel is missing: {wheel}")
+    actual_sha256 = _sha256(wheel)
+    if actual_sha256 != package.bundled_sha256:
+        raise InstallError(
+            f"bundled scanner wheel SHA-256 mismatch: {wheel} "
+            f"(expected {package.bundled_sha256}, got {actual_sha256})"
+        )
+    return str(wheel.resolve())
 
 
 def _metadata_version_command(
@@ -201,7 +239,11 @@ def install_scanner(
         venv.EnvBuilder(with_pip=True, clear=False, symlinks=False).create(environment)
 
     python = _venv_python(environment)
-    _run(_uv_install_command(uv, python, package), env=package_environment)
+    requirement = _install_requirement(package)
+    _run(
+        _uv_install_command(uv, python, package, requirement=requirement),
+        env=package_environment,
+    )
 
     executable = _venv_executable(environment, package.executable)
     if not executable.is_file():
@@ -260,8 +302,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"扫描器安装失败: {exc}", file=sys.stderr)
         print(
             f"请确认公司 pip 源已同步 uv=={UV_VERSION}、"
-            "cisco-ai-skill-scanner==2.0.13，并已人工构建和上传 "
-            "skillspector==2.5.1 wheel 及其依赖。",
+            "cisco-ai-skill-scanner==2.0.13 及两套扫描器的全部依赖；"
+            "SkillSpector 官方 wheel 应存在于 batch-review/packages。",
             file=sys.stderr,
         )
         return 1

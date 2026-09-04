@@ -117,7 +117,9 @@ Windows Excel 常见的 GBK/GB18030；原文件不会被改写，识别出的编
 
 ### 内网 pip 安装静态扫描器
 
-扫描节点不能访问 GitHub且不使用 Docker。公司 pip 源必须先同步 `cisco-ai-skill-scanner==2.0.13`，并上传内部审核构建的 `skillspector==2.5.1` wheel 及全部二进制依赖。随后使用 Python 3.12、3.13 或 3.14 执行：
+扫描节点不能访问 GitHub且不使用 Docker。公司 pip 源必须同步 `uv==0.12.9`、
+`cisco-ai-skill-scanner==2.0.13` 及两套扫描器的全部依赖。SkillSpector 2.5.1 使用本仓库
+`packages/` 中的 NVIDIA 官方 wheel，无需公司源另行发布顶层包。随后使用 Python 3.12、3.13 或 3.14 执行：
 
 ```bash
 python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
@@ -261,7 +263,7 @@ results/<batch_id>/skill-review-results.json
 
 ## 7. 当前真实运行前置
 
-代码、本地模拟链路和真实 CSV plan-only 导入已经可运行。正式连接公司环境前仍需提供或确认：Gerrit 只读 SSH 参数、公司内网源中的 SkillSpector wheel、目录权限与保留周期、全批次统一截止时间的版本冻结方式，以及首批小样本仓库。缺少这些输入时不能开始真实批量审查。
+代码、本地模拟链路和真实 CSV plan-only 导入已经可运行。正式连接公司环境前仍需提供或确认：Gerrit 只读 SSH 参数、公司内网源中的扫描器依赖、目录权限与保留周期、全批次统一截止时间的版本冻结方式，以及首批小样本仓库。缺少这些输入时不能开始真实批量审查。
 
 ## 8. 测试
 
