@@ -7,6 +7,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 BATCH_REVIEW_DIR = Path(__file__).resolve().parents[1]
@@ -147,6 +148,7 @@ class ProjectSetupTests(unittest.TestCase):
         state_dir = manifests / batch_id
         state_dir.mkdir(parents=True)
         state = {
+            "workflow_version": project_status.CURRENT_WORKFLOW_VERSION,
             "status": "WAITING_FOR_AI",
             "current_task_id": "task-1",
             "items": [
@@ -163,6 +165,33 @@ class ProjectSetupTests(unittest.TestCase):
         status = project_status.inspect_project(operator_state_path=self.operator)
         self.assertEqual(status.next_action, "AI_REVIEW")
         self.assertIn("/auto-skill-review", status.next_instruction)
+
+    def test_started_legacy_batch_is_redirected_to_a_new_plan(self):
+        config, manifests = self._ready_config()
+        batch_id = "legacy-started"
+        state_dir = manifests / batch_id
+        state_dir.mkdir(parents=True)
+        state = {
+            "status": "WAITING_FOR_AI",
+            "current_task_id": "task-1",
+            "items": [
+                {
+                    "task_id": "task-1",
+                    "status": "WAITING_FOR_AI",
+                    "skill_id": "id-1",
+                    "skill_name": "demo",
+                }
+            ],
+        }
+        (state_dir / "per-skill-launcher-state.json").write_text(
+            json.dumps(state), encoding="utf-8"
+        )
+        self._write_operator(config, batch_id)
+
+        status = project_status.inspect_project(operator_state_path=self.operator)
+
+        self.assertEqual(status.state, "BATCH_WORKFLOW_INCOMPATIBLE")
+        self.assertEqual(status.next_action, "PLAN")
 
     def test_auto_review_skill_is_discoverable_and_bounded(self):
         skill = BATCH_REVIEW_DIR.parent / ".claude" / "skills" / "auto-skill-review" / "SKILL.md"
@@ -181,6 +210,40 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertEqual(status.state, "INVENTORY_INVALID")
         self.assertEqual(status.next_action, "EDIT_CONFIG")
         self.assertEqual(status.issues[0]["code"], "SKILL_ID_DUPLICATE")
+
+    def test_managed_scanners_require_successful_offline_health_record(self):
+        config, _ = self._ready_config()
+        self._write_operator(config)
+        health_file = self.root / "scanner-health.json"
+        with (
+            mock.patch.object(project_status, "MANAGED_SCANNER_ROOT", self.root.resolve()),
+            mock.patch.object(project_status, "SCANNER_HEALTH_FILE", health_file),
+        ):
+            missing = project_status.inspect_project(operator_state_path=self.operator)
+            self.assertEqual(missing.next_action, "INSTALL_SCANNERS")
+            self.assertEqual(missing.issues[0]["code"], "SCANNER_HEALTH_UNKNOWN")
+
+            health_file.write_text(
+                json.dumps(
+                    {
+                        "status": "HEALTHY",
+                        "profile": "static_offline",
+                        "scanners": {
+                            "cisco": {
+                                "version": "2.0.13",
+                                "executable": str((self.root / "skill-scanner").resolve()),
+                            },
+                            "skillspector": {
+                                "version": "2.5.1",
+                                "executable": str((self.root / "skillspector").resolve()),
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            healthy = project_status.inspect_project(operator_state_path=self.operator)
+            self.assertEqual(healthy.next_action, "PLAN")
 
     def test_ask_cc_skill_is_discoverable_and_uses_read_only_status(self):
         skill_root = BATCH_REVIEW_DIR.parent / ".claude" / "skills" / "ask-cc"

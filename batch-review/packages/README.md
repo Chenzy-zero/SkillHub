@@ -24,6 +24,12 @@
 再以 `--no-deps` 安装官方 wheel，因此不会下载 `langgraph-cli`、`blockbuster` 或
 `forbiddenfruit`。如果未来官方 wheel 的运行依赖或代码引用发生变化，安装器会停止并要求重新审核清单。
 
+## 扫描器冒烟 Skill
+
+`scanner-smoke-skill/` 是安装器使用的最小只读测试包。它不属于待治理台账，也不会进入候选仓库。
+安装器在限制外部网络的环境下让 Cisco 与 SkillSpector 对它各执行一次真实静态扫描，只有两者都生成
+有效 JSON 后才写入健康记录。
+
 ## Python 3.13.15 Windows 64 位
 
 - 文件：`python-3.13.15-amd64.exe`

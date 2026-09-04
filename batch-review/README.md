@@ -26,6 +26,14 @@ CSV 台账
 
 程序不会执行被审查 Skill 的脚本、安装依赖或调用其中的工具；不会自动调用模型；不会 Commit、Push 或上架候选内容。原始扫描报告保存在受限证据区，不进入私密候选目录。
 
+### 下载能力边界
+
+当前 Gerrit 服务端会忽略 `--filter=blob:none`，不支持 partial clone；不允许对远端未广播的
+SHA 直接 fetch；也不接受 `git archive --remote` 的路径限定参数。因此程序按
+`repo_name + branch` 用 `git ls-remote` 冻结分支 HEAD，下载一次该 Revision 的整仓无历史归档，
+再在本地只提取该仓库清单中的 Skill。整仓归档不会作为完整仓库长期保存，也不会下载 Git 历史。
+如果冻结 Revision 无法出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`，不会静默切换到其他版本。
+
 ## 1. 已实现模块
 
 - CSV 的 UTF-8/UTF-16/GBK 自动识别、原始文件摘要、严格读取、去重、冲突和状态映射；
@@ -84,6 +92,11 @@ Linux/CentOS 第一次执行：
 在 Claude Code 中输入 `/ask-cc` 可以只读检查状态；输入 `/auto-skill-review` 可自动完成当前及
 后续 AI 审查并推进到下一 Skill、下一仓库。
 
+Windows 测试说明：快照测试中的符号链接用例需要开发者模式或创建符号链接的提升权限。未满足
+条件时，测试只会对 `WinError 1314` 自动跳过；其他错误仍会失败。可在“设置 → 隐私和安全性
+→ 开发者选项”开启开发者模式。该测试兼容处理不影响实际批量下载和扫描，正式基线验证仍建议
+在 Linux 扫描节点执行。
+
 ## 3. 配置
 
 复制 `config/review.example.toml`，再填写公司内网的真实值。以下值必须由负责人确认，不能沿用示例占位符：
@@ -133,12 +146,17 @@ python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
 避免 pip 在 Cisco 的大型依赖树上触发 `resolution-too-deep`。Cisco 与 SkillSpector 顶层版本仍
 分别固定为 2.0.13 和 2.5.1。默认只安装 wheel；Windows 下仅对 Cisco 依赖链缺少 wheel 的
 `win-unicode-console==0.5` 开放单包源码构建例外，其余包仍禁止源码构建。安装完成后，将输出
-的两个可执行文件绝对路径填写到 `scanners.*.command[0]`。安装自检只读取 Python
-包元数据，不会为了查询版本启动扫描器。完整步骤见
+的两个可执行文件绝对路径填写到 `scanners.*.command[0]`。安装器会核对包元数据，并在代理被阻断、
+空 tiktoken 缓存的条件下对内置最小 Skill 执行真实静态扫描；成功后写入
+`.scanner-tools/scanner-health.json`。完整步骤见
 `docs/15-skill-batch-review-script-user-guide.md`。
 
-执行 Cisco 本地静态扫描时，程序会强制 LiteLLM 读取随包数据，防止 Cisco 命令行在
-加载未启用的 LLM 组件时向 GitHub 请求价格表。
+Cisco 2.0.13 安装完成后会从其专用环境移除未启用的 `litellm`，避免 CLI 启动时通过 tiktoken
+下载 BPE 词表；该环境只允许当前配置中的本地静态规则。SkillSpector 官方 JSON 的
+`explanation` 字段会被保留为问题说明，`finding=null` 不再导致 LP3 被误判为报告不完整。
+
+按仓库归档流程带有独立 `workflow_version`。已经执行过的旧批次不会在新流程中继续推进；应保留旧证据，
+由 `review.cmd` 创建新批次。完全未开始的旧计划可以安全迁移。
 
 ## 4. 标准执行顺序
 

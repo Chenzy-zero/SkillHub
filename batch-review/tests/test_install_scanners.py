@@ -100,6 +100,41 @@ class ScannerInstallerTests(unittest.TestCase):
         self.assertIn("--only-binary", command)
         self.assertEqual(command[-1], "packages/runtime.txt")
 
+    def test_cisco_static_profile_uninstalls_litellm(self):
+        command = MODULE._uv_uninstall_command(
+            Path("resolver/uv"), Path("scanner/python.exe"), "litellm"
+        )
+        self.assertEqual(
+            command,
+            (
+                "resolver/uv",
+                "pip",
+                "uninstall",
+                "--python",
+                "scanner/python.exe",
+                "litellm",
+            ),
+        )
+
+    def test_smoke_environment_blocks_optional_network_clients(self):
+        environment = MODULE._smoke_environment({}, Path("empty-cache"))
+        self.assertEqual(environment["TIKTOKEN_CACHE_DIR"], "empty-cache")
+        self.assertEqual(environment["HF_HUB_OFFLINE"], "1")
+        self.assertEqual(environment["HTTPS_PROXY"], "http://127.0.0.1:9")
+        self.assertEqual(environment["LITELLM_LOCAL_MODEL_COST_MAP"], "True")
+
+    def test_smoke_commands_keep_both_scanners_in_static_mode(self):
+        cisco = MODULE._smoke_command(
+            MODULE.SCANNERS[0], Path("cisco"), Path("skill"), Path("cisco.json")
+        )
+        spector = MODULE._smoke_command(
+            MODULE.SCANNERS[1], Path("spector"), Path("skill"), Path("spector.json")
+        )
+        self.assertNotIn("--use-llm", cisco)
+        self.assertIn("--no-llm", spector)
+        self.assertEqual(cisco[-1], "cisco.json")
+        self.assertEqual(spector[-1], "spector.json")
+
     def test_index_url_is_passed_by_environment_not_command_line(self):
         environment = MODULE._pip_environment("https://mirror.example/simple")
         self.assertEqual(environment["PIP_INDEX_URL"], "https://mirror.example/simple")

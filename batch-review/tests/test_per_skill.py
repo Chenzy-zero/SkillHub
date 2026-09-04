@@ -312,6 +312,30 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
             )
         )
 
+    def test_repository_archive_failure_has_stable_error_code(self):
+        inventory = parse_inventory_csv(
+            (
+                "skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status\n"
+                f"id-one,first,team/one,main,skills/first,{'a' * 40},否,active\n"
+            ),
+            status_mapping={"active": "ACTIVE"},
+        )
+
+        class FailingArchiveRunner:
+            def checked(self, args, *, cwd=None, timeout=None):
+                if args[0] == "ls-remote":
+                    return GitResult(tuple(args), 0, f"{self_revision}\trefs/heads/main\n", "")
+                raise GitCommandError(GitResult(tuple(args), 1, "", "archive denied"))
+
+        self_revision = self.revision
+        with self.assertRaisesRegex(PerSkillError, "REPOSITORY_ARCHIVE_UNAVAILABLE"):
+            download_repository_skills(
+                self.config(),
+                batch_id="repository-failure",
+                rows=inventory.rows,
+                runner=FailingArchiveRunner(),
+            )
+
     def test_partial_fetch_recovers_same_task_left_by_failed_windows_cleanup(self):
         class SuccessfulRunner:
             def checked(self, args, *, cwd=None, timeout=None):

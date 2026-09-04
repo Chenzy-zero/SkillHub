@@ -813,8 +813,23 @@ def _finding_from_mapping(raw: Mapping[str, Any], scanner: str, index: int) -> F
         _nested_mapping_value(raw, ("severity", "risk_level", "risk", "level", "priority"))
     )
     title = _text(_nested_mapping_value(raw, ("title", "name", "summary")))
-    message = _text(
-        _nested_mapping_value(raw, ("message", "description", "detail", "reason", "finding"))
+    # SkillSpector 2.5.1 serializes human-readable text as ``explanation``
+    # and may emit ``finding: null``. Resolve aliases one by one so a null
+    # field cannot mask a later non-empty explanation.
+    message = next(
+        (
+            text
+            for alias in (
+                "message",
+                "description",
+                "detail",
+                "reason",
+                "explanation",
+                "finding",
+            )
+            if (text := _text(_nested_mapping_value(raw, (alias,)))) is not None
+        ),
+        None,
     )
     if message is None:
         # A title-only official finding still has useful human-readable text,

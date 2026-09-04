@@ -216,16 +216,22 @@ def download_repository_skills(
         if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", revision):
             raise PerSkillError("Gerrit returned an invalid branch revision")
 
-        active_runner.checked(
-            (
-                "archive",
-                f"--remote={url}",
-                "--format=tar",
-                f"--output={archive_path}",
-                revision,
-            ),
-            cwd=workspace_root,
-        )
+        try:
+            active_runner.checked(
+                (
+                    "archive",
+                    f"--remote={url}",
+                    "--format=tar",
+                    f"--output={archive_path}",
+                    revision,
+                ),
+                cwd=workspace_root,
+            )
+        except GitCommandError as exc:
+            raise PerSkillError(
+                "REPOSITORY_ARCHIVE_UNAVAILABLE: Gerrit could not export the frozen "
+                "repository revision"
+            ) from exc
         if not archive_path.is_file():
             raise PerSkillError("Gerrit reported success without a repository archive")
 

@@ -100,8 +100,49 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
             (self.manifests / "skills-1/per-skill-launcher-state.json").read_text(encoding="utf-8")
         )
         self.assertEqual(state["status"], "READY")
+        self.assertEqual(state["workflow_version"], "repository_archive_v1")
         self.assertEqual(state["items"][0]["skill_id"], "id-one")
         self.assertEqual(state["items"][0]["status"], "PENDING")
+
+    def test_started_legacy_batch_cannot_resume_under_repository_workflow(self):
+        config = load_config(self.config)
+        state = launcher_module._new_state(config, "legacy-started")
+        state.pop("workflow_version")
+        state["status"] = "WAITING_FOR_AI"
+        state["current_task_id"] = "legacy-task"
+        state["items"][0].update({"status": "WAITING_FOR_AI", "task_id": "legacy-task"})
+        launcher_module._save(config, state)
+
+        with self.assertRaisesRegex(launcher_module.LauncherError, "旧批次已经开始执行"):
+            launcher_module._load_state(config, "legacy-started")
+
+    def test_pristine_legacy_plan_is_migrated_without_execution(self):
+        config = load_config(self.config)
+        state = launcher_module._new_state(config, "legacy-pristine")
+        state.pop("workflow_version")
+        launcher_module._save(config, state)
+
+        migrated = launcher_module._load_state(config, "legacy-pristine")
+
+        self.assertEqual(migrated["workflow_version"], "repository_archive_v1")
+        stored = json.loads(
+            (self.manifests / "legacy-pristine/per-skill-launcher-state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(stored["workflow_version"], "repository_archive_v1")
+
+    def test_inventory_change_blocks_existing_batch(self):
+        config = load_config(self.config)
+        state = launcher_module._new_state(config, "inventory-changed")
+        launcher_module._save(config, state)
+        with self.inventory.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"id-two,two,team/demo,main,skills/two,{'b' * 40},否,active,product,Bob,bob@example.com\n"
+            )
+
+        with self.assertRaisesRegex(launcher_module.LauncherError, "CSV 内容发生变化"):
+            launcher_module._load_state(config, "inventory-changed")
 
     def test_start_requires_explicit_execution(self):
         result = self.run_launcher("start", "--config", str(self.config), "--batch-id", "skills-2")

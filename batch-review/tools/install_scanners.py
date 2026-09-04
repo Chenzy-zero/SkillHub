@@ -18,9 +18,11 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import venv
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -35,6 +37,9 @@ WINDOWS_PYTHON_FILENAME = "python-3.13.15-amd64.exe"
 WINDOWS_PYTHON_SHA256 = "edec09c4853aeae9ac36efb8c9f95b6b8e2fee65eee56d9767a8b7c69c574403"
 SKILLSPECTOR_RUNTIME_INPUT = BUNDLED_PACKAGES_DIR / "skillspector-runtime.in"
 SKILLSPECTOR_EXCLUDED_RUNTIME_DEPENDENCY = "langgraph-cli"
+CISCO_EXCLUDED_STATIC_DEPENDENCY = "litellm"
+SCANNER_HEALTH_FILENAME = "scanner-health.json"
+SCANNER_SMOKE_SKILL = BUNDLED_PACKAGES_DIR / "scanner-smoke-skill"
 
 
 @dataclass(frozen=True)
@@ -376,6 +381,141 @@ def _uv_requirements_command(
     )
 
 
+def _uv_uninstall_command(uv: Path, python: Path, distribution: str) -> tuple[str, ...]:
+    """Remove an optional dependency from one isolated scanner environment."""
+
+    return (
+        str(uv),
+        "pip",
+        "uninstall",
+        "--python",
+        str(python),
+        distribution,
+    )
+
+
+def _module_absent_command(python: Path, module: str) -> tuple[str, ...]:
+    program = (
+        "import importlib.util, sys; "
+        "raise SystemExit(0 if importlib.util.find_spec(sys.argv[1]) is None else 1)"
+    )
+    return (str(python), "-c", program, module)
+
+
+def _smoke_command(
+    package: ScannerPackage,
+    executable: Path,
+    skill_root: Path,
+    output_file: Path,
+) -> tuple[str, ...]:
+    if package.name == "cisco":
+        return (
+            str(executable),
+            "scan",
+            str(skill_root),
+            "--format",
+            "json",
+            "--compact",
+            "--output",
+            str(output_file),
+        )
+    return (
+        str(executable),
+        "scan",
+        str(skill_root),
+        "--no-llm",
+        "--format",
+        "json",
+        "--output",
+        str(output_file),
+    )
+
+
+def _smoke_environment(base: dict[str, str], cache_root: Path) -> dict[str, str]:
+    """Force optional model clients into deterministic offline behaviour."""
+
+    environment = dict(base)
+    environment.update(
+        {
+            "ALL_PROXY": "http://127.0.0.1:9",
+            "AWS_EC2_METADATA_DISABLED": "true",
+            "HF_HUB_OFFLINE": "1",
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+            "NO_PROXY": "",
+            "TIKTOKEN_CACHE_DIR": str(cache_root),
+            "TRANSFORMERS_OFFLINE": "1",
+        }
+    )
+    return environment
+
+
+def _smoke_scanner(
+    package: ScannerPackage,
+    executable: Path,
+    *,
+    root: Path,
+    package_environment: dict[str, str],
+) -> None:
+    if not (SCANNER_SMOKE_SKILL / "SKILL.md").is_file():
+        raise InstallError(f"scanner smoke fixture is missing: {SCANNER_SMOKE_SKILL}")
+    with tempfile.TemporaryDirectory(prefix=f"{package.name}-smoke-", dir=root) as name:
+        temporary = Path(name)
+        output = temporary / "report.json"
+        environment = _smoke_environment(package_environment, temporary / "tiktoken-cache")
+        try:
+            completed = subprocess.run(
+                _smoke_command(package, executable, SCANNER_SMOKE_SKILL, output),
+                env=environment,
+                check=False,
+                text=True,
+                capture_output=True,
+                timeout=90,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise InstallError(f"{package.name} static smoke test could not run: {exc}") from exc
+        allowed_codes = {0, 1} if package.name == "skillspector" else {0}
+        combined = f"{completed.stdout}\n{completed.stderr}"
+        if completed.returncode not in allowed_codes:
+            raise InstallError(
+                f"{package.name} static smoke test failed with exit code "
+                f"{completed.returncode}: {combined[-2000:]}"
+            )
+        if "cl100k_base.tiktoken" in combined or "ConnectionError" in combined:
+            raise InstallError(f"{package.name} static smoke test attempted network access")
+        try:
+            report = json.loads(output.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise InstallError(f"{package.name} static smoke test produced no valid JSON: {exc}") from exc
+        if not isinstance(report, (dict, list)):
+            raise InstallError(f"{package.name} static smoke report has an invalid JSON root")
+
+
+def _write_health_record(root: Path, installed: dict[str, str]) -> None:
+    record = {
+        "schema_version": "1.0",
+        "status": "HEALTHY",
+        "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "profile": "static_offline",
+        "scanners": {
+            package.name: {
+                "version": package.version,
+                "executable": installed[package.name],
+            }
+            for package in SCANNERS
+        },
+        "excluded_dependencies": {"cisco": [CISCO_EXCLUDED_STATIC_DEPENDENCY]},
+    }
+    destination = root / SCANNER_HEALTH_FILENAME
+    temporary = destination.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, destination)
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -518,10 +658,29 @@ def install_scanner(
         env=package_environment,
     )
 
+    if package.name == "cisco":
+        # Cisco imports an optional LLM analyzer even in static mode. Removing
+        # LiteLLM from this dedicated environment prevents its tiktoken loader
+        # from downloading a BPE file during offline CLI startup.
+        _run(
+            _uv_uninstall_command(uv, python, CISCO_EXCLUDED_STATIC_DEPENDENCY),
+            env=package_environment,
+        )
+        _run(
+            _module_absent_command(python, CISCO_EXCLUDED_STATIC_DEPENDENCY),
+            env=package_environment,
+        )
+
     executable = _venv_executable(environment, package.executable)
     if not executable.is_file():
         raise InstallError(f"scanner executable was not created: {executable}")
     _run(_metadata_version_command(python, package), env=package_environment)
+    _smoke_scanner(
+        package,
+        executable,
+        root=root,
+        package_environment=package_environment,
+    )
     return executable.resolve()
 
 
@@ -560,6 +719,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     root = args.root.expanduser().resolve()
     installed: dict[str, str] = {}
+    health_record = root / SCANNER_HEALTH_FILENAME
+    health_record.unlink(missing_ok=True)
     try:
         skillspector_python = _skillspector_python(root)
         print(f"SkillSpector Python: {skillspector_python}")
@@ -579,6 +740,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     base_python=base_python,
                 )
             )
+        _write_health_record(root, installed)
     except (InstallError, OSError) as exc:
         print(f"扫描器安装失败: {exc}", file=sys.stderr)
         print(

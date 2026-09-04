@@ -36,6 +36,10 @@ from skill_batch_review.per_skill import (  # noqa: E402
 )
 from skill_batch_review.preflight import review_preflight  # noqa: E402
 from skill_batch_review.snapshot import CoverageIssue, PackageEntry, SnapshotResult  # noqa: E402
+from skill_batch_review.workflow import (  # noqa: E402
+    CURRENT_WORKFLOW_VERSION,
+    legacy_state_is_pristine,
+)
 
 
 _BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -116,6 +120,7 @@ def _new_state(config: ReviewConfig, batch_id: str) -> dict[str, Any]:
     rows = _rows(config, document)
     return {
         "schema_version": "1.0",
+        "workflow_version": CURRENT_WORKFLOW_VERSION,
         "batch_id": batch_id,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
@@ -149,8 +154,22 @@ def _load_state(config: ReviewConfig, batch_id: str) -> dict[str, Any]:
         raise LauncherError(f"批次状态无效: {path}")
     if value.get("config_sha256") != _sha256(config.path):
         raise LauncherError("批次创建后配置文件发生变化，请恢复原配置或创建新批次")
-    row_lookup = {row.source_row_id: row for row in _rows(config, _inventory(config))}
+    document = _inventory(config)
+    if value.get("inventory_csv_sha256") != document.raw_csv_sha256:
+        raise LauncherError("批次创建后 CSV 内容发生变化；请保留原批次证据并创建新批次")
+    workflow_version = value.get("workflow_version")
     migrated = False
+    if workflow_version is None:
+        if not legacy_state_is_pristine(value):
+            raise LauncherError(
+                "旧批次已经开始执行，不能切换到当前按仓库归档流程继续运行；"
+                "请保留原批次证据并创建新批次"
+            )
+        value["workflow_version"] = CURRENT_WORKFLOW_VERSION
+        migrated = True
+    elif workflow_version != CURRENT_WORKFLOW_VERSION:
+        raise LauncherError(f"批次执行模式不兼容: {workflow_version!r}；请创建新批次")
+    row_lookup = {row.source_row_id: row for row in _rows(config, document)}
     for item in value["items"]:
         if not isinstance(item, dict):
             continue

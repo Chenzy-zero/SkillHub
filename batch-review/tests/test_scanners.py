@@ -223,6 +223,37 @@ class ScannerAdapterTests(unittest.TestCase):
         self.assertTrue(result.tool_ok)
         self.assertEqual(result.decision, "DO_NOT_INSTALL")
 
+    def test_skillspector_uses_official_explanation_when_finding_is_null(self) -> None:
+        report = {
+            "risk_assessment": {
+                "score": 68,
+                "severity": "HIGH",
+                "recommendation": "DO_NOT_INSTALL",
+            },
+            "issues": [
+                {
+                    "id": "LP3",
+                    "severity": "MEDIUM",
+                    "finding": None,
+                    "explanation": "The Skill does not declare its required permissions.",
+                    "location": {"file": "SKILL.md", "start_line": 1},
+                }
+            ],
+        }
+        result = SkillSpectorAdapter(runner=FakeRunner(returncode=1, report=report)).scan(
+            self.skill_root,
+            output_file=self.base / "skillspector-lp3.json",
+        )
+        self.assertEqual(result.status, SCANNER_STATUS_COMPLETED)
+        self.assertTrue(result.tool_ok)
+        self.assertTrue(result.report_complete)
+        self.assertEqual(result.decision, "DO_NOT_INSTALL")
+        self.assertEqual(
+            result.findings[0].message,
+            "The Skill does not declare its required permissions.",
+        )
+        self.assertIsNone(result.findings[0].raw["finding"])
+
     def test_skillspector_exit_two_is_execution_error(self) -> None:
         runner = FakeRunner(returncode=2, report={"findings": []})
         result = SkillSpectorAdapter(runner=runner).scan(

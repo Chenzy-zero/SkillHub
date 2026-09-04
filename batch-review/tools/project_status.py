@@ -21,10 +21,16 @@ if str(SRC_DIR) not in sys.path:
 from skill_batch_review.config import ConfigError, ReviewConfig, load_config  # noqa: E402
 from skill_batch_review.inventory import load_inventory_csv  # noqa: E402
 from skill_batch_review.preflight import PreflightIssue, review_preflight  # noqa: E402
+from skill_batch_review.workflow import (  # noqa: E402
+    CURRENT_WORKFLOW_VERSION,
+    legacy_state_is_pristine,
+)
 
 
 OPERATOR_STATE = BATCH_REVIEW_DIR / ".batch-review" / "operator-state.json"
 LAUNCHER_STATE_NAME = "per-skill-launcher-state.json"
+MANAGED_SCANNER_ROOT = (BATCH_REVIEW_DIR / ".scanner-tools").resolve()
+SCANNER_HEALTH_FILE = MANAGED_SCANNER_ROOT / "scanner-health.json"
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,50 @@ def _operator_state(path: Path) -> dict[str, Any] | None:
 def _blocking_config_issues(issues: Sequence[PreflightIssue]) -> tuple[PreflightIssue, ...]:
     scanner_codes = {"SCANNER_NOT_FOUND"}
     return tuple(issue for issue in issues if issue.code not in scanner_codes)
+
+
+def _managed_scanner_health_issues(config: ReviewConfig) -> tuple[PreflightIssue, ...]:
+    """Validate the installer's smoke-test marker for managed scanner paths."""
+
+    executables = {
+        name: Path(config.scanner(name).executable).expanduser().resolve()
+        for name in ("cisco", "skillspector")
+    }
+    if not all(path.is_relative_to(MANAGED_SCANNER_ROOT) for path in executables.values()):
+        return ()
+    try:
+        record = _read_json(SCANNER_HEALTH_FILE)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return (
+            PreflightIssue(
+                "SCANNER_HEALTH_UNKNOWN",
+                f"扫描器缺少有效的离线健康检查记录，请重新安装: {exc}",
+            ),
+        )
+    if record.get("status") != "HEALTHY" or record.get("profile") != "static_offline":
+        return (PreflightIssue("SCANNER_HEALTH_INVALID", "扫描器离线健康检查未通过"),)
+    scanner_records = record.get("scanners")
+    if not isinstance(scanner_records, Mapping):
+        return (PreflightIssue("SCANNER_HEALTH_INVALID", "扫描器健康检查记录缺少版本信息"),)
+    for name, executable in executables.items():
+        item = scanner_records.get(name)
+        expected_version = config.scanner(name).version
+        if not isinstance(item, Mapping) or item.get("version") != expected_version:
+            return (
+                PreflightIssue(
+                    "SCANNER_HEALTH_STALE",
+                    f"{name} 健康检查版本与当前配置不一致，请重新安装",
+                ),
+            )
+        recorded = Path(str(item.get("executable") or "")).expanduser().resolve()
+        if recorded != executable:
+            return (
+                PreflightIssue(
+                    "SCANNER_HEALTH_STALE",
+                    f"{name} 健康检查路径与当前配置不一致，请重新安装",
+                ),
+            )
+    return ()
 
 
 def _current_item(batch_state: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -188,15 +238,16 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
         )
 
     missing_scanners = tuple(issue for issue in issues if issue.code == "SCANNER_NOT_FOUND")
-    if missing_scanners:
+    health_issues = () if missing_scanners else _managed_scanner_health_issues(config)
+    if missing_scanners or health_issues:
         return ProjectStatus(
             state="SCANNERS_REQUIRED",
-            summary="基础配置已就绪，但静态扫描器尚未安装到约定位置。",
+            summary="基础配置已就绪，但静态扫描器尚未安装或未通过离线健康检查。",
             next_action="INSTALL_SCANNERS",
-            next_instruction="双击 review.cmd，并确认执行扫描器安装。",
+            next_instruction="双击 review.cmd，并确认重新安装和验证扫描器。",
             config_path=str(config_path),
             inventory=inventory,
-            issues=tuple(issue.to_dict() for issue in missing_scanners),
+            issues=tuple(issue.to_dict() for issue in (*missing_scanners, *health_issues)),
         )
 
     batch_id = str(operator.get("batch_id") or "").strip() or None
@@ -231,6 +282,49 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
             config_path=str(config_path),
             batch_id=batch_id,
             issues=({"code": "BATCH_STATE_INVALID", "message": str(exc), "blocking": True},),
+        )
+
+    workflow_version = batch_state.get("workflow_version")
+    if workflow_version != CURRENT_WORKFLOW_VERSION and not (
+        workflow_version is None and legacy_state_is_pristine(batch_state)
+    ):
+        return ProjectStatus(
+            state="BATCH_WORKFLOW_INCOMPATIBLE",
+            summary="当前批次使用旧版或未知执行流程，不能安全续跑。",
+            next_action="PLAN",
+            next_instruction="保留旧批次证据；再次运行 review.cmd 创建新批次。",
+            config_path=str(config_path),
+            batch_id=batch_id,
+            batch_status=str(batch_state.get("status") or "UNKNOWN"),
+            inventory=inventory,
+            issues=(
+                {
+                    "code": "BATCH_WORKFLOW_INCOMPATIBLE",
+                    "message": (
+                        f"批次执行模式 {workflow_version!r} 与当前模式 "
+                        f"{CURRENT_WORKFLOW_VERSION!r} 不兼容"
+                    ),
+                    "blocking": True,
+                },
+            ),
+        )
+    if batch_state.get("inventory_csv_sha256") not in {None, inventory.get("csv_sha256")}:
+        return ProjectStatus(
+            state="BATCH_INVENTORY_CHANGED",
+            summary="当前 CSV 已在批次创建后发生变化，不能继续原批次。",
+            next_action="PLAN",
+            next_instruction="保留旧批次证据；再次运行 review.cmd 根据当前 CSV 创建新批次。",
+            config_path=str(config_path),
+            batch_id=batch_id,
+            batch_status=str(batch_state.get("status") or "UNKNOWN"),
+            inventory=inventory,
+            issues=(
+                {
+                    "code": "BATCH_INVENTORY_CHANGED",
+                    "message": "批次记录的 CSV SHA-256 与当前文件不一致",
+                    "blocking": True,
+                },
+            ),
         )
 
     batch_status = str(batch_state.get("status") or "UNKNOWN")

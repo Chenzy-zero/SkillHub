@@ -51,6 +51,18 @@ class SnapshotTests(unittest.TestCase):
         self.git("commit", "-qm", message)
         return self.git("rev-parse", "HEAD")
 
+    def symlink_or_skip(self, link: Path, target: str) -> None:
+        """Create a fixture symlink, skipping only the Windows privilege case."""
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest(
+                    "Windows symlink fixtures require Developer Mode or elevated privileges "
+                    "(WinError 1314)"
+                )
+            raise
+
     def make_basic_skill(self) -> None:
         skill = self.repo / "skills" / "demo"
         (skill / "scripts").mkdir(parents=True)
@@ -62,8 +74,8 @@ class SnapshotTests(unittest.TestCase):
         script.chmod(0o755)
         (skill / "nested" / "SKILL.md").write_text("# nested\n", encoding="utf-8")
         (skill / "asset.bin").write_bytes(b"\x00\x01binary\xff")
-        (skill / "safe-link").symlink_to("SKILL.md")
-        (skill / "outside-link").symlink_to("/etc/passwd")
+        self.symlink_or_skip(skill / "safe-link", "SKILL.md")
+        self.symlink_or_skip(skill / "outside-link", "/etc/passwd")
 
     def test_exports_git_bytes_without_checkout_and_writes_manifest(self) -> None:
         self.make_basic_skill()
@@ -114,7 +126,7 @@ class SnapshotTests(unittest.TestCase):
         script = skill / "run.sh"
         script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         script.chmod(0o755)
-        (skill / "safe-link").symlink_to("SKILL.md")
+        self.symlink_or_skip(skill / "safe-link", "SKILL.md")
         revision = self.commit()
         archive = self.root / "skill.tar"
         self.git(

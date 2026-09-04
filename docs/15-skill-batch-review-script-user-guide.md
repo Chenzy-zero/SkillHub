@@ -45,6 +45,13 @@ results_root = "/data/skill-review/results"
 clone，网络临时文件包含整个 revision；程序只物化 CSV 白名单 Skill，且提取完成立即删除 tar。
 可选清单字段统一使用 `product_line`、`user_name`、`user_email`。
 
+当前目标 Gerrit 的下载能力有明确边界：服务端会忽略 `--filter=blob:none`，因此不支持
+partial clone；服务端也不允许对未通过远端引用广播的 SHA 直接 `fetch`，不能把任意未广播的
+Commit 当作可下载版本；`git archive --remote` 不接受 `-- <skill_path>` 这样的路径限定参数。
+所以默认流程是先用 `git ls-remote` 冻结分支当时的 HEAD，再以该 Revision 下载一次整仓、无历史
+归档，最后在本地只提取 CSV 中登记的 Skill。整仓归档只用于传输，不会作为完整仓库保留；若固定
+Revision 无法由 Gerrit 出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`，不能静默改用其他版本。
+
 面向普通操作人员的默认入口进一步简化为：首次使用 `init.cmd`/`init.sh`，之后始终使用
 `review.cmd`/`review.sh`。免参数入口自动保存本机配置路径和当前批次号，并根据状态调用底层
 启动器。一次确认后会连续执行计划和静态阶段；AI 阶段可在 Claude Code 输入
@@ -200,6 +207,13 @@ UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是任何上游 Skill �
 
 Windows 可以作为配置、发起和查看结果的操作端，但首批正式扫描不建议直接在 Windows 执行。原因是当前尚未在 Windows 验证 Git 符号链接、文件权限位、路径大小写和快照摘要是否与 Linux 一致。Windows 应通过 SSH 连接 CentOS 扫描节点执行以下命令。
 
+测试快照时，如果 Windows 未开启开发者模式且当前账号没有创建符号链接的权限，相关测试会因
+`WinError 1314` 自动跳过，并在测试输出中说明需要开发者模式或提升权限。这个跳过只针对
+`WinError 1314`；其他符号链接错误仍会使测试失败。开启方式是 Windows“设置 → 隐私和安全性
+→ 开发者选项 → 开发者模式”（不同版本 Windows 的菜单名称可能略有差异）。生产下载和扫描
+流程不依赖测试用例中的符号链接，因此该测试跳过不代表扫描结果自动通过；正式环境仍建议使用
+Linux 扫描节点完成基线验证。
+
 CentOS 7.9 已停止主流维护，扫描节点应隔离部署、使用只读 Gerrit 账号并限制出站网络。不要使用系统自带 Python；单独安装 Python 3.12、3.13 或 3.14。使用 3.14 时必须确认公司内网源具备兼容的二进制 wheel。
 
 ### 5.2 批处理程序安装
@@ -258,7 +272,9 @@ LangGraph Studio 开发服务，扫描代码本身没有引用它，却会继续
 2. 从官方 wheel 元数据提取真实运行依赖范围，并只在当前公司 pip 源中解析可用版本；
 3. 排除未被扫描代码使用的 `langgraph-cli[inmem]` 开发服务链；
 4. 使用 `--no-deps` 安装原始官方 SkillSpector wheel；
-5. 再核对 SkillSpector 版本和命令行文件。
+5. 核对 SkillSpector 版本和命令行文件；
+6. 在限制外部网络的环境变量下，对项目自带的最小 Skill 执行一次真实扫描；
+7. 两套扫描器都通过后写入 `scanner-health.json` 健康记录。
 
 这会同时避开 `forbiddenfruit`、`blockbuster` 和 `langgraph-runtime-inmem`，不需要逐个补包。
 依赖安装使用同步模式，会自动移除 SkillSpector 隔离环境内此前失败尝试遗留的多余包；无需手工清理
@@ -312,17 +328,25 @@ python3.12 batch-review/tools/install_scanners.py \
 其他包；Linux/CentOS 仍保持全部 wheel。公司包源需要同步这个固定版本的源码制品并完成内部
 审核。如果其他依赖缺少 wheel，安装仍会停止。
 
-安装器完成后使用 Python 包元数据核对实际版本，不会启动
-`skill-scanner.exe --version` 或 `skillspector.exe --version`。这是为了避免某些上游命令行入口在解析
-`--version` 之前就加载可选组件，从而意外发起网络请求。版本是否符合固定值仍会严格校验。
+安装器先使用 Python 包元数据核对实际版本，不会调用扫描器的 `--version`。随后使用项目自带的
+`packages/scanner-smoke-skill/` 分别执行一次真实静态扫描。冒烟过程固定空 tiktoken 缓存，并将常见
+模型和 HTTP 客户端指向离线环境；扫描器必须在限定时间内生成有效 JSON。任一工具启动失败、尝试下载
+tiktoken 词表或没有生成有效报告，安装均视为失败，不会写入健康记录。
 
-Cisco 2.0.13 的命令行会在启动时加载可选 LLM 模块，其 LiteLLM 依赖默认尝试从
-GitHub 读取模型价格表，即使实际扫描命令没有启用 LLM。本项目的 Cisco 扫描适配器会强制设置
-`LITELLM_LOCAL_MODEL_COST_MAP=True`，使其使用已安装包内自带的备用数据，不需要人工配置，也不允许外部
-环境值覆盖该限制。
+Cisco 2.0.13 的命令行会在启动时加载可选 LLM 模块；该模块还会通过 tiktoken 下载 BPE 词表，即使
+实际命令没有启用 LLM。安装器会在 Cisco 专用环境安装完成后移除 `litellm`，并验证该模块确实不可见。
+这是固定版本 Cisco 的“仅静态扫描”运行配置，不影响当前启用的本地规则；配置仍禁止 LLM、behavioral、
+VirusTotal 和 AI Defense 参数。适配器继续设置 `LITELLM_LOCAL_MODEL_COST_MAP=True` 作为额外保护。
 
 遇到截图中的错误后无需删除 `.scanner-tools`，拉取本次修复并再次双击 `review.cmd` 即可；
-安装过程是可重复执行的。
+安装过程是可重复执行的。旧环境没有 `scanner-health.json` 时，`review.cmd` 会主动提示重新安装，不再只因
+扫描器 exe 已存在就误判环境可用。
+
+### 5.3.1 旧批次升级边界
+
+当前按仓库归档流程使用独立的 `workflow_version`。完全没有下载或扫描过的旧计划可以自动补充版本标识；
+已经下载、扫描、等待 AI 或完成任一 Skill 的旧批次不得续跑。`review.cmd` 会保留旧证据并引导创建新批次，
+避免同一结果表前半部分使用 CSV 固定 revision、后半部分使用仓库分支 HEAD。
 
 Windows 下载或清理 Skill 时，Git 可能将 `.transport.git/objects/pack` 内的 `*.idx`、`*.pack`
 标记为只读，杀毒软件或文件索引也可能短暂占用这些文件。项目清理函数会先恢复只读文件的写权限，
@@ -371,9 +395,13 @@ skillspector scan <skill_root> --no-llm --format json --output <output_file>
 
 Cisco 配置不得增加 LLM、behavioral、VirusTotal 或 AI Defense 上传选项；SkillSpector 必须保留 `--no-llm`。
 
-不要手工执行扫描器的 `--version` 作为安装验收；重新执行上述安装器即可通过包元数据
-完成无网络版本校验。SkillSpector 即使使用 `--no-llm` 仍会尝试把依赖名称和版本发送给 OSV.dev；公司
+不要手工执行扫描器的 `--version` 作为安装验收；重新执行上述安装器即可完成版本核对和真实静态冒烟。
+SkillSpector 即使使用 `--no-llm` 仍会尝试把依赖名称和版本发送给 OSV.dev；公司
 环境不允许该出站访问时，应在网络层阻断，它会退回内置离线规则。该限制必须记录到扫描覆盖信息中。
+
+SkillSpector 2.5.1 的问题说明字段使用 `explanation`，部分规则（例如 LP3）的 `finding` 可以为空。适配器
+会优先保留并读取 `explanation`；只有说明字段全部为空时才判定报告不完整。返回码 1 且报告完整时仍按
+`DO_NOT_INSTALL` 处理，不会因为兼容字段而放行。
 
 ### 5.5 Gerrit SSH 准备
 
