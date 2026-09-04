@@ -347,6 +347,11 @@ VirusTotal 和 AI Defense 参数。适配器继续设置 `LITELLM_LOCAL_MODEL_CO
 安装过程是可重复执行的。旧环境没有 `scanner-health.json` 时，`review.cmd` 会主动提示重新安装，不再只因
 扫描器 exe 已存在就误判环境可用。
 
+若前一次安装在 SkillSpector 冒烟阶段中止，Cisco 环境可能已完成 `litellm` 移除但尚未来得及写入整体
+健康记录。再次运行安装器时会自动清空并重建这个可丢弃的 Cisco 专用虚拟环境，避免 uv 读取残缺的
+`litellm-*.dist-info/METADATA`；不需要手动删除 `.scanner-tools`。uv 在 Windows 上固定使用复制模式，
+不会再反复输出跨文件系统无法 hardlink 的警告。
+
 ### 5.3.1 旧批次升级边界
 
 当前按仓库归档流程使用独立的 `workflow_version`。完全没有下载或扫描过的旧计划可以自动补充版本标识；

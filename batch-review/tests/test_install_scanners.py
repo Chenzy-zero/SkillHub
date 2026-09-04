@@ -171,6 +171,34 @@ class ScannerInstallerTests(unittest.TestCase):
         environment = MODULE._pip_environment("https://mirror.example/simple")
         self.assertEqual(environment["PIP_INDEX_URL"], "https://mirror.example/simple")
         self.assertEqual(environment["UV_INDEX_URL"], "https://mirror.example/simple")
+        self.assertEqual(environment["UV_LINK_MODE"], "copy")
+
+    def test_cisco_repair_recreates_same_version_environment(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            environment = root / "cisco"
+            environment.mkdir()
+            base_python = root / "python.exe"
+            base_python.write_text("python", encoding="utf-8")
+            with (
+                patch.object(MODULE, "_venv_python", return_value=base_python),
+                patch.object(
+                    MODULE,
+                    "_python_identity",
+                    return_value=(base_python, (3, 14)),
+                ),
+                patch.object(MODULE, "_run") as run,
+            ):
+                selected = MODULE._ensure_scanner_environment(
+                    environment,
+                    base_python,
+                    recreate=True,
+                )
+
+            self.assertEqual(selected, base_python)
+            command = run.call_args.args[0]
+            self.assertIn("--clear", command)
+            self.assertEqual(command[-1], str(environment))
 
     def test_uv_installs_exact_scanner_version_into_selected_environment(self):
         command = MODULE._uv_install_command(

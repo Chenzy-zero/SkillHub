@@ -242,7 +242,12 @@ def _skillspector_python(runtime_root: Path | None = None) -> Path:
     )
 
 
-def _ensure_scanner_environment(environment: Path, base_python: Path) -> Path:
+def _ensure_scanner_environment(
+    environment: Path,
+    base_python: Path,
+    *,
+    recreate: bool = False,
+) -> Path:
     """Create or safely refresh one disposable scanner virtual environment."""
 
     expected = _python_identity((str(base_python),))
@@ -254,7 +259,7 @@ def _ensure_scanner_environment(environment: Path, base_python: Path) -> Path:
         if environment_python.is_file()
         else None
     )
-    if actual is None or actual[1] != expected[1]:
+    if recreate or actual is None or actual[1] != expected[1]:
         environment.parent.mkdir(parents=True, exist_ok=True)
         command = [str(base_python), "-m", "venv"]
         if environment.exists():
@@ -269,6 +274,7 @@ def _ensure_scanner_environment(environment: Path, base_python: Path) -> Path:
 def _pip_environment(index_url: str | None) -> dict[str, str]:
     environment = os.environ.copy()
     environment.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
+    environment.setdefault("UV_LINK_MODE", "copy")
     if index_url:
         environment["PIP_INDEX_URL"] = index_url
         environment["UV_INDEX_URL"] = index_url
@@ -673,7 +679,15 @@ def install_scanner(
     base_python: Path,
 ) -> Path:
     environment = root / package.name
-    python = _ensure_scanner_environment(environment, base_python)
+    # Cisco's deliberately removed static-only dependency can leave an
+    # incomplete dist-info directory if a later scanner fails before the
+    # health marker is written. Recreate this disposable venv on every repair
+    # run so uv never has to parse stale or partial metadata.
+    python = _ensure_scanner_environment(
+        environment,
+        base_python,
+        recreate=package.name == "cisco",
+    )
     requirement = _install_requirement(package)
     if package.name == "skillspector":
         runtime_requirements = _skillspector_runtime_requirements(package)
