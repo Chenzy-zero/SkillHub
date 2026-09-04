@@ -189,7 +189,7 @@ status
 - 审查前必须从 Gerrit 冻结实际来源版本，并与 CSV、分支和 Skill 路径对账；
 - Source 事实身份仍包含 branch，不删除多分支来源；批量审查选择视图按 `repo_name + normalized_skill_path` 比较各分支中该路径最近变化时间，只审常规最新候选；
 - 同时间但内容不同的分支版本不能静默任选，应分别检查并进入人工确认；
-- 同一仓库一次下载，但不同 Skill 可以绑定不同冻结 Revision；
+- 当前逐 Skill 流程每次只下载一个 Skill；优先使用 Gerrit 远程目录归档，备用 partial fetch，不允许静默退化为完整仓库下载；
 - Cisco AI Skill Scanner 与 NVIDIA SkillSpector 先对同一内容版本并行完成静态检查；
 - 扫描器安装入口先经公司 pip 源安装固定版 `uv==0.12.9`，再用 uv 解析固定版本扫描器，避免 pip 对 Cisco 大型间接依赖树产生 `resolution-too-deep`；SkillSpector 顶层包使用仓库内经 SHA-256 校验的 NVIDIA 2.5.1 官方 wheel；其误列为核心依赖但未被扫描代码引用的 `langgraph-cli[inmem]` 开发服务组件不安装，真实运行依赖按官方 wheel 声明的版本范围只从当前公司源解析，不使用公网解析出的传递版本锁，以 `--no-deps` 安装原始官方 wheel；Windows 64 位如缺少 Python 3.12/3.13，在用户确认后使用仓库内经 SHA-256 校验的 Python.org 3.13.15 官方安装包部署项目专用运行环境，不更改 PATH 或默认 Python；默认只允许 wheel，Windows 仅对固定的 `win-unicode-console==0.5` 开放单包源码构建例外；不得因此改用未批准的包源；
 - AI 审查使用项目级 `.claude/skills/skill-security-review/`，由 Claude Code 调用公司内网模型执行；AI Skill 只读、不联网、不执行被审查内容；该入口参考 UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是上游副本；
@@ -403,7 +403,7 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 - `docs/15-skill-batch-review-script-user-guide.md`：批量审查脚本配置、逐仓库执行、AI 结果导入、报告、清理和排障说明
 - `docs/16-skill-batch-review-quick-start.md`：公司配置模板、一键启动器与 Claude Code Skill 触发说明
 - `docs/17-per-skill-review-requirements.md`：逐 Skill 下载、归档、结果和筛选需求
-- `docs/18-per-skill-review-design.md`：逐 Skill partial fetch、目录、复用和 JSON/CSV 设计
+- `docs/18-per-skill-review-design.md`：逐 Skill 远程归档/partial fetch、目录、复用和 JSON/CSV 设计
 - `docs/19-per-skill-review-implementation-tasks.md`：逐 Skill 审查实施任务与验收场景
 - `docs/20-project-initialization-and-guided-operation.md`：首次初始化、状态判断、双击入口和 ask-cc 使用说明
 - `batch-review/`：存量 Skill 批量审查程序、脱敏配置样例和本地测试

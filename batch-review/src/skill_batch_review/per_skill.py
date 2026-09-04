@@ -27,7 +27,7 @@ from .ai_review import (
 from .artifacts import EvidenceStore, safe_join
 from .config import ReviewConfig
 from .filesystem import remove_tree
-from .git_source import GitRunner
+from .git_source import GitCommandError, GitRunner
 from .inventory import InventoryDocument, InventoryRow
 from .orchestrator import _default_adapters, _run_static_scans, _scan_summary
 from .result_reuse import (
@@ -40,7 +40,7 @@ from .result_reuse import (
 )
 from .review_policy import evaluate_policy
 from .scanners import ScannerAdapter
-from .snapshot import SnapshotResult, export_skill_snapshot
+from .snapshot import SnapshotResult, export_skill_archive_snapshot, export_skill_snapshot
 
 
 class PerSkillError(RuntimeError):
@@ -110,6 +110,8 @@ class PartialDownload:
     task_root: Path
     repository: Path
     revision: str
+    snapshot: SnapshotResult | None = None
+    transport: str = "partial_clone"
 
 
 def partial_fetch_skill_repository(
@@ -169,9 +171,75 @@ def partial_fetch_skill_repository(
         active_runner = GitRunner(env=environment)
     url = config.gerrit.repository_url(row.repo_name, branch=row.branch)
     try:
+        ref = f"refs/heads/{row.branch}"
+        remote = active_runner.checked(("ls-remote", "--exit-code", url, ref), cwd=task_root)
+        matches = [
+            line.split()
+            for line in remote.stdout.splitlines()
+            if line.strip()
+        ]
+        if len(matches) != 1 or len(matches[0]) != 2 or matches[0][1] != ref:
+            raise PerSkillError(f"cannot resolve exactly one remote branch: {ref}")
+        head = matches[0][0].lower()
+        if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", head):
+            raise PerSkillError("Gerrit returned an invalid branch revision")
+        if head != row.inventory_revision.lower():
+            raise PerSkillError(
+                f"STALE_INVENTORY: branch head {head} differs from CSV {row.inventory_revision}"
+            )
+
+        archive_path = task_root / ".skill-archive.tar"
+        archive_command = [
+            "archive",
+            f"--remote={url}",
+            "--format=tar",
+            f"--output={archive_path}",
+            ref,
+        ]
+        if row.skill_path != ".":
+            archive_command.extend(("--", row.skill_path))
+        try:
+            active_runner.checked(tuple(archive_command), cwd=task_root)
+        except GitCommandError:
+            if archive_path.exists():
+                archive_path.unlink()
+        else:
+            if not archive_path.is_file():
+                raise PerSkillError("Gerrit remote archive reported success without an archive file")
+            remote_after = active_runner.checked(
+                ("ls-remote", "--exit-code", url, ref), cwd=task_root
+            )
+            after_matches = [line.split() for line in remote_after.stdout.splitlines() if line.strip()]
+            if (
+                len(after_matches) != 1
+                or len(after_matches[0]) != 2
+                or after_matches[0][1] != ref
+                or after_matches[0][0].lower() != head
+            ):
+                raise PerSkillError(
+                    "STALE_SOURCE: branch changed while the remote Skill archive was downloaded"
+                )
+            root_name = _component(
+                skill_root_name(row.skill_path, row.skill_name), "skill_name"
+            )
+            snapshot = export_skill_archive_snapshot(
+                archive_path,
+                row.repo_name,
+                head,
+                row.skill_path,
+                task_root / root_name,
+            )
+            archive_path.unlink()
+            return PartialDownload(
+                task_root,
+                task_root,
+                head,
+                snapshot=snapshot,
+                transport="remote_archive",
+            )
+
         active_runner.checked(("init", "--bare", str(repository)), cwd=task_root)
         active_runner.checked(("remote", "add", "origin", url), cwd=repository)
-        ref = f"refs/heads/{row.branch}"
         result = active_runner.run(
             (
                 "fetch",
@@ -186,15 +254,20 @@ def partial_fetch_skill_repository(
         )
         diagnostic = (result.stdout + "\n" + result.stderr).lower()
         if any(marker in diagnostic for marker in _FILTER_UNSUPPORTED):
-            raise PerSkillError("PARTIAL_CLONE_UNSUPPORTED: Gerrit ignored blob:none filtering")
+            raise PerSkillError(
+                "SKILL_ONLY_DOWNLOAD_UNSUPPORTED: Gerrit supports neither remote archive "
+                "nor partial-clone filtering; full-repository fallback is disabled"
+            )
         if not result.ok:
             raise PerSkillError(f"partial fetch failed with exit code {result.returncode}: {result.stderr[:500]}")
-        head = active_runner.checked(("rev-parse", f"{ref}^{{commit}}"), cwd=repository).stdout.strip().lower()
-        if head != row.inventory_revision.lower():
+        fetched_head = active_runner.checked(
+            ("rev-parse", f"{ref}^{{commit}}"), cwd=repository
+        ).stdout.strip().lower()
+        if fetched_head != head:
             raise PerSkillError(
-                f"STALE_INVENTORY: branch head {head} differs from CSV {row.inventory_revision}"
+                f"STALE_INVENTORY: fetched branch head {fetched_head} differs from remote {head}"
             )
-        return PartialDownload(task_root, repository, head)
+        return PartialDownload(task_root, repository, head, transport="partial_clone")
     except Exception as operation_error:
         if task_root.exists() and not config.workspace.keep_failed_workspace:
             try:
@@ -372,7 +445,7 @@ def prepare_skill(
         )
     downloaded = downloader(config, batch_id=batch_id, row=row, task_id=task_id)
     export_root = downloaded.task_root / root_name
-    snapshot = export_skill_snapshot(
+    snapshot = downloaded.snapshot or export_skill_snapshot(
         downloaded.repository,
         downloaded.revision,
         row.skill_path,
@@ -380,6 +453,7 @@ def prepare_skill(
     )
     snapshot = _archive_snapshot(config, row, snapshot)
     source = _source_mapping(config, row, snapshot)
+    source["download_transport"] = downloaded.transport
     evidence = EvidenceStore(
         config.workspace.evidence_root,
         batch_id,

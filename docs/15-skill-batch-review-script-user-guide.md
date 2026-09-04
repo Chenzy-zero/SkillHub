@@ -20,7 +20,7 @@
 `skill_id`，并由上游保证是需要审查的最终版本。默认流程为：
 
 ```text
-逐 Skill partial fetch
+逐 Skill 远程目录归档（优先）/ partial fetch（备用）
 → 只导出 skill_path
 → skills/<skill_id>/<skill_name>/
 → 静态与 AI 审查或结果复用
@@ -38,8 +38,9 @@ skills_root = "/data/skill-review/skills"
 results_root = "/data/skill-review/results"
 ```
 
-Gerrit 必须支持 `--filter=blob:none`。服务端忽略过滤时程序返回
-`PARTIAL_CLONE_UNSUPPORTED`，不会静默退回完整仓库下载。可选清单字段统一使用
+程序先用 `git ls-remote` 核对分支版本，再优先通过 Gerrit `git-upload-archive` 仅下载
+`skill_path`。若远程归档被禁用，才尝试 `--filter=blob:none`；两种能力都不可用时返回
+`SKILL_ONLY_DOWNLOAD_UNSUPPORTED`，不会静默退回完整仓库下载。可选清单字段统一使用
 `product_line`、`user_name`、`user_email`。
 
 面向普通操作人员的默认入口进一步简化为：首次使用 `init.cmd`/`init.sh`，之后始终使用

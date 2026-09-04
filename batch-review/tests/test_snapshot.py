@@ -1,6 +1,8 @@
 import hashlib
+import io
 import json
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +15,7 @@ from skill_batch_review.snapshot import (
     UnsafePathError,
     calculate_skill_digest,
     canonical_manifest_json,
+    export_skill_archive_snapshot,
     export_skill_snapshot,
 )
 
@@ -103,6 +106,82 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(manifest["skill_digest"], result.skill_digest)
         self.assertFalse(manifest["coverage_complete"])
         self.assertEqual(manifest["entries"], [entry.to_dict() for entry in result.entries])
+
+    def test_remote_archive_snapshot_matches_git_object_digest(self) -> None:
+        skill = self.repo / "skills/demo"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# archived skill\n", encoding="utf-8")
+        script = skill / "run.sh"
+        script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+        (skill / "safe-link").symlink_to("SKILL.md")
+        revision = self.commit()
+        archive = self.root / "skill.tar"
+        self.git(
+            "archive",
+            "--format=tar",
+            f"--output={archive}",
+            revision,
+            "--",
+            "skills/demo",
+        )
+        archived = export_skill_archive_snapshot(
+            archive,
+            "team/demo",
+            revision,
+            "skills/demo",
+            self.root / "archive-snapshot",
+        )
+        direct = export_skill_snapshot(
+            self.repo,
+            revision,
+            "skills/demo",
+            self.root / "git-snapshot",
+        )
+        self.assertEqual(archived.skill_digest, direct.skill_digest)
+        self.assertEqual(
+            [entry.to_dict() | {"git_object_id": None} for entry in archived.entries],
+            [entry.to_dict() | {"git_object_id": None} for entry in direct.entries],
+        )
+        self.assertFalse((self.root / "archive-snapshot/safe-link").exists())
+
+    def test_remote_archive_rejects_path_traversal(self) -> None:
+        archive = self.root / "unsafe.tar"
+        content = b"escape"
+        with tarfile.open(archive, "w") as handle:
+            info = tarfile.TarInfo("skills/demo/../../escape.txt")
+            info.size = len(content)
+            handle.addfile(info, io.BytesIO(content))
+        with self.assertRaises(UnsafePathError):
+            export_skill_archive_snapshot(
+                archive,
+                "team/demo",
+                "a" * 40,
+                "skills/demo",
+                self.root / "unsafe-output",
+            )
+        self.assertFalse((self.root / "escape.txt").exists())
+
+    def test_remote_archive_marks_empty_gitlink_directory_incomplete(self) -> None:
+        archive = self.root / "submodule.tar"
+        content = b"# skill\n"
+        with tarfile.open(archive, "w") as handle:
+            marker = tarfile.TarInfo("skills/demo/SKILL.md")
+            marker.size = len(content)
+            handle.addfile(marker, io.BytesIO(content))
+            submodule = tarfile.TarInfo("skills/demo/vendor/")
+            submodule.type = tarfile.DIRTYPE
+            handle.addfile(submodule)
+        result = export_skill_archive_snapshot(
+            archive,
+            "team/demo",
+            "a" * 40,
+            "skills/demo",
+            self.root / "submodule-output",
+        )
+        self.assertFalse(result.coverage_complete)
+        self.assertIn("SUBMODULE_NOT_INCLUDED", {issue.code for issue in result.coverage_issues})
+        self.assertIn("vendor", {entry.relative_path for entry in result.entries})
 
     def test_digest_is_sorted_and_only_uses_path_type_mode_and_hash_or_target(self) -> None:
         self.make_basic_skill()

@@ -11,9 +11,9 @@
   ↓
 清理并建立本项 git_download 临时目录
   ↓
-Blobless Partial Fetch 固定分支
+核对远程分支 Commit
   ↓
-确认 FETCH_HEAD == latest_commitid
+远程归档 skill_path（优先）/ Blobless Partial Fetch（备用）
   ↓
 只导出 skill_path
   ↓
@@ -40,21 +40,26 @@ Blobless Partial Fetch 固定分支
 
 ```text
 git_download/<batch_id>/<task_id>/
-├── .transport.git/       仅用于 partial fetch 的临时裸仓库
-└── <skill_name>/         从固定 Commit 导出的纯 Skill 文件夹
+├── .transport.git/       仅在备用 partial fetch 时出现
+└── <skill_name>/         从已核对分支导出的纯 Skill 文件夹
 ```
 
-传输命令使用参数数组，不经过 Shell：
+传输命令使用参数数组，不经过 Shell。默认顺序：
 
 ```text
+git ls-remote --exit-code <受控 Gerrit URL> refs/heads/<branch>
+git archive --remote=<受控 Gerrit URL> --format=tar refs/heads/<branch> -- <skill_path>
+
+# 仅在远程归档不可用时探测：
 git init --bare .transport.git
 git remote add origin <受控 Gerrit URL>
 git fetch --no-tags --depth=1 --filter=blob:none origin refs/heads/<branch>
 ```
 
-若 Git 输出表明服务端忽略 `filter`，任务以 `PARTIAL_CLONE_UNSUPPORTED` 停止。导出阶段使用
-`git ls-tree` 和 `git cat-file` 按需读取目标 Skill Blob，不 Checkout、不运行 Hook、不运行
-仓库内容。
+归档前后均核对分支仍指向 CSV Commit。归档逐项校验路径、类型、大小和权限，不使用
+`extractall`，不生成符号链接。若远程归档不可用且服务端又忽略 `filter`，任务以
+`SKILL_ONLY_DOWNLOAD_UNSUPPORTED` 停止。备用导出使用 `git ls-tree` 和 `git cat-file` 按需读取
+目标 Skill Blob。不 Checkout、不运行 Hook、不运行仓库内容，也不回退完整仓库下载。
 
 ## 3. 永久 Skill 目录
 

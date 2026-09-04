@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import json
 import csv
+import io
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
 
 from skill_batch_review.config import load_config
 from skill_batch_review.inventory import parse_inventory_csv
-from skill_batch_review.git_source import GitResult
+from skill_batch_review.git_source import GitCommandError, GitResult
 from skill_batch_review.per_skill import (
     PartialDownload,
     PerSkillError,
@@ -188,6 +190,10 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
     def test_partial_fetch_refuses_server_that_ignores_blob_filter(self):
         class UnsupportedRunner:
             def checked(self, args, *, cwd=None, timeout=None):
+                if args[0] == "ls-remote":
+                    return GitResult(tuple(args), 0, f"{self.revision}\trefs/heads/main\n", "")
+                if args[0] == "archive":
+                    raise GitCommandError(GitResult(tuple(args), 1, "", "archive disabled"))
                 return GitResult(tuple(args), 0, "", "")
 
             def run(self, args, *, cwd=None, timeout=None, check=True, input_text=None):
@@ -200,19 +206,59 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
 
         config = self.config()
         row = self.inventory().rows[0]
-        with self.assertRaisesRegex(PerSkillError, "PARTIAL_CLONE_UNSUPPORTED"):
+        runner = UnsupportedRunner()
+        runner.revision = self.revision
+        with self.assertRaisesRegex(PerSkillError, "SKILL_ONLY_DOWNLOAD_UNSUPPORTED"):
             partial_fetch_skill_repository(
                 config,
                 batch_id="unsupported",
                 row=row,
                 task_id="skill-test",
-                runner=UnsupportedRunner(),
+                runner=runner,
             )
         self.assertFalse((config.workspace.git_download_root / "unsupported/skill-test").exists())
+
+    def test_remote_archive_downloads_only_skill_without_git_directory(self):
+        class ArchiveRunner:
+            def checked(self, args, *, cwd=None, timeout=None):
+                if args[0] == "ls-remote":
+                    return GitResult(tuple(args), 0, f"{self.revision}\trefs/heads/main\n", "")
+                if args[0] == "archive":
+                    output = Path(next(item.split("=", 1)[1] for item in args if item.startswith("--output=")))
+                    content = b"---\nname: sample\n---\n"
+                    with tarfile.open(output, "w") as archive:
+                        info = tarfile.TarInfo("skills/sample/SKILL.md")
+                        info.size = len(content)
+                        info.mode = 0o644
+                        archive.addfile(info, io.BytesIO(content))
+                    return GitResult(tuple(args), 0, "", "")
+                raise AssertionError(f"unexpected Git command: {args}")
+
+        config = self.config()
+        row = self.inventory().rows[0]
+        runner = ArchiveRunner()
+        runner.revision = self.revision
+        result = partial_fetch_skill_repository(
+            config,
+            batch_id="archive",
+            row=row,
+            task_id="skill-archive",
+            runner=runner,
+        )
+        self.assertEqual(result.transport, "remote_archive")
+        self.assertIsNotNone(result.snapshot)
+        self.assertTrue((result.task_root / "sample/SKILL.md").is_file())
+        self.assertFalse((result.task_root / ".transport.git").exists())
+        self.assertFalse((result.task_root / ".skill-archive.tar").exists())
+        cleanup_skill_download(config, batch_id="archive", task_id="skill-archive")
 
     def test_partial_fetch_recovers_same_task_left_by_failed_windows_cleanup(self):
         class SuccessfulRunner:
             def checked(self, args, *, cwd=None, timeout=None):
+                if args[0] == "ls-remote":
+                    return GitResult(tuple(args), 0, f"{self.revision}\trefs/heads/main\n", "")
+                if args[0] == "archive":
+                    raise GitCommandError(GitResult(tuple(args), 1, "", "archive disabled"))
                 if args[0] == "init":
                     self.assert_repository_was_removed = not Path(args[-1]).exists()
                     return GitResult(tuple(args), 0, "", "")

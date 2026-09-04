@@ -24,6 +24,7 @@ import os
 import posixpath
 import re
 import subprocess
+import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -585,6 +586,251 @@ def calculate_skill_digest(entries: Iterable[PackageEntry]) -> str:
     return hashlib.sha256(canonical_manifest_json(entries)).hexdigest()
 
 
+def export_skill_archive_snapshot(
+    archive: str | Path,
+    repository: str,
+    source_revision: str,
+    skill_path: str,
+    destination: str | Path,
+    *,
+    limits: SnapshotLimits | None = None,
+) -> SnapshotResult:
+    """Safely materialize a single Skill returned by ``git archive --remote``.
+
+    Archive members are parsed individually; ``extractall`` is deliberately
+    not used.  Paths, modes, sizes and symlinks receive the same treatment as
+    the local Git-object snapshot path, so scanners never follow links.
+    """
+
+    active_limits = limits or SnapshotLimits()
+    normalized_path = normalize_skill_path(skill_path)
+    revision = source_revision.strip().lower()
+    if not _REVISION_RE.fullmatch(revision):
+        raise GitSourceError("source_revision must be a complete 40- or 64-character Git object ID")
+    archive_path = Path(archive).expanduser().resolve(strict=True)
+    if not archive_path.is_file():
+        raise SnapshotError(f"remote Skill archive is not a file: {archive_path}")
+    destination_path = _prepare_destination(Path(destination).expanduser())
+    prefix = "" if normalized_path == "." else normalized_path + "/"
+    entries: list[PackageEntry] = []
+    issues: list[CoverageIssue] = []
+    seen: set[str] = set()
+    directories: set[str] = set()
+    copied_size = 0
+    declared_size = 0
+
+    try:
+        handle = tarfile.open(archive_path, mode="r:")
+    except (OSError, tarfile.TarError) as exc:
+        raise SnapshotError(f"cannot read remote Skill archive: {exc}") from exc
+    with handle:
+        for member in handle:
+            name = member.name.rstrip("/")
+            if not name:
+                continue
+            _validate_relative_path(name)
+            if member.isdir() and normalized_path.startswith(name + "/"):
+                # git archive includes parent directory headers before the
+                # requested subtree; they contain no package content.
+                continue
+            if normalized_path != "." and name == normalized_path and member.isdir():
+                continue
+            if prefix:
+                if not name.startswith(prefix):
+                    raise UnsafePathError("remote archive member escaped the requested Skill Root")
+                relative = name[len(prefix) :]
+            else:
+                relative = name
+            _validate_relative_path(relative)
+            if member.isdir():
+                directories.add(relative)
+                continue
+            if relative in seen:
+                raise SnapshotError(f"remote archive contains a duplicate path: {relative}")
+            seen.add(relative)
+            declared_size += member.size
+
+            if member.issym():
+                target_bytes = member.linkname.encode("utf-8", "surrogateescape")
+                target = _decode_symlink_target(target_bytes, relative, issues)
+                entries.append(
+                    PackageEntry(relative, "symlink", "120000", len(target_bytes), symlink_target=target)
+                )
+                issues.append(
+                    CoverageIssue(
+                        "SYMLINK_NOT_FOLLOWED",
+                        relative,
+                        "symlink target is recorded in the manifest and never followed",
+                        blocking=False,
+                    )
+                )
+                continue
+            if not member.isfile():
+                issues.append(
+                    CoverageIssue(
+                        "UNSUPPORTED_ARCHIVE_ENTRY",
+                        relative,
+                        f"remote archive entry type {member.type!r} was not materialized",
+                    )
+                )
+                continue
+
+            mode = "100755" if member.mode & 0o111 else "100644"
+            if member.size > active_limits.max_file_size_bytes:
+                entries.append(PackageEntry(relative, "file", mode, member.size))
+                issues.append(
+                    CoverageIssue(
+                        "FILE_TOO_LARGE",
+                        relative,
+                        f"file is {member.size} bytes; limit is {active_limits.max_file_size_bytes}",
+                    )
+                )
+                continue
+            if copied_size + member.size > active_limits.max_package_size_bytes:
+                entries.append(PackageEntry(relative, "file", mode, member.size))
+                issues.append(
+                    CoverageIssue(
+                        "PACKAGE_LIMIT_EXCEEDED",
+                        relative,
+                        "entry was not read after the package byte limit was reached",
+                    )
+                )
+                continue
+            source = handle.extractfile(member)
+            if source is None:
+                raise SnapshotError(f"cannot read remote archive member: {relative}")
+            content = source.read(member.size + 1)
+            if len(content) != member.size:
+                raise SnapshotError(f"remote archive member size mismatch: {relative}")
+            copied_size += len(content)
+            file_type = (
+                "lfs_pointer"
+                if _is_lfs_pointer(content)
+                else "binary"
+                if _is_binary(content)
+                else "file"
+            )
+            if file_type == "lfs_pointer":
+                issues.append(
+                    CoverageIssue(
+                        "LFS_POINTER",
+                        relative,
+                        "blob is a Git LFS pointer; the real LFS object was not included",
+                    )
+                )
+            elif file_type == "binary":
+                issues.append(
+                    CoverageIssue(
+                        "BINARY_FILE",
+                        relative,
+                        "binary bytes were captured; semantic scanner coverage requires review",
+                        blocking=False,
+                    )
+                )
+            _write_blob(destination_path, relative, content, mode)
+            entries.append(
+                PackageEntry(
+                    relative,
+                    file_type,
+                    mode,
+                    len(content),
+                    sha256=hashlib.sha256(content).hexdigest(),
+                )
+            )
+
+    # JGit represents a Git submodule as an empty directory in an archive.
+    # Git cannot track ordinary empty directories, so a deepest directory
+    # without any archived member is an omitted gitlink and must block review.
+    for directory in sorted(directories, key=lambda value: value.count("/"), reverse=True):
+        has_file = any(path.startswith(directory + "/") for path in seen)
+        has_child_directory = any(
+            child != directory and child.startswith(directory + "/")
+            for child in directories
+        )
+        if not has_file and not has_child_directory:
+            entries.append(PackageEntry(directory, "submodule", "160000", 0))
+            issues.append(
+                CoverageIssue(
+                    "SUBMODULE_NOT_INCLUDED",
+                    directory,
+                    "remote archive exposed an empty gitlink directory; submodule content is not included",
+                )
+            )
+
+    entry_count = len(entries)
+    if entry_count > active_limits.max_file_count:
+        issues.append(
+            CoverageIssue(
+                "FILE_COUNT_EXCEEDED",
+                None,
+                f"package contains {entry_count} entries; limit is {active_limits.max_file_count}",
+            )
+        )
+    if declared_size > active_limits.max_package_size_bytes:
+        issues.append(
+            CoverageIssue(
+                "PACKAGE_TOO_LARGE",
+                None,
+                f"package is {declared_size} bytes; limit is {active_limits.max_package_size_bytes}",
+            )
+        )
+    skill_entry = next((entry for entry in entries if entry.relative_path == "SKILL.md"), None)
+    if skill_entry is None:
+        issues.append(
+            CoverageIssue(
+                "MISSING_SKILL_MD",
+                None,
+                "requested Skill Root does not contain an exact SKILL.md entry",
+            )
+        )
+    elif skill_entry.file_type == "symlink":
+        issues.append(
+            CoverageIssue(
+                "SKILL_MD_NOT_REGULAR",
+                "SKILL.md",
+                "SKILL.md is not a regular readable file",
+            )
+        )
+    elif skill_entry.sha256 is None:
+        issues.append(
+            CoverageIssue(
+                "SKILL_MD_UNAVAILABLE",
+                "SKILL.md",
+                "SKILL.md exists in the archive but its content was not captured",
+            )
+        )
+    elif skill_entry.file_type == "lfs_pointer":
+        issues.append(
+            CoverageIssue(
+                "SKILL_MD_LFS_POINTER",
+                "SKILL.md",
+                "SKILL.md is an LFS pointer rather than the real content",
+            )
+        )
+    for entry in entries:
+        if entry.relative_path != "SKILL.md" and entry.relative_path.rsplit("/", 1)[-1] == "SKILL.md":
+            issues.append(
+                CoverageIssue(
+                    "NESTED_SKILL_MD",
+                    entry.relative_path,
+                    "nested SKILL.md detected; review it as a separate Skill Root",
+                    blocking=False,
+                )
+            )
+    entries.sort(key=lambda entry: entry.relative_path.encode("utf-8"))
+    digest = calculate_skill_digest(entries)
+    return SnapshotResult(
+        repository,
+        revision,
+        normalized_path,
+        destination_path,
+        tuple(entries),
+        digest,
+        tuple(issues),
+        declared_size,
+    )
+
+
 def export_skill_snapshot(
     repository: str | Path,
     source_revision: str,
@@ -851,5 +1097,6 @@ __all__ = [
     "UnsafePathError",
     "calculate_skill_digest",
     "canonical_manifest_json",
+    "export_skill_archive_snapshot",
     "export_skill_snapshot",
 ]

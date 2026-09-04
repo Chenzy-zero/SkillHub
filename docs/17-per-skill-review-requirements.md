@@ -54,8 +54,8 @@ CSV 已由上游筛选为需要审查的最新版本，本流程不再比较不�
 
 1. 严格按 CSV 行逐个处理；
 2. 每个 Skill 开始前确认临时下载目录为空；
-3. 使用 Git partial fetch 获取固定分支的 Commit、目录树及目标 Skill Blob；
-4. 服务端不支持 partial clone/filter 时明确失败，不静默下载完整仓库；
+3. 先核对远程分支 Commit，优先使用 Gerrit 远程归档仅获取目标 Skill 目录；
+4. 远程归档不可用时可尝试 Git partial fetch；两者都不支持时明确失败，不静默下载完整仓库；
 5. 从 Git 固定 Commit 导出 `skill_path`，只形成一个不含 `.git` 的 Skill 文件夹；
 6. 将 Skill 文件夹迁移到 `skills/<skill_id>/<skill_name>/`；
 7. 对永久 Skill 文件夹执行两套静态检查和 AI 审查；
