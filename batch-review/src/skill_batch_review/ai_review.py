@@ -65,16 +65,15 @@ def build_ai_review_handoff(
     policy_version: str,
     assigned_reviewed_at: str,
     reviewer_model: str,
-    manifest_path: Path,
     result_schema_path: Path,
-    result_output_path: Path,
     require_complete_inputs: bool = True,
 ) -> dict[str, Any]:
     """Build the exact read-only context handed to Claude Code.
 
     No process is launched and no file is written.  The caller may save this
-    dictionary in the restricted evidence area and invoke the project Skill
-    manually with only Read/Glob/Grep permissions.
+    dictionary in the restricted evidence area. The model receives package
+    content plus compact frozen metadata; scanner reports remain program-only
+    evidence and are merged after the AI result is validated.
     """
 
     if len(scans) != 2:
@@ -86,7 +85,6 @@ def build_ai_review_handoff(
         raise AIReviewValidationError(["snapshot is missing skill_digest"])
     if not getattr(snapshot, "source_revision", None):
         raise AIReviewValidationError(["snapshot is missing source_revision"])
-    scan_payloads: list[dict[str, Any]] = []
     errors: list[str] = []
     for scanner in ("cisco", "skillspector"):
         scan = by_name[scanner]
@@ -95,27 +93,13 @@ def build_ai_review_handoff(
             errors.append(f"{scanner} digest does not match the snapshot")
         if require_complete_inputs and handoff_status != "COMPLETED":
             errors.append(f"{scanner} scan is not complete and successful")
-        version = getattr(scan, "tool_version", None)
-        effective_version = getattr(version, "version", None)
-        scan_payloads.append(
-            {
-                "scanner": (
-                    "CISCO_AI_SKILL_SCANNER"
-                    if scanner == "cisco"
-                    else "NVIDIA_SKILLSPECTOR"
-                ),
-                "status": handoff_status,
-                "tool_version": effective_version,
-                "rules_or_config_version": getattr(scan, "config_digest", None),
-                "scanned_digest_sha256": getattr(scan, "skill_digest", None),
-                "report_path": getattr(scan, "raw_report_path", None)
-                or getattr(scan, "report_path", None),
-            }
-        )
     if require_complete_inputs and not bool(getattr(snapshot, "coverage_complete", False)):
         errors.append("snapshot coverage is incomplete")
     if errors:
         raise AIReviewValidationError(errors)
+    files_expected = getattr(snapshot, "file_count", None)
+    if not isinstance(files_expected, int):
+        files_expected = len(getattr(snapshot, "entries", ()))
     return {
         "schema_version": "1.0",
         "review_id": review_id,
@@ -123,9 +107,14 @@ def build_ai_review_handoff(
         "assigned_reviewed_at": assigned_reviewed_at,
         "reviewer_model": reviewer_model,
         "skill_root": str(Path(snapshot.snapshot_path).resolve()),
-        "package_manifest_path": str(manifest_path.resolve()),
         "result_schema_path": str(result_schema_path.resolve()),
-        "result_output_path": str(result_output_path.resolve()),
+        "package_summary": {
+            "coverage_complete": bool(getattr(snapshot, "coverage_complete", False)),
+            "files_expected": files_expected,
+            "coverage_issues": [
+                issue.to_dict() for issue in getattr(snapshot, "coverage_issues", ())
+            ],
+        },
         "subject": {
             "skill_name": source.skill_name,
             "repo_name": source.repo_name,
@@ -135,11 +124,9 @@ def build_ai_review_handoff(
             "source_revision": snapshot.source_revision,
             "skill_digest_sha256": snapshot.skill_digest,
         },
-        "static_reports": scan_payloads,
         "execution_boundary": {
             "allowed_tools": ["Read", "Glob", "Grep"],
             "network_allowed": False,
-            "write_allowed": False,
             "execute_target_content": False,
             "invoke_skill": "/skill-security-review",
         },
@@ -202,16 +189,6 @@ def _semantic_errors(
         errors.append("$.input_coverage.files_reviewed exceeds files_expected")
 
     package_digest = subject["skill_digest_sha256"]
-    for index, report in enumerate(coverage["static_reports"]):
-        scanned_digest = report["scanned_digest_sha256"]
-        if report["status"] == "COMPLETED" and scanned_digest is None:
-            errors.append(
-                f"$.input_coverage.static_reports[{index}] completed without a digest"
-            )
-        if package_digest and scanned_digest and scanned_digest.lower() != package_digest.lower():
-            errors.append(
-                f"$.input_coverage.static_reports[{index}] digest differs from the package"
-            )
 
     incomplete = any(
         (
@@ -222,13 +199,9 @@ def _semantic_errors(
             subject["source_revision"] is None,
             package_digest is None,
             not coverage["package_complete"],
-            coverage["manifest_status"] != "COMPLETE",
             expected_files is None,
             expected_files is not None and reviewed_files != expected_files,
             bool(coverage["unreadable_or_skipped_files"]),
-            any(report["status"] != "COMPLETED" for report in coverage["static_reports"]),
-            not coverage["digest_consistent"],
-            not coverage["traceability_complete"],
         )
     )
     if incomplete and security["verdict"] not in {"BLOCK", "INCOMPLETE"}:

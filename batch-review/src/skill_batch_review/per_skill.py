@@ -765,9 +765,7 @@ def prepare_skill(
         policy_version=config.ai.policy_version,
         assigned_reviewed_at=assigned,
         reviewer_model=config.ai.reviewer_model,
-        manifest_path=safe_join(evidence.task_root, "package-manifest.json"),
         result_schema_path=config.ai.result_schema_path,
-        result_output_path=safe_join(evidence.task_root, "ai/imported-result.json"),
     )
     handoff_ref = evidence.write_json("ai/handoff.json", handoff)
     scan_paths = {

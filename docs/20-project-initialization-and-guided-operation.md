@@ -108,8 +108,8 @@ JSON 写入唯一约定位置，然后调用受信入口自动推进下一 Skill
 定位当前 `ai-review-current.json`，并指向自动入口。三个 Skill 的职责不同：
 
 - `/ask-cc`：判断项目走到哪里以及下一步是什么；
-- `/skill-security-review`：只读审查一个已经准备好的 Skill，并产生固定 JSON。
-- `/auto-skill-review`：重复调用单项审查规则并自动推进整个批次。
+- `/skill-security-review`：只审查一个已经准备好的 Skill Package，并产生固定 JSON；不读取静态扫描报告。
+- `/auto-skill-review`：以轻量主会话推进批次，每个 Skill 使用一个新的独立 Agent 上下文，避免多个 Skill 的内容累积到同一上下文。
 
 ## 5. 本机文件
 

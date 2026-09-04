@@ -216,7 +216,7 @@ skill-batch-review prepare-repository review.toml \
 
 1. 在公司内网模型环境启动 Claude Code；
 2. 在包含本项目的 Claude Code 工作区中调用项目级 Skill：`/skill-security-review`；该入口文件位于 `.claude/skills/skill-security-review/SKILL.md`；
-3. 把该任务 `handoff` JSON 作为唯一任务上下文；
+3. 把该任务的精简 `handoff` 元数据和 Skill Package 作为唯一任务上下文，不读取静态扫描报告、Manifest 或历史结果；
 4. 只开放读取能力，不开放 Bash、写文件、网络、MCP 或子代理；
 5. 将最终纯 JSON 保存为 `<ai-results-dir>/<task_id>.json`。
 

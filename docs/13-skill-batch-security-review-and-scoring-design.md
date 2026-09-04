@@ -506,7 +506,7 @@ AI 审查必须遵循：
 
 - 不依赖 OpenClaw 专属权限字段；缺少权限声明时按实际文件和行为推断；
 - 不以作者、仓库热度或已有 `security_reviewed` 值降低风险；
-- 同时读取完整 Skill Package 和两套静态报告；
+- 只读取完整 Skill Package 和最小任务元数据；两套静态报告由程序独立校验和汇总，不进入 AI 上下文；
 - 固定输出 JSON Schema，并把安全结论与质量得分分开；
 - 只允许读取，不执行 Skill、不联网、不修改目标内容。
 
@@ -937,7 +937,7 @@ private-candidates/
         ↓
 调用项目 skills/ 下的 AI 审查 Skill
         ↓
-AI 读取完整 Skill + 两套静态报告
+AI 只读取完整 Skill + 最小任务元数据
         ↓
 输出 AI 安全结论 + 质量各维度评分
         ↓
@@ -954,7 +954,7 @@ AI 读取完整 Skill + 两套静态报告
 .claude/skills/skill-security-review/
 ```
 
-Claude Code 从项目 `.claude/skills/` 自动发现该 Skill。批次控制层必须在两套静态报告完成后显式调用 `/skill-security-review`，不能依赖模型自行判断触发时机。审查会话只开放 `Read`、`Glob`、`Grep`，并禁用 MCP 和其他执行类工具。
+Claude Code 从项目 `.claude/skills/` 自动发现该 Skill。批次控制层必须在两套静态报告完成后显式调用 `/skill-security-review`，不能依赖模型自行判断触发时机。每个 Skill 使用独立上下文，只读取 Skill Package、结果 Schema 和最小任务元数据；不向模型提供静态扫描报告、Manifest 或历史结果。审查 Agent 只开放读取能力，以及仅写入指定结果 JSON 的能力，并禁用 MCP 和其他执行类工具。
 
 单个 Skill 的调用信息建议按以下模板提供：
 

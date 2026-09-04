@@ -76,20 +76,13 @@
       "additionalProperties": false,
       "required": [
         "package_complete",
-        "manifest_status",
         "files_expected",
         "files_reviewed",
         "unreadable_or_skipped_files",
-        "static_reports",
-        "digest_consistent",
-        "traceability_complete",
         "limitations"
       ],
       "properties": {
         "package_complete": {"type": "boolean"},
-        "manifest_status": {
-          "enum": ["COMPLETE", "MISSING", "INVALID", "MISMATCHED"]
-        },
         "files_expected": {"type": ["integer", "null"], "minimum": 0},
         "files_reviewed": {"type": "integer", "minimum": 0},
         "unreadable_or_skipped_files": {
@@ -97,30 +90,6 @@
           "items": {"type": "string"},
           "uniqueItems": true
         },
-        "static_reports": {
-          "type": "array",
-          "minItems": 2,
-          "maxItems": 2,
-          "items": {"$ref": "#/$defs/staticReport"},
-          "allOf": [
-            {
-              "contains": {
-                "type": "object",
-                "properties": {"scanner": {"const": "CISCO_AI_SKILL_SCANNER"}},
-                "required": ["scanner"]
-              }
-            },
-            {
-              "contains": {
-                "type": "object",
-                "properties": {"scanner": {"const": "NVIDIA_SKILLSPECTOR"}},
-                "required": ["scanner"]
-              }
-            }
-          ]
-        },
-        "digest_consistent": {"type": "boolean"},
-        "traceability_complete": {"type": "boolean"},
         "limitations": {
           "type": "array",
           "items": {"type": "string"}
@@ -158,7 +127,6 @@
                       "NETWORK_OR_DATA_MOVEMENT",
                       "DEPENDENCY_OR_INSTALLATION",
                       "PERSISTENCE_OR_CONCEALMENT",
-                      "STATIC_REPORT_CONFLICT",
                       "OTHER_SECURITY"
                     ]
                   }
@@ -338,35 +306,6 @@
     }
   },
   "$defs": {
-    "staticReport": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "scanner",
-        "status",
-        "tool_version",
-        "rules_or_config_version",
-        "scanned_digest_sha256",
-        "report_path"
-      ],
-      "properties": {
-        "scanner": {
-          "enum": ["CISCO_AI_SKILL_SCANNER", "NVIDIA_SKILLSPECTOR"]
-        },
-        "status": {
-          "enum": ["COMPLETED", "FAILED", "TIMEOUT", "MISSING", "INVALID"]
-        },
-        "tool_version": {"type": ["string", "null"]},
-        "rules_or_config_version": {"type": ["string", "null"]},
-        "scanned_digest_sha256": {
-          "anyOf": [
-            {"type": "string", "pattern": "^[a-fA-F0-9]{64}$"},
-            {"type": "null"}
-          ]
-        },
-        "report_path": {"type": ["string", "null"]}
-      }
-    },
     "location": {
       "type": "object",
       "additionalProperties": false,
@@ -383,7 +322,7 @@
       "required": ["source", "finding_id"],
       "properties": {
         "source": {
-          "enum": ["AI_REVIEW", "CISCO_AI_SKILL_SCANNER", "NVIDIA_SKILLSPECTOR"]
+          "const": "AI_REVIEW"
         },
         "finding_id": {"type": ["string", "null"]}
       }

@@ -874,7 +874,7 @@ allowed-tools: Read Glob Grep
 同时提供当前任务的 `handoff.json` 路径，并明确：
 
 ```text
-按照 handoff 中的 Skill 根目录、Manifest、两份静态报告、固定 Revision、Digest、策略版本和模型标识完成只读审查。
+按照 handoff 中的 Skill 根目录、固定 Revision、Digest、策略版本和模型标识完成审查。AI 不读取 Manifest、两份静态报告或历史结果；这些证据由程序独立校验和汇总。
 最终只返回符合 review-result.schema.json 的一个 JSON 对象，不要输出 Markdown 代码块或额外说明。
 ```
 

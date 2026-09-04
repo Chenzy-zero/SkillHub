@@ -76,30 +76,9 @@ def valid_ai_result(task_id: str, revision: str, digest: str) -> dict:
         },
         "input_coverage": {
             "package_complete": True,
-            "manifest_status": "COMPLETE",
             "files_expected": 2,
             "files_reviewed": 2,
             "unreadable_or_skipped_files": [],
-            "static_reports": [
-                {
-                    "scanner": "CISCO_AI_SKILL_SCANNER",
-                    "status": "COMPLETED",
-                    "tool_version": "1.0",
-                    "rules_or_config_version": "config-1",
-                    "scanned_digest_sha256": digest,
-                    "report_path": "cisco.json",
-                },
-                {
-                    "scanner": "NVIDIA_SKILLSPECTOR",
-                    "status": "COMPLETED",
-                    "tool_version": "1.0",
-                    "rules_or_config_version": "config-1",
-                    "scanned_digest_sha256": digest,
-                    "report_path": "skillspector.json",
-                },
-            ],
-            "digest_consistent": True,
-            "traceability_complete": True,
             "limitations": [],
         },
         "security_review": {

@@ -44,30 +44,9 @@ def valid_result():
         },
         "input_coverage": {
             "package_complete": True,
-            "manifest_status": "COMPLETE",
             "files_expected": 3,
             "files_reviewed": 3,
             "unreadable_or_skipped_files": [],
-            "static_reports": [
-                {
-                    "scanner": "CISCO_AI_SKILL_SCANNER",
-                    "status": "COMPLETED",
-                    "tool_version": "1.0",
-                    "rules_or_config_version": "policy-1",
-                    "scanned_digest_sha256": DIGEST,
-                    "report_path": "reports/cisco.json",
-                },
-                {
-                    "scanner": "NVIDIA_SKILLSPECTOR",
-                    "status": "COMPLETED",
-                    "tool_version": "1.0",
-                    "rules_or_config_version": "policy-1",
-                    "scanned_digest_sha256": DIGEST,
-                    "report_path": "reports/skillspector.json",
-                },
-            ],
-            "digest_consistent": True,
-            "traceability_complete": True,
             "limitations": [],
         },
         "security_review": {
@@ -123,9 +102,9 @@ class AIReviewValidationTests(unittest.TestCase):
         with self.assertRaises(AIReviewValidationError):
             self.validate(payload)
 
-    def test_incomplete_static_report_cannot_pass(self):
+    def test_incomplete_package_cannot_pass(self):
         payload = valid_result()
-        payload["input_coverage"]["static_reports"][0]["status"] = "TIMEOUT"
+        payload["input_coverage"]["package_complete"] = False
         with self.assertRaisesRegex(AIReviewValidationError, "must be INCOMPLETE"):
             self.validate(payload)
 
@@ -138,8 +117,6 @@ class AIReviewValidationTests(unittest.TestCase):
     def test_frozen_digest_must_match(self):
         payload = copy.deepcopy(valid_result())
         payload["subject"]["skill_digest_sha256"] = "c" * 64
-        for report in payload["input_coverage"]["static_reports"]:
-            report["scanned_digest_sha256"] = "c" * 64
         with self.assertRaisesRegex(AIReviewValidationError, "frozen package"):
             self.validate(payload)
 
@@ -189,11 +166,12 @@ class AIReviewValidationTests(unittest.TestCase):
                 policy_version="policy-1",
                 assigned_reviewed_at="2026-08-31T08:00:00Z",
                 reviewer_model="intranet-model",
-                manifest_path=root / "manifest.json",
                 result_schema_path=SCHEMA,
-                result_output_path=root / "ai-result.json",
             )
             self.assertEqual(context["subject"]["skill_digest_sha256"], DIGEST)
+            self.assertEqual(context["package_summary"]["files_expected"], 0)
+            self.assertNotIn("static_reports", context)
+            self.assertNotIn("package_manifest_path", context)
             self.assertEqual(context["execution_boundary"]["allowed_tools"], ["Read", "Glob", "Grep"])
 
             scans[0].tool_ok = False
@@ -206,9 +184,7 @@ class AIReviewValidationTests(unittest.TestCase):
                     policy_version="policy-1",
                     assigned_reviewed_at="2026-08-31T08:00:00Z",
                     reviewer_model="intranet-model",
-                    manifest_path=root / "manifest.json",
                     result_schema_path=SCHEMA,
-                    result_output_path=root / "ai-result.json",
                 )
 
 

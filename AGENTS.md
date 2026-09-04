@@ -192,7 +192,7 @@ status
 - 当前执行流程按 `repo_name + branch` 分组：冻结一次分支 HEAD、下载一次不含历史和 `.git` 的整仓归档、只提取 CSV 登记的全部 Skill，再逐一审查；同仓库全部 Skill 完成后才进入下一仓库；
 - Cisco AI Skill Scanner 与 NVIDIA SkillSpector 先对同一内容版本并行完成静态检查；SkillSpector 官方结果中的 `explanation` 是有效问题说明，`finding` 为空但 `explanation` 完整时不得误判为扫描失败；
 - 扫描器安装入口先经公司 pip 源安装固定版 `uv==0.12.9`，再用 uv 解析固定版本扫描器，避免 pip 对 Cisco 大型间接依赖树产生 `resolution-too-deep`；Cisco 2.0.13 的专用环境在安装后移除未启用且会触发 tiktoken 联网的 `litellm`，只保留静态扫描入口；SkillSpector 顶层包使用仓库内经 SHA-256 校验的 NVIDIA 2.5.1 官方 wheel；其误列为核心依赖但未被扫描代码引用的 `langgraph-cli[inmem]` 开发服务组件不安装，真实运行依赖按官方 wheel 声明的版本范围只从当前公司源解析，不使用公网解析出的传递版本锁，以 `--no-deps` 安装原始官方 wheel；安装完成必须在限制网络的环境中执行两套扫描器的真实最小 Skill 冒烟并写入健康记录；Windows 64 位如缺少 Python 3.12/3.13，在用户确认后使用仓库内经 SHA-256 校验的 Python.org 3.13.15 官方安装包部署项目专用运行环境，不更改 PATH 或默认 Python；默认只允许 wheel，Windows 仅对固定的 `win-unicode-console==0.5` 开放单包源码构建例外；不得因此改用未批准的包源；
-- AI 审查使用项目级 `.claude/skills/skill-security-review/`，由 Claude Code 调用公司内网模型执行；AI Skill 只读、不联网、不执行被审查内容；该入口参考 UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是上游副本；
+- AI 审查使用项目级 `.claude/skills/skill-security-review/`，由 Claude Code 调用公司内网模型执行；每个 Skill 使用独立上下文，AI 只读取 Skill Package 和最小任务元数据，不读取静态扫描报告、Manifest 或历史结果，不联网、不执行被审查内容；静态结果由程序独立合并；该入口参考 UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是上游副本；
 - 安全结论与质量得分分别保存。安全未通过或检查不完整时，质量高分不能放行；私密候选质量门槛当前为 70 分；
 - 通过内容只生成本地私密候选工作空间，不自动 Commit、Push 或上架；由负责人后续手动同步到私密 Git 中转仓库；
 - 原始报告进入受限证据区，不进入私密候选 Git 工作空间。

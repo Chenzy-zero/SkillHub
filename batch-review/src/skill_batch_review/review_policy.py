@@ -736,8 +736,6 @@ def _ai_completeness(review: Mapping[str, Any], expected_digest: str | None) -> 
         return reasons
     if coverage.get("package_complete") is not True:
         reasons.append("AI package coverage is incomplete")
-    if coverage.get("manifest_status") != "COMPLETE":
-        reasons.append("AI manifest is not complete")
     expected_files = coverage.get("files_expected")
     reviewed_files = coverage.get("files_reviewed")
     if not isinstance(expected_files, int) or not isinstance(reviewed_files, int):
@@ -746,30 +744,6 @@ def _ai_completeness(review: Mapping[str, Any], expected_digest: str | None) -> 
         reasons.append("AI file coverage counts differ")
     if coverage.get("unreadable_or_skipped_files"):
         reasons.append("AI review skipped or unreadable files")
-    if coverage.get("digest_consistent") is not True:
-        reasons.append("AI reports digest inconsistency")
-    if coverage.get("traceability_complete") is not True:
-        reasons.append("AI traceability is incomplete")
-    reports = coverage.get("static_reports")
-    seen: set[str] = set()
-    if not isinstance(reports, list):
-        reasons.append("AI static report list is missing")
-    else:
-        for report in reports:
-            if not isinstance(report, Mapping):
-                reasons.append("AI static report entry is invalid")
-                continue
-            scanner = _scanner_name(report.get("scanner"))
-            seen.add(scanner)
-            if report.get("status") != "COMPLETED":
-                reasons.append(f"AI static report for {scanner} is not complete")
-            report_digest = _text(_first(report, "scanned_digest_sha256", "skill_digest"))
-            if not report_digest:
-                reasons.append(f"AI static report for {scanner} has no digest")
-            elif expected_digest and report_digest.lower() != expected_digest.lower():
-                reasons.append(f"AI static report for {scanner} digest differs")
-    for scanner in sorted(_SCANNERS - seen):
-        reasons.append(f"AI static report for {scanner} is missing")
     reviewer = review.get("reviewer")
     if not isinstance(reviewer, Mapping) or not _text(reviewer.get("model")):
         reasons.append("AI reviewer model is missing")

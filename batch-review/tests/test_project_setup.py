@@ -199,6 +199,8 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("name: auto-skill-review", content)
         self.assertIn("review.cmd --auto", content)
         self.assertIn("Do not use Git", content)
+        self.assertIn("fresh Agent", content)
+        self.assertIn("Do not read `package-manifest.json`", content)
 
     def test_duplicate_skill_id_is_reported_before_plan(self):
         config, _ = self._ready_config()
