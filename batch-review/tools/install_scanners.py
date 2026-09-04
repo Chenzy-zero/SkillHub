@@ -378,11 +378,13 @@ def _uv_requirements_command(
     return (
         str(uv),
         "pip",
-        "sync",
+        "install",
         "--python",
         str(python),
         "--only-binary",
         ":all:",
+        "--upgrade",
+        "-r",
         str(requirements),
     )
 
@@ -679,14 +681,13 @@ def install_scanner(
     base_python: Path,
 ) -> Path:
     environment = root / package.name
-    # Cisco's deliberately removed static-only dependency can leave an
-    # incomplete dist-info directory if a later scanner fails before the
-    # health marker is written. Recreate this disposable venv on every repair
-    # run so uv never has to parse stale or partial metadata.
+    # A failed repair can leave either isolated environment with incomplete
+    # metadata or a partial dependency graph. Both are disposable, so rebuild
+    # them before resolving packages instead of asking uv to repair stale state.
     python = _ensure_scanner_environment(
         environment,
         base_python,
-        recreate=package.name == "cisco",
+        recreate=True,
     )
     requirement = _install_requirement(package)
     if package.name == "skillspector":

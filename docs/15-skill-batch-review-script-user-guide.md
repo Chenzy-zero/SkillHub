@@ -277,8 +277,10 @@ LangGraph Studio 开发服务，扫描代码本身没有引用它，却会继续
 7. 两套扫描器都通过后写入 `scanner-health.json` 健康记录。
 
 这会同时避开 `forbiddenfruit`、`blockbuster` 和 `langgraph-runtime-inmem`，不需要逐个补包。
-依赖安装使用同步模式，会自动移除 SkillSpector 隔离环境内此前失败尝试遗留的多余包；无需手工清理
-`jmespath` 或其他依赖。不能使用公网 PyPI 解析出的传递依赖锁定文件，因为公司源的同步进度可能较慢，
+安装器会先重建 SkillSpector 隔离环境，再通过 `uv pip install -r` 解析上述直接依赖的完整传递依赖；
+不能使用 `uv pip sync`，因为 `.in` 文件不是包含全部传递包的锁定结果，`sync` 会删除
+`pydantic_core`、`typing_inspection` 等必需组件。无需手工清理 `jmespath` 或其他依赖。不能使用公网
+PyPI 解析出的传递依赖锁定文件，因为公司源的同步进度可能较慢，
 例如公网已有 `botocore 1.43.88` 时公司源可能只有 `1.43.87`。顶层扫描器版本仍固定，实际解析出的
 运行包版本可通过扫描环境追溯。
 
@@ -347,9 +349,9 @@ VirusTotal 和 AI Defense 参数。适配器继续设置 `LITELLM_LOCAL_MODEL_CO
 安装过程是可重复执行的。旧环境没有 `scanner-health.json` 时，`review.cmd` 会主动提示重新安装，不再只因
 扫描器 exe 已存在就误判环境可用。
 
-若前一次安装在 SkillSpector 冒烟阶段中止，Cisco 环境可能已完成 `litellm` 移除但尚未来得及写入整体
-健康记录。再次运行安装器时会自动清空并重建这个可丢弃的 Cisco 专用虚拟环境，避免 uv 读取残缺的
-`litellm-*.dist-info/METADATA`；不需要手动删除 `.scanner-tools`。uv 在 Windows 上固定使用复制模式，
+若前一次安装在冒烟阶段中止，Cisco 环境可能留下残缺的 `litellm-*.dist-info/METADATA`，SkillSpector
+环境也可能缺少传递依赖。再次运行安装器时会自动清空并重建这两个可丢弃的专用虚拟环境；不需要手动
+删除 `.scanner-tools`。uv 在 Windows 上固定使用复制模式，
 不会再反复输出跨文件系统无法 hardlink 的警告。
 
 ### 5.3.1 旧批次升级边界

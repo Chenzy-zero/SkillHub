@@ -91,14 +91,16 @@ class ScannerInstallerTests(unittest.TestCase):
         self.assertIn("boto3>=1.34.0", content)
         self.assertIn("yara-python>=4.5.0", content)
 
-    def test_runtime_requirements_install_remains_wheel_only(self):
+    def test_runtime_requirements_install_resolves_full_wheel_only_closure(self):
         command = MODULE._uv_requirements_command(
             Path("resolver/uv"),
             Path("scanner/python.exe"),
             Path("packages/runtime.txt"),
         )
-        self.assertEqual(command[0:3], ("resolver/uv", "pip", "sync"))
+        self.assertEqual(command[0:3], ("resolver/uv", "pip", "install"))
         self.assertIn("--only-binary", command)
+        self.assertIn("--upgrade", command)
+        self.assertIn("-r", command)
         self.assertEqual(command[-1], "packages/runtime.txt")
 
     def test_cisco_static_profile_uninstalls_litellm(self):
