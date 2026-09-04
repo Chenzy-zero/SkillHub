@@ -1,7 +1,11 @@
 # Skill 批量安全审查执行程序
 
 本目录实现 `docs/13-skill-batch-security-review-and-scoring-design.md` 的本地执行部分。
-默认启动器现在按仓库一次下载、提取全部台账 Skill 后逐一处理；原仓库级命令仍保留为兼容入口。
+默认启动器现在按仓库一次下载、提取全部台账 Skill，逐一扫描并一次性生成该仓库的 AI 队列；
+AI 由独立 Agent 按队列并行（受配置上限控制）完成。原仓库级命令仍保留为兼容入口。
+
+本目录的执行边界和 AI 调度规则统一见 [`AGENTS.md`](AGENTS.md)。安全扫描时只在本目录下
+生成工作文件；仓库根目录的 CSV 等外部文件仅作为显式只读输入。
 
 首次配置和一键启动见 [`docs/16-skill-batch-review-quick-start.md`](../docs/16-skill-batch-review-quick-start.md)；完整配置字段、逐仓库操作、Claude Code 执行、输出目录和故障处理见 [`docs/15-skill-batch-review-script-user-guide.md`](../docs/15-skill-batch-review-script-user-guide.md)。
 
@@ -15,9 +19,9 @@ CSV 台账
   → 检查同名同内容的已通过结果能否复用
   → 同名 Skill Root 内容一致时复用已通过结果
   → Cisco + SkillSpector 并行静态检查
-  → 生成 Claude Code 只读交接任务
+  → 为该仓库生成 Claude Code 只读交接任务队列
   → 在公司内网模型环境调用一次 /auto-skill-review
-  → 导入并校验 AI JSON
+  → 为每个 Skill 启动独立 Agent 并批量导入 AI JSON
   → 合并问题、安全判定、独立质量评分
   → 在 skill_id 目录写入 review-result.json
   → 原子更新批次结果 CSV/JSON
@@ -46,7 +50,8 @@ SHA 直接 fetch；也不接受 `git archive --remote` 的路径限定参数。�
 - Claude Code AI 审查交接、JSON Schema 和冻结版本一致性校验；
 - 问题归一化、去重、安全门禁和独立 0–100 质量得分；
 - 受限证据、可恢复状态、本地私密候选、批次报告和受控清理；
-- 仓库级一次归档、全部台账 Skill 提取、`skills/<skill_id>/<skill_name>` 归档和单项 JSON；
+- 仓库级一次归档、全部台账 Skill 提取、逐项静态扫描、`skills/<skill_id>/<skill_name>` 归档和单项 JSON；
+- 当前仓库 AI 队列、受控并发和一次性结果导入；
 - 同名同内容的 `content_id` 关联、已通过结果复用和批次 CSV/JSON；
 - 本地集成测试覆盖完整的两阶段单仓库流程。
 
@@ -86,8 +91,9 @@ Linux/CentOS 第一次执行：
 ```
 
 初始化会生成被 Git 忽略的 `batch-review/config/review.local.toml` 和本机操作状态，已有配置
-默认绝不覆盖。检查配置后，Windows 始终双击 `batch-review\review.cmd`，Linux/CentOS 始终执行
-`./batch-review/review.sh`。该入口会读取真实状态并只提供当前可执行的下一步。
+默认绝不覆盖。完成配置和扫描器健康检查后，在 Claude Code 直接输入
+`/auto-skill-review` 即可；它会在内部调用 `review.cmd`/`review.sh`，不要求操作人员在每个阶段
+重新打开窗口。命令行入口仍可用于排障和人工确认。
 
 在 Claude Code 中输入 `/ask-cc` 可以只读检查状态；输入 `/auto-skill-review` 可自动完成当前及
 后续 AI 审查并推进到下一 Skill、下一仓库。
@@ -160,13 +166,15 @@ Cisco 2.0.13 安装完成后会从其专用环境移除未启用的 `litellm`，
 
 ## 4. 标准执行顺序
 
-推荐使用免参数入口：
+推荐使用一次 Skill 调度入口：
 
 ```text
 首次运行 init.cmd / init.sh
-→ 后续始终运行 review.cmd / review.sh
-→ 等待 AI 时在 Claude Code 输入 /auto-skill-review
-→ 自动审查并推进到批次完成或真实阻塞
+→ 填写配置并完成扫描器离线健康检查
+→ 在 Claude Code 直接输入 /auto-skill-review
+→ 脚本完成计划、仓库下载、Skill 提取和逐项静态扫描
+→ 独立 Agent 按当前仓库队列并行完成 AI 审查
+→ 脚本导入结果、清理并自动进入下一仓库
 ```
 
 以下带参数命令保留用于自动化运维和故障排查，普通执行人员无需记忆：
@@ -179,8 +187,9 @@ Cisco 2.0.13 安装完成后会从其专用环境移除未启用的 `litellm`，
 ./batch-review/run.sh advance --config batch-review/config/review.company.toml --batch-id baseline-20260901 --execute --confirm-cleanup
 ```
 
-Windows 将 `run.sh` 替换为 `run.cmd`。启动器生成 AI 队列后，在 Claude Code 中调用
-`/skill-security-review`；完整操作见快速使用说明。
+Windows 将 `run.sh` 替换为 `run.cmd`。启动器生成当前仓库的 `ai-review-queue.json` 后，
+由 `/auto-skill-review` 自动触发多个隔离 Agent；不再要求手动逐个调用
+`/skill-security-review`。
 
 `run.sh` / `run.cmd` 会维护仓库和 Skill 状态，并把结果写入 `skills_root` 与 `results_root`。
 

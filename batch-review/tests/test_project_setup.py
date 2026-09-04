@@ -161,10 +161,14 @@ class ProjectSetupTests(unittest.TestCase):
             ],
         }
         (state_dir / "per-skill-launcher-state.json").write_text(json.dumps(state), encoding="utf-8")
+        (state_dir / "ai-review-queue.json").write_text(
+            json.dumps({"batch_id": batch_id, "items": []}), encoding="utf-8"
+        )
         self._write_operator(config, batch_id)
         status = project_status.inspect_project(operator_state_path=self.operator)
         self.assertEqual(status.next_action, "AI_REVIEW")
         self.assertIn("/auto-skill-review", status.next_instruction)
+        self.assertEqual(status.ai_queue_path, str((state_dir / "ai-review-queue.json").resolve()))
 
     def test_started_legacy_batch_is_redirected_to_a_new_plan(self):
         config, manifests = self._ready_config()
@@ -200,6 +204,8 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("review.cmd --auto", content)
         self.assertIn("Do not use Git", content)
         self.assertIn("fresh Agent", content)
+        self.assertIn("ai-review-queue.json", content)
+        self.assertIn("max_parallel", content)
         self.assertIn("Do not read `package-manifest.json`", content)
 
     def test_duplicate_skill_id_is_reported_before_plan(self):

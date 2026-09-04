@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Operator launcher for the one-Skill-at-a-time workflow."""
+"""Operator launcher for the repository-at-a-time Skill review workflow.
+
+New batches download a repository once, run deterministic static preparation
+for every listed Skill, and pause with a bounded AI queue.  State files created
+before the queue protocol retain the older serial compatibility path.
+"""
 
 from __future__ import annotations
 
@@ -44,6 +49,8 @@ from skill_batch_review.workflow import (  # noqa: E402
 
 _BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _STATE_NAME = "per-skill-launcher-state.json"
+_AI_QUEUE_MODE = "repository_batch_v1"
+_LEGACY_AI_QUEUE_MODE = "serial_v1"
 
 
 class LauncherError(RuntimeError):
@@ -129,6 +136,11 @@ def _new_state(config: ReviewConfig, batch_id: str) -> dict[str, Any]:
         "inventory_csv_sha256": document.raw_csv_sha256,
         "inventory_csv_encoding": document.source_encoding,
         "current_task_id": None,
+        # New batches prepare every Skill in the active repository before the
+        # AI checkpoint.  Older state files without this field remain on the
+        # serial path so a partially executed batch is never silently changed
+        # to a different execution protocol.
+        "ai_queue_mode": _AI_QUEUE_MODE,
         "items": [
             {
                 "source_row_id": row.source_row_id,
@@ -276,8 +288,8 @@ def _snapshot_from_item(item: Mapping[str, Any]) -> SnapshotResult:
     )
 
 
-def _prepare_next(config: ReviewConfig, state: dict[str, Any]) -> None:
-    """Download one repository, then review its extracted Skills one by one."""
+def _prepare_next_serial(config: ReviewConfig, state: dict[str, Any]) -> None:
+    """Compatibility path for batches created before repository AI queues."""
 
     document = _inventory(config)
     rows = _rows(config, document)
@@ -439,7 +451,257 @@ def _prepare_next(config: ReviewConfig, state: dict[str, Any]) -> None:
         print(f"Skill 无需 AI 等待，自动继续: {prepared.skill_id}/{row.skill_name}")
 
 
-def _finish_current(config: ReviewConfig, state: dict[str, Any], *, confirm_cleanup: bool) -> None:
+def _waiting_items(
+    state: Mapping[str, Any], *, repository: str | None = None
+) -> list[dict[str, Any]]:
+    """Return AI tasks that have been statically prepared but not finalized."""
+
+    active = state.get("active_repository")
+    active_branch = str(active.get("branch")) if isinstance(active, Mapping) else None
+    items: list[dict[str, Any]] = []
+    for item in state.get("items", []):
+        if not isinstance(item, dict) or item.get("status") != "WAITING_FOR_AI":
+            continue
+        if repository is not None and (
+            str(item.get("repo_name")) != repository
+            or str(item.get("branch")) != active_branch
+        ):
+            continue
+        items.append(item)
+    return items
+
+
+def _ai_queue_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": item["task_id"],
+        "skill_id": item["skill_id"],
+        "skill_name": item["skill_name"],
+        "repo_name": item["repo_name"],
+        "branch": item["branch"],
+        "handoff": item["handoff_path"],
+        "expected_result": item["ai_result_path"],
+        "skill_trigger": "/skill-security-review",
+    }
+
+
+def _activate_waiting_queue(
+    config: ReviewConfig,
+    state: dict[str, Any],
+    waiting: Sequence[dict[str, Any]],
+) -> None:
+    """Persist both a batch queue and a backwards-compatible current item."""
+
+    if not waiting:
+        raise LauncherError("没有可激活的 AI 审查任务")
+    current = waiting[0]
+    state["current_task_id"] = current["task_id"]
+    state["status"] = "WAITING_FOR_AI"
+    batch_root = config.workspace.manifest_root / str(state["batch_id"])
+    queue = {
+        "schema_version": "1.0",
+        "queue_mode": _AI_QUEUE_MODE,
+        "batch_id": state["batch_id"],
+        "repository": {
+            "repo_name": current["repo_name"],
+            "branch": current["branch"],
+        },
+        "max_parallel": config.concurrency.ai_reviews,
+        "items": [_ai_queue_item(item) for item in waiting],
+    }
+    _atomic_json(batch_root / "ai-review-queue.json", queue)
+    _atomic_json(batch_root / "ai-review-current.json", {
+        **queue,
+        **_ai_queue_item(current),
+        "items": queue["items"],
+    })
+    _save(config, state)
+    print(
+        f"等待 AI 审查: {len(waiting)} 个 Skill（最多并行 {config.concurrency.ai_reviews} 个）"
+    )
+
+
+def _complete_active_repository(
+    config: ReviewConfig, state: dict[str, Any]
+) -> None:
+    active = state.get("active_repository")
+    if not isinstance(active, Mapping):
+        return
+    repository = str(active["repo_name"])
+    branch = str(active["branch"])
+    cleanup_repository_download(
+        config,
+        batch_id=str(state["batch_id"]),
+        repository=repository,
+        branch=branch,
+    )
+    for item in state["items"]:
+        if item.get("repo_name") == repository and item.get("branch") == branch:
+            item["workspace_cleaned"] = True
+    state.setdefault("completed_repositories", []).append(
+        {**dict(active), "completed_at": _utc_now()}
+    )
+    state["active_repository"] = None
+    _save(config, state)
+
+
+def _prepare_repository_items(
+    config: ReviewConfig,
+    state: dict[str, Any],
+    *,
+    document: InventoryDocument,
+    row_lookup: Mapping[str, InventoryRow],
+    group_items: Sequence[dict[str, Any]],
+) -> None:
+    """Run static preparation serially for every pending Skill in one repo."""
+
+    for item in group_items:
+        if item.get("status") != "PENDING":
+            continue
+        row = row_lookup[str(item["source_row_id"])]
+        stored = item.get("download_snapshot")
+        if not isinstance(stored, Mapping):
+            raise LauncherError(f"Skill 缺少仓库提取快照: {item.get('skill_id')}")
+        snapshot = _snapshot_from_item(item)
+        prepared = prepare_skill(
+            config,
+            batch_id=str(state["batch_id"]),
+            row=row,
+            downloaded=PartialDownload(
+                Path(str(stored["task_root"])),
+                Path(str(stored["task_root"])).parent,
+                snapshot.source_revision,
+                snapshot=snapshot,
+                transport=str(item["download_transport"]),
+            ),
+        )
+        item["index_path"] = str(prepared.index_path)
+        item.pop("download_snapshot", None)
+        item["workspace_cleaned"] = False
+        if prepared.requires_ai:
+            result_path = (
+                config.workspace.manifest_root
+                / str(state["batch_id"])
+                / "ai-results"
+                / f"{prepared.task_id}.json"
+            )
+            item["status"] = "WAITING_FOR_AI"
+            item["handoff_path"] = str(prepared.handoff_path)
+            item["ai_result_path"] = str(result_path)
+        else:
+            item["status"] = "COMPLETE"
+        csv_path, json_path = write_skill_result_tables(
+            config, document, batch_id=str(state["batch_id"])
+        )
+        state["result_csv"] = str(csv_path)
+        state["result_json"] = str(json_path)
+        _save(config, state)
+        if prepared.requires_ai:
+            print(f"静态审查完成，进入 AI 队列: {prepared.skill_id}/{row.skill_name}")
+        else:
+            print(f"Skill 无需 AI 等待，自动继续: {prepared.skill_id}/{row.skill_name}")
+
+
+def _prepare_next_batch(config: ReviewConfig, state: dict[str, Any]) -> None:
+    """Download one repository and prepare all of its Skills before AI."""
+
+    document = _inventory(config)
+    rows = _rows(config, document)
+    row_lookup = {row.source_row_id: row for row in rows}
+
+    while True:
+        active = state.get("active_repository")
+        if isinstance(active, Mapping):
+            repository = str(active["repo_name"])
+            branch = str(active["branch"])
+            waiting = _waiting_items(state, repository=repository)
+            if waiting:
+                _activate_waiting_queue(config, state, waiting)
+                return
+            pending = [
+                item
+                for item in state["items"]
+                if item.get("status") == "PENDING"
+                and item.get("repo_name") == repository
+                and item.get("branch") == branch
+            ]
+            if pending:
+                _prepare_repository_items(
+                    config,
+                    state,
+                    document=document,
+                    row_lookup=row_lookup,
+                    group_items=pending,
+                )
+                continue
+            _complete_active_repository(config, state)
+            print(f"仓库已完成，自动进入下一仓库: {repository}")
+            continue
+
+        next_item = next(
+            (item for item in state["items"] if item.get("status") == "PENDING"),
+            None,
+        )
+        if next_item is None:
+            csv_path, json_path = write_skill_result_tables(
+                config, document, batch_id=str(state["batch_id"])
+            )
+            state["status"] = "COMPLETE"
+            state["current_task_id"] = None
+            state["result_csv"] = str(csv_path)
+            state["result_json"] = str(json_path)
+            _save(config, state)
+            print(f"批次已完成: {state['batch_id']}")
+            return
+
+        repository = str(next_item["repo_name"])
+        branch = str(next_item["branch"])
+        group_items = [
+            item
+            for item in state["items"]
+            if item.get("status") == "PENDING"
+            and item.get("repo_name") == repository
+            and item.get("branch") == branch
+        ]
+        group_rows = [row_lookup[str(item["source_row_id"])] for item in group_items]
+        print(f"开始仓库: {repository} ({branch})，Skill 数量: {len(group_rows)}")
+        downloaded = download_repository_skills(
+            config,
+            batch_id=str(state["batch_id"]),
+            rows=group_rows,
+        )
+        for item, row in zip(group_items, group_rows):
+            skill_download = downloaded.skills[row.source_row_id]
+            if skill_download.snapshot is None:
+                raise LauncherError("仓库归档没有生成 Skill 快照")
+            item["task_id"] = skill_task_id(row)
+            item["download_snapshot"] = {
+                "snapshot_path": str(skill_download.snapshot.snapshot_path),
+                "task_root": str(skill_download.task_root),
+                "manifest": skill_download.snapshot.manifest_dict(),
+            }
+            item["source_revision"] = downloaded.revision
+            item["download_transport"] = downloaded.transport
+        state["active_repository"] = {
+            "repo_name": repository,
+            "branch": branch,
+            "source_revision": downloaded.revision,
+            "skill_count": len(group_items),
+        }
+        _save(config, state)
+
+
+def _prepare_next(config: ReviewConfig, state: dict[str, Any]) -> None:
+    """Dispatch the current batch protocol without mixing old state semantics."""
+
+    if state.get("ai_queue_mode") == _AI_QUEUE_MODE:
+        _prepare_next_batch(config, state)
+    else:
+        _prepare_next_serial(config, state)
+
+
+def _finish_current_serial(
+    config: ReviewConfig, state: dict[str, Any], *, confirm_cleanup: bool
+) -> None:
     task_id = state.get("current_task_id")
     if not task_id:
         return
@@ -474,6 +736,66 @@ def _finish_current(config: ReviewConfig, state: dict[str, Any], *, confirm_clea
     state["status"] = "READY"
     _save(config, state)
     print(f"已完成 Skill: {item['skill_id']}/{item['skill_name']}")
+
+
+def _finish_current_batch(
+    config: ReviewConfig, state: dict[str, Any], *, confirm_cleanup: bool
+) -> None:
+    """Import all ready AI results for the current repository in one advance."""
+
+    if not confirm_cleanup:
+        raise LauncherError("进入下一个 Skill 前必须提供 --confirm-cleanup")
+    active = state.get("active_repository")
+    if not isinstance(active, Mapping):
+        state["current_task_id"] = None
+        return
+    repository = str(active["repo_name"])
+    branch = str(active["branch"])
+    document = _inventory(config)
+
+    while True:
+        waiting = _waiting_items(state, repository=repository)
+        if not waiting:
+            state["current_task_id"] = None
+            state["status"] = "READY"
+            _save(config, state)
+            return
+        item = waiting[0]
+        state["current_task_id"] = item["task_id"]
+        ai_path = Path(str(item.get("ai_result_path") or ""))
+        if not ai_path.is_file():
+            # Preserve all completed work and leave the first missing task as
+            # the durable cursor.  The coordinator can launch only the
+            # missing Agent(s) and call advance again.
+            _activate_waiting_queue(config, state, waiting)
+            return
+        finalize_skill(
+            config,
+            index_path=Path(str(item["index_path"])),
+            ai_result_path=ai_path,
+        )
+        csv_path, json_path = write_skill_result_tables(
+            config, document, batch_id=str(state["batch_id"])
+        )
+        item["status"] = "COMPLETE"
+        item["result_csv"] = str(csv_path)
+        item["result_json"] = str(json_path)
+        item["workspace_cleaned"] = False
+        state["result_csv"] = str(csv_path)
+        state["result_json"] = str(json_path)
+        _save(config, state)
+        print(f"已完成 Skill: {item['skill_id']}/{item['skill_name']}")
+
+
+def _finish_current(
+    config: ReviewConfig, state: dict[str, Any], *, confirm_cleanup: bool
+) -> None:
+    """Import the current result using the state file's queue protocol."""
+
+    if state.get("ai_queue_mode") == _AI_QUEUE_MODE:
+        _finish_current_batch(config, state, confirm_cleanup=confirm_cleanup)
+    else:
+        _finish_current_serial(config, state, confirm_cleanup=confirm_cleanup)
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
@@ -528,7 +850,21 @@ def _cmd_status(args: argparse.Namespace) -> int:
     for item in state["items"]:
         status = str(item.get("status"))
         counts[status] = counts.get(status, 0) + 1
-    print(json.dumps({"batch_id": state["batch_id"], "status": state["status"], "current_task_id": state.get("current_task_id"), "skill_status_counts": counts}, ensure_ascii=False, indent=2))
+    queue_path = config.workspace.manifest_root / str(state["batch_id"]) / "ai-review-queue.json"
+    print(json.dumps({
+        "batch_id": state["batch_id"],
+        "status": state["status"],
+        "workflow_version": state.get("workflow_version"),
+        "ai_queue_mode": state.get("ai_queue_mode", _LEGACY_AI_QUEUE_MODE),
+        "current_task_id": state.get("current_task_id"),
+        "active_repository": state.get("active_repository"),
+        "ai_queue_path": (
+            str(queue_path)
+            if state.get("status") == "WAITING_FOR_AI" and queue_path.is_file()
+            else None
+        ),
+        "skill_status_counts": counts,
+    }, ensure_ascii=False, indent=2))
     return 0
 
 

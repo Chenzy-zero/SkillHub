@@ -52,10 +52,10 @@ Commit 当作可下载版本；`git archive --remote` 不接受 `-- <skill_path>
 归档，最后在本地只提取 CSV 中登记的 Skill。整仓归档只用于传输，不会作为完整仓库保留；若固定
 Revision 无法由 Gerrit 出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`，不能静默改用其他版本。
 
-面向普通操作人员的默认入口进一步简化为：首次使用 `init.cmd`/`init.sh`，之后始终使用
-`review.cmd`/`review.sh`。免参数入口自动保存本机配置路径和当前批次号，并根据状态调用底层
-启动器。一次确认后会连续执行计划和静态阶段；AI 阶段可在 Claude Code 输入
-`/auto-skill-review` 自动推进。原 `run.sh`/`run.cmd` 继续作为带参数的运维入口。
+面向普通操作人员的默认入口进一步简化为：首次使用 `init.cmd`/`init.sh`，完成配置和扫描器
+健康检查后，在 Claude Code 直接输入一次 `/auto-skill-review`。该 Skill 会在内部调用
+`review.cmd`/`review.sh` 完成计划、下载和静态阶段，再批量调度 AI Agent；不要求操作人员
+逐阶段重新打开入口。原 `run.sh`/`run.cmd` 继续作为带参数的运维入口。
 
 ## 1. 文档目的
 
@@ -104,27 +104,31 @@ Revision 无法由 Gerrit 出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`
 
 ## 3. 当前版本的执行限制
 
-### 3.1 默认按仓库下载、按 Skill 审查
+### 3.1 默认按仓库下载、按 Skill 扫描并批量 AI 审查
 
 默认启动器按 `repo_name + branch` 处理：
 
 ```text
 下载一次仓库无历史归档
-→ 提取并静态扫描该仓库全部台账 Skill
-→ 逐一完成 AI 审查或确认复用
+→ 提取并逐一静态扫描该仓库全部台账 Skill
+→ 生成当前仓库 AI 队列
+→ 为每个 Skill 启动独立 Agent（受控并发）
+→ 一次性导入 AI 结果或确认复用
 → 写入各单项和批次结果
 → 清理该仓库 git_download
 → 自动处理下一仓库
 ```
 
 `batch-review/run.sh` 与 `run.cmd` 负责记住仓库和 Skill 进度。Claude Code 中显式调用
-`/auto-skill-review` 后，可自动完成后续 AI 交接和状态推进，直到完成或遇到真实阻塞。
+`/auto-skill-review` 后，会读取当前仓库的 AI 队列并为各 Skill 启动独立 Agent，自动完成
+结果导入和状态推进，直到完成或遇到真实阻塞。
 原来的 `skill-batch-review prepare-repository/finalize-repository` 保留为兼容入口。
 
-### 3.2 Claude Code 需要显式启动一次
+### 3.2 Claude Code 只需要触发一次
 
 普通脚本不会自行启动模型。执行人员在公司内网模型环境中调用一次项目级
-`/auto-skill-review`；该 Skill 按 `/skill-security-review` 的严格规则逐项生成 JSON 并推进批次。
+`/auto-skill-review`；该 Skill 按 `/skill-security-review` 的严格规则为队列中的每项启动
+隔离 Agent 并推进批次。无需先手工执行 `review.cmd`。
 
 ### 3.3 全批次统一截止时间尚未自动冻结
 
@@ -137,7 +141,8 @@ Revision 无法由 Gerrit 出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`
 配置中的 `[retry]` 和 `[concurrency]` 用于固定批次运行策略。启动器和
 `/auto-skill-review` 会按计划逐仓库推进，但不会跳过失败任务，也不会自行扩大并发或无限重试。
 
-当前已实现的并行行为只有：同一个 Skill 的 Cisco 与 SkillSpector 静态检查并行执行。
+静态阶段保持逐 Skill 串行写入结果；同一个 Skill 的 Cisco 与 SkillSpector 并行执行。
+AI 阶段可在当前仓库内并行启动多个独立 Agent，最大数量由 `[concurrency].ai_reviews` 控制。
 
 ### 3.5 清理边界
 
@@ -844,7 +849,8 @@ skill-batch-review prepare-repository \
 
 ### 步骤 6：执行 Claude Code AI 审查
 
-对 `ai_review_queue` 中每个任务分别处理。
+对 `ai_review_queue` 中每个任务分别处理；任务之间可以并行，但每项必须使用独立的
+Claude Code Agent 上下文，不能把多个 Skill 合并到同一会话。
 
 #### 6.1 准备 Claude Code 环境
 
@@ -852,8 +858,8 @@ skill-batch-review prepare-repository \
 
 - 使用公司内网模型；
 - 工作区中不放凭据；
-- 只允许 `Read`、`Glob`、`Grep`；
-- 禁止 Bash、写文件、网络、MCP 和子代理；
+- AI Agent 只允许 `Read`、`Glob`、`Grep`，并只能写入自己的 expected result；
+- 禁止执行内容、安装、网络和 MCP；父会话负责调度 Agent，不在父会话审查 Skill；
 - 不执行目标 Skill 的任何内容；
 - 不跟随离开 Skill Root 的链接。
 
@@ -867,7 +873,7 @@ allowed-tools: Read Glob Grep
 
 #### 6.2 调用 AI Skill
 
-在 Claude Code 中调用：
+在 Claude Code 中由 `/auto-skill-review` 调度；需要手工排障时才直接调用：
 
 ```text
 /skill-security-review

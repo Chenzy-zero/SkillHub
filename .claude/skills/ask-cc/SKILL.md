@@ -30,9 +30,13 @@ Act as the read-only project guide for this repository. Determine the real curre
 2. Read the returned `state`, `summary`, `issues`, `inventory`, `current_skill`, `batch_id`, `next_action`, and `next_instruction`.
 3. When `next_action` is `AI_REVIEW`, read:
    - `batch-review/.batch-review/operator-state.json`;
-   - the active batch's `ai-review-current.json` under the configured manifest directory.
+   - the active batch's `ai-review-queue.json` (falling back to `ai-review-current.json`)
+     under the configured manifest directory.
 
-   Confirm that the handoff and expected result paths exist. Then tell the user to invoke `/auto-skill-review`. Do not perform the security review inside `ask-cc`; the automatic Skill applies the dedicated review rules and advances persisted state.
+   Confirm that the queue and its expected result paths exist. Then tell the user to invoke
+   `/auto-skill-review`; it also starts the trusted script when the status is `PLAN` or `START`.
+   Do not perform the security review inside `ask-cc`; the automatic Skill applies the dedicated
+   review rules and advances persisted state.
 4. For other states, use [references/workflow.md](references/workflow.md) to explain what the state means. Prefer the parameter-free entry points `init.cmd`/`init.sh` and `review.cmd`/`review.sh`; do not make the user copy the underlying command with a config path and batch ID.
 5. If status checking fails or a state is inconsistent, report the exact file or check that failed and stop. Do not repair or delete state automatically.
 

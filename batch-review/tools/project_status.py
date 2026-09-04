@@ -46,6 +46,7 @@ class ProjectStatus:
     inventory: Mapping[str, Any] | None = None
     issues: tuple[Mapping[str, Any], ...] = ()
     result_paths: Mapping[str, str] | None = None
+    ai_queue_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +61,7 @@ class ProjectStatus:
             "inventory": dict(self.inventory) if self.inventory else None,
             "issues": [dict(issue) for issue in self.issues],
             "result_paths": dict(self.result_paths) if self.result_paths else None,
+            "ai_queue_path": self.ai_queue_path,
         }
 
 
@@ -335,6 +337,12 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
         "batch_status": batch_status,
         "current_skill": current,
         "inventory": inventory,
+        "ai_queue_path": (
+            str(state_path.parent / "ai-review-queue.json")
+            if batch_status in {"WAITING_FOR_AI", "AI_RESULT_READY"}
+            and (state_path.parent / "ai-review-queue.json").is_file()
+            else None
+        ),
     }
     if batch_status == "COMPLETE":
         return ProjectStatus(
@@ -353,32 +361,32 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
         if current and ai_path.is_file():
             return ProjectStatus(
                 state="AI_RESULT_READY",
-                summary="当前 Skill 的 AI 结果已保存，可以合并结果并进入下一个 Skill。",
+                summary="当前仓库已有 AI 结果，可以由脚本批量合并并进入下一仓库。",
                 next_action="ADVANCE",
-                next_instruction="运行 review.cmd；程序会校验并保存结果，然后自动继续。",
+                next_instruction="运行 /auto-skill-review；它会校验并保存结果，然后自动继续。",
                 **common,
             )
         return ProjectStatus(
             state="WAITING_FOR_AI",
-            summary="当前 Skill 的静态扫描已完成，正在等待 AI 安全与质量审查。",
+            summary="当前仓库的静态扫描已完成，正在等待 AI 队列审查。",
             next_action="AI_REVIEW",
             next_instruction="在 Claude Code 输入 /auto-skill-review；它会完成当前及后续 AI 审查并自动推进批次。",
             **common,
         )
     if batch_status == "READY_TO_ADVANCE":
         return ProjectStatus(
-        state="READY_TO_ADVANCE",
-        summary="当前 Skill 已复用合格结果，无需重复 AI 审查。",
-        next_action="ADVANCE",
-        next_instruction="运行 review.cmd；程序会写入复用记录并自动进入下一个 Skill。",
+            state="READY_TO_ADVANCE",
+            summary="当前 Skill 已复用合格结果，无需重复 AI 审查。",
+            next_action="ADVANCE",
+            next_instruction="在 Claude Code 输入 /auto-skill-review；它会写入复用记录并自动继续。",
             **common,
         )
     if batch_status == "READY":
         return ProjectStatus(
-        state="READY_TO_START",
-        summary="批次计划已建立，尚未按仓库下载和扫描。",
-        next_action="START",
-        next_instruction="双击 review.cmd，一次确认后按仓库自动下载并逐一扫描。",
+            state="READY_TO_START",
+            summary="批次计划已建立，尚未按仓库下载和扫描。",
+            next_action="START",
+            next_instruction="在 Claude Code 输入 /auto-skill-review；它会调用脚本按仓库下载并逐一扫描。",
             **common,
         )
     return ProjectStatus(
@@ -416,6 +424,8 @@ def _human(status: ProjectStatus) -> str:
     if status.result_paths:
         lines.append(f"结果 CSV：{status.result_paths.get('csv')}")
         lines.append(f"结果 JSON：{status.result_paths.get('json')}")
+    if status.ai_queue_path:
+        lines.append(f"AI 队列：{status.ai_queue_path}")
     return "\n".join(lines)
 
 

@@ -19,7 +19,11 @@
   ↓
 逐 Skill 判断：同名 + 同 Digest + 审查版本一致？
   ├── 是：生成当前 Skill 的 RESULT_REUSED 结果
-  └── 否：Cisco 与 SkillSpector → AI → 综合判定
+  └── 否：逐项完成 Cisco 与 SkillSpector 静态检查
+  ↓
+同仓库全部静态结果完成后生成 AI 队列
+  ↓
+每个 Skill 由独立 Agent 审查（受控并发）→ 综合判定
   ↓
 写 source-metadata.json 与 review-result.json
   ↓

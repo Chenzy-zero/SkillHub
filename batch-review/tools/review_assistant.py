@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""State-aware no-argument operator entry point for the per-Skill workflow."""
+"""State-aware operator entry point for the repository-batched Skill workflow."""
 
 from __future__ import annotations
 
@@ -65,6 +65,8 @@ def _print_status(status: dict[str, Any]) -> None:
     current = status.get("current_skill")
     if isinstance(current, dict):
         print(f"当前 Skill：{current.get('skill_id', '-')} / {current.get('skill_name', '-')}")
+    if status.get("ai_queue_path"):
+        print(f"AI 队列：{status['ai_queue_path']}")
     for issue in status.get("issues") or []:
         print(f"- [{issue.get('code')}] {issue.get('message')}")
     print(f"下一步：{status.get('next_instruction')}")
@@ -179,7 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 continue
             if action == "AI_REVIEW":
                 print("请在当前仓库的 Claude Code 会话输入：/auto-skill-review")
-                print("它会完成当前及后续 AI 审查，并自动推进到下一 Skill 和下一仓库。")
+                print("它会为当前仓库批量调度独立 Agent，并自动推进到下一仓库。")
                 return 0
             if action == "ADVANCE":
                 operator = _operator()

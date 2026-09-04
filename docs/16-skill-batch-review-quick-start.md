@@ -5,15 +5,13 @@
 
 ## 1. 运行方式
 
-### 推荐：首次初始化后使用免参数入口
+### 推荐：首次初始化后使用一次 Skill 调度
 
-Windows 首次双击 `batch-review\init.cmd`，之后始终双击 `batch-review\review.cmd`。
-Linux/CentOS 首次执行 `./batch-review/init.sh`，之后始终执行 `./batch-review/review.sh`。
+Windows 首次双击 `batch-review\init.cmd`，Linux/CentOS 首次执行 `./batch-review/init.sh`。
 
 初始化入口会创建真实的本机配置 `batch-review/config/review.local.toml`；该文件被 Git 忽略，
-已有文件默认不会被覆盖。`review` 入口会自动记住配置文件和批次号，根据真实状态提示并执行
-当前唯一的下一步。Claude Code 中可输入 `/ask-cc` 查看状态；需要自动完成整个批次时输入
-`/auto-skill-review`，无需记忆命令、路径和参数。
+已有文件默认不会被覆盖。完成配置和扫描器健康检查后，在 Claude Code 中输入一次
+`/auto-skill-review` 即可；它会在内部调用受信 `review.cmd`/`review.sh`。`/ask-cc` 仍可只读查看状态。
 
 下面的参数化命令主要用于理解流程和运维排障。
 
@@ -24,12 +22,13 @@ run.sh / run.cmd
   ├─ 读取 CSV，按 repo_name + branch 分组
   ├─ 每个仓库下载一次无历史 tar，提取全部台账 Skill
   ├─ 逐一运行 Cisco AI Skill Scanner 与 SkillSpector
-  ├─ 生成 AI 审查交接文件
-  ├─ 校验 AI 结果，生成单项 JSON 和批次 CSV/JSON
-  └─ 结果持久化后自动进入下一 Skill 和下一仓库
+  ├─ 为当前仓库生成完整 AI 审查队列
+  ├─ 校验全部 AI 结果，生成单项 JSON 和批次 CSV/JSON
+  └─ 结果持久化后自动进入下一仓库
 
 /auto-skill-review
-  └─ 按严格单项审查规则生成 AI JSON，并自动推进整个批次
+  ├─ 为队列中的每个 Skill 启动独立 Agent（受控并发）
+  └─ 自动导入结果并推进整个批次
 ```
 
 AI Skill 不下载仓库、不调用静态扫描器、不清理目录，也不执行被审查 Skill。
@@ -114,7 +113,8 @@ Gerrit，也不运行扫描器。计划中的 Skill 数、排除项和状态应�
 
 ## 5. 启动自动静态阶段
 
-`start` 会访问 Gerrit 并实际运行两套静态扫描器，因此必须显式写 `--execute`：
+`start` 会访问 Gerrit 并实际运行两套静态扫描器，因此必须显式写 `--execute`。日常不需要
+手工执行，`/auto-skill-review` 会通过受信入口调用它：
 
 ```bash
 ./batch-review/run.sh start \
@@ -124,9 +124,11 @@ Gerrit，也不运行扫描器。计划中的 Skill 数、排除项和状态应�
 ```
 
 脚本会对当前 `repo_name + branch` 冻结一次 HEAD、下载一次不含 `.git` 和历史的整仓 tar，
-只提取 CSV 登记的全部 Skill，并逐一执行静态扫描。它会生成：
+只提取 CSV 登记的全部 Skill，并逐一执行静态扫描。静态阶段完成后才暂停，统一生成当前仓库
+的 AI 队列。它会生成：
 
-- `ai-review-current.json`：当前 Skill 的 handoff 和结果保存路径；
+- `ai-review-queue.json`：当前仓库所有待审 Skill 的 handoff、结果路径和并发上限；
+- `ai-review-current.json`：兼容旧入口的队列首项；
 - 静态扫描报告、Skill 摘要和冻结版本信息。
 
 `start` 会继续使用 `plan` 已生成的同一批次和固定配置；如果没有预先执行 `plan`，它也会先
@@ -141,9 +143,10 @@ Gerrit，也不运行扫描器。计划中的 Skill 数、排除项和状态应�
 /auto-skill-review
 ```
 
-该 Skill 自动读取 `ai-review-current.json`，按项目单项审查规则生成并保存独立 JSON，调用
-受信启动器校验结果，然后进入同仓库下一个 Skill。同仓库全部完成后，它会自动下载并处理
-下一仓库，直到批次完成。Schema、Digest、规则版本或任务身份不匹配时会停止，不会跳过。
+该 Skill 自动读取 `ai-review-queue.json`，按 `[concurrency].ai_reviews` 为每个 Skill 启动
+独立 Agent；每个 Agent 只审查自己的 Skill Package 并保存独立 JSON。全部结果到齐后，受信
+启动器一次性校验、合并、清理当前仓库并进入下一仓库，直到批次完成。Schema、Digest、规则
+版本或任务身份不匹配时会停止，不会跳过。
 
 ## 7. 运维人员手动推进（仅用于排障）
 
@@ -159,14 +162,13 @@ Gerrit，也不运行扫描器。计划中的 Skill 数、排除项和状态应�
 
 通常不需要手动执行。该命令按以下顺序执行：
 
-1. 检查当前 Skill 的 AI 结果是否齐全；
-2. 校验并合并静态结果与 AI 结果；
-3. 在 `skills/<skill_id>/review-result.json` 写入单项结果；
+1. 检查当前仓库 AI 队列的结果是否齐全；
+2. 校验并合并静态结果与全部 AI 结果；
+3. 在各 `skills/<skill_id>/review-result.json` 写入单项结果；
 4. 更新 `results/<batch_id>/` 下的 CSV 和 JSON；
-5. 激活同仓库下一个待 AI Skill；
-6. 同仓库完成后下载并准备下一个仓库。
+5. 当前仓库完成后清理临时目录并准备下一个仓库。
 
-若 AI 结果缺失，命令停止并列出缺失路径，不会清理、不会跳过，也不会进入下一个 Skill。
+若 AI 结果缺失，命令停止并列出缺失路径，不会清理、不会跳过，也不会进入下一个仓库。
 自动 Skill 会重复执行上述动作，直至批次完成。HTML 视觉改版后续进行，本阶段以单项 JSON
 和批次 CSV/JSON 为正式输出。
 
@@ -183,8 +185,8 @@ Windows 将 `./batch-review/run.sh` 替换为 `batch-review\run.cmd`。入口会
 
 ## 9. 一键启动的边界
 
-`start` 是仓库级静态阶段入口，`advance` 是运维排障用的单步续跑入口。日常操作使用
-`review.cmd` 的一次确认和 `/auto-skill-review` 的一次调用即可。普通脚本不能自行生成 AI 结论；
+`start` 是仓库级静态阶段入口，`advance` 是运维排障用的单步续跑入口。日常操作只需
+`/auto-skill-review` 一次调用即可。普通脚本不能自行生成 AI 结论；
 Claude Code 自动 Skill 负责这一段，并且每个结果仍须通过 Schema、Digest、批次和策略版本校验。
 
 程序不会自动 Commit、Push 或上架 SkillHub。全部纳管内容写入 `skills_root`，安全通过与否

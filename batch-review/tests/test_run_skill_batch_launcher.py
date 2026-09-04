@@ -149,7 +149,7 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("--execute", result.stderr)
 
-    def test_repository_is_downloaded_once_while_skills_advance_sequentially(self):
+    def test_repository_is_downloaded_once_and_ai_queue_contains_all_skills(self):
         self.inventory.write_text(
             "skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,product_line,user_name,user_email\n"
             f"id-one,one,team/demo,main,skills/one,{'a' * 40},否,active,product,Alice,alice@example.com\n"
@@ -207,15 +207,19 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         ):
             launcher_module._prepare_next(config, state)
             self.assertEqual(download.call_count, 1)
-            self.assertEqual(prepare_calls, ["id-one"])
+            self.assertEqual(prepare_calls, ["id-one", "id-two"])
+            self.assertEqual(
+                [item["status"] for item in state["items"]],
+                ["WAITING_FOR_AI", "WAITING_FOR_AI"],
+            )
+            queue = json.loads(
+                (self.manifests / "repo-sequential/ai-review-queue.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual([item["skill_id"] for item in queue["items"]], ["id-one", "id-two"])
             first = state["items"][0]
             first["status"] = "COMPLETE"
-            state["current_task_id"] = None
-            state["status"] = "READY"
-
-            launcher_module._prepare_next(config, state)
-            self.assertEqual(download.call_count, 1)
-            self.assertEqual(prepare_calls, ["id-one", "id-two"])
             second = state["items"][1]
             second["status"] = "COMPLETE"
             state["current_task_id"] = None
@@ -225,6 +229,45 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
             self.assertEqual(download.call_count, 1)
             self.assertEqual(cleanup.call_count, 1)
             self.assertEqual(state["status"], "COMPLETE")
+
+    def test_batch_advance_imports_all_ready_ai_results(self):
+        self.inventory.write_text(
+            "skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,product_line,user_name,user_email\n"
+            f"id-one,one,team/demo,main,skills/one,{'a' * 40},否,active,product,Alice,alice@example.com\n"
+            f"id-two,two,team/demo,main,skills/two,{'b' * 40},否,active,product,Bob,bob@example.com\n",
+            encoding="utf-8",
+        )
+        config = load_config(self.config)
+        state = launcher_module._new_state(config, "batch-finish")
+        state["active_repository"] = {
+            "repo_name": "team/demo",
+            "branch": "main",
+            "source_revision": "c" * 40,
+            "skill_count": 2,
+        }
+        state["ai_queue_mode"] = "repository_batch_v1"
+        for index, item in enumerate(state["items"], 1):
+            item.update(
+                {
+                    "task_id": f"task-{index}",
+                    "status": "WAITING_FOR_AI",
+                    "index_path": str(self.root / f"index-{index}.json"),
+                    "ai_result_path": str(self.root / f"ai-{index}.json"),
+                }
+            )
+            Path(item["ai_result_path"]).write_text("{}\n", encoding="utf-8")
+
+        table_paths = (self.root / "results.csv", self.root / "results.json")
+        with (
+            mock.patch.object(launcher_module, "finalize_skill") as finalize,
+            mock.patch.object(launcher_module, "write_skill_result_tables", return_value=table_paths),
+        ):
+            launcher_module._finish_current(config, state, confirm_cleanup=True)
+
+        self.assertEqual(finalize.call_count, 2)
+        self.assertEqual([item["status"] for item in state["items"]], ["COMPLETE", "COMPLETE"])
+        self.assertIsNone(state["current_task_id"])
+        self.assertEqual(state["status"], "READY")
 
 
 if __name__ == "__main__":

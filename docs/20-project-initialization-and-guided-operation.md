@@ -9,11 +9,11 @@
 首次初始化
 → 填写一次真实配置
 → 安装一次静态扫描器
-→ 自动建立批次
-→ 按仓库下载一次并提取全部台账 Skill
-→ AI 检查点
-→ 自动保存结果并进入下一 Skill / 下一仓库
-→ 输出批次 CSV/JSON
+→ 在 Claude Code 调用 /auto-skill-review
+→ 脚本自动建立批次、按仓库下载并提取全部台账 Skill
+→ 逐一完成静态扫描并生成当前仓库 AI 队列
+→ 独立 Agent 批量审查并自动保存结果
+→ 清理后进入下一仓库，输出批次 CSV/JSON
 ```
 
 ## 2. 首次初始化
@@ -48,10 +48,9 @@ batch-review\init.cmd
 
 ## 3. 只需记住一个日常入口
 
-初始化完成后：
-
-- Windows 双击 `batch-review\review.cmd`；
-- Linux/CentOS 执行 `./batch-review/review.sh`。
+初始化完成并通过扫描器健康检查后，可以直接在 Claude Code 输入 `/auto-skill-review`。
+Windows 的 `batch-review\review.cmd`、Linux/CentOS 的 `./batch-review/review.sh` 仍可作为
+手动排障入口。
 
 入口会先进行只读状态检查，然后根据实际情况执行一种动作：
 
@@ -59,10 +58,10 @@ batch-review\init.cmd
 |---|---|
 | 配置未完成 | 显示唯一配置文件和待填写字段，不执行网络操作 |
 | 扫描器未安装 | 经确认后从当前公司 pip 源安装固定版本工具 |
-| 尚无批次 | 一次确认后生成计划并直接启动仓库级静态扫描 |
+| 尚无批次 | 由 `/auto-skill-review` 调用脚本生成计划并启动仓库级静态扫描 |
 | 计划已生成 | 下载当前仓库一次，提取并静态扫描其全部台账 Skill |
-| 等待 AI | 提醒在 Claude Code 使用 `/auto-skill-review` |
-| AI 结果已存在 | 自动保存结果并进入下一 Skill；本仓库完成后进入下一仓库 |
+| 等待 AI | 由 `/auto-skill-review` 为队列批量启动独立 Agent |
+| AI 结果已存在 | 自动保存全部结果；本仓库完成后清理并进入下一仓库 |
 | 内容结果可复用 | 自动记录复用关系并继续 |
 | 批次完成 | 显示结果 CSV 和 JSON 的绝对路径 |
 
@@ -77,9 +76,10 @@ batch-review\init.cmd
 /auto-skill-review
 ```
 
-该 Skill 会读取当前交接、按 `skill-security-review` 的只读规则完成 AI 安全与质量审查，把
-JSON 写入唯一约定位置，然后调用受信入口自动推进下一 Skill 和下一仓库，直到批次完成或遇到
-真实阻塞。它不会发布、Push、安装或执行被审查内容。
+该 Skill 会先调用 `batch-review` 受信脚本完成计划、下载和静态扫描，再读取当前仓库 AI 队列，
+按 `skill-security-review` 的只读规则为每项启动独立 Agent，把 JSON 写入唯一约定位置，然后
+自动合并结果、清理并推进下一仓库，直到批次完成或遇到真实阻塞。它不会发布、Push、安装或
+执行被审查内容。
 
 `/ask-cc` 继续作为只读状态查询入口：
 
@@ -105,11 +105,12 @@ JSON 写入唯一约定位置，然后调用受信入口自动推进下一 Skill
 ```
 
 `ask-cc` 不执行初始化、下载、扫描、安装、清理或 Git 操作。当状态为等待 AI 审查时，它会
-定位当前 `ai-review-current.json`，并指向自动入口。三个 Skill 的职责不同：
+定位当前仓库的 `ai-review-queue.json`（旧批次才回退到 `ai-review-current.json`），并指向自动入口。
+三个 Skill 的职责不同：
 
 - `/ask-cc`：判断项目走到哪里以及下一步是什么；
 - `/skill-security-review`：只审查一个已经准备好的 Skill Package，并产生固定 JSON；不读取静态扫描报告。
-- `/auto-skill-review`：以轻量主会话推进批次，每个 Skill 使用一个新的独立 Agent 上下文，避免多个 Skill 的内容累积到同一上下文。
+- `/auto-skill-review`：以轻量主会话调度脚本和 AI 队列，每个 Skill 使用一个新的独立 Agent 上下文，避免多个 Skill 的内容累积到同一上下文。
 
 ## 5. 本机文件
 
@@ -123,8 +124,11 @@ batch-review/.batch-review/operator-state.json
 <manifest_root>/<batch_id>/per-skill-launcher-state.json
     批次和逐 Skill 进度
 
+<manifest_root>/<batch_id>/ai-review-queue.json
+    当前仓库全部 AI 审查队列
+
 <manifest_root>/<batch_id>/ai-review-current.json
-    当前 AI 审查交接位置
+    兼容旧入口的队列首项
 ```
 
 这些本机状态不会提交到 Git。原始 CSV 不会被修改，批次状态保存 CSV 的 SHA-256；批次创建后
