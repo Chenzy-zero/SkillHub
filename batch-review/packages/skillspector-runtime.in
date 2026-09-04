@@ -1,0 +1,20 @@
+# SkillSpector 2.5.1 command-line runtime dependencies.
+#
+# Versions are taken from NVIDIA's v2.5.1 uv.lock.  The upstream wheel also
+# declares langgraph-cli[inmem]>=0.4.14, but no SkillSpector runtime module
+# imports langgraph_cli.  That package starts the optional LangGraph Studio
+# development server and is intentionally excluded from the scanner runtime.
+boto3==1.43.37
+httpx==0.28.1
+langchain-anthropic==1.4.7
+langchain-aws==1.6.1
+langchain-core==1.4.8
+langchain-openai==1.3.3
+langgraph==1.2.6
+langsmith==0.9.1
+openai==2.44.0
+pydantic==2.13.4
+pyyaml==6.0.3
+rich==15.0.0
+typer==0.23.2
+yara-python==4.5.4

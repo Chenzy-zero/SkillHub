@@ -15,9 +15,11 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import venv
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -31,6 +33,14 @@ WINDOWS_SOURCE_BUILD_REQUIREMENT = "win-unicode-console==0.5"
 BUNDLED_PACKAGES_DIR = Path(__file__).resolve().parents[1] / "packages"
 WINDOWS_PYTHON_FILENAME = "python-3.13.15-amd64.exe"
 WINDOWS_PYTHON_SHA256 = "edec09c4853aeae9ac36efb8c9f95b6b8e2fee65eee56d9767a8b7c69c574403"
+SKILLSPECTOR_RUNTIME_INPUT = BUNDLED_PACKAGES_DIR / "skillspector-runtime.in"
+SKILLSPECTOR_WINDOWS_LOCK = (
+    BUNDLED_PACKAGES_DIR / "skillspector-runtime-windows-py313.txt"
+)
+SKILLSPECTOR_WINDOWS_LOCK_SHA256 = (
+    "7661004da68119b3350158d809cbfc6d8060c10c0c3d3bf9f45a3c2db1cce367"
+)
+SKILLSPECTOR_EXCLUDED_RUNTIME_DEPENDENCY = "langgraph-cli"
 
 
 @dataclass(frozen=True)
@@ -323,6 +333,7 @@ def _uv_install_command(
     *,
     platform_name: str | None = None,
     requirement: str | None = None,
+    no_deps: bool = False,
 ) -> tuple[str, ...]:
     command = [
         str(uv),
@@ -333,8 +344,10 @@ def _uv_install_command(
         "--only-binary",
         ":all:",
         "--upgrade",
-        requirement or package.requirement,
     ]
+    if no_deps:
+        command.append("--no-deps")
+    command.append(requirement or package.requirement)
     platform_value = os.name if platform_name is None else platform_name
     if platform_value == "nt" and package.name == "cisco":
         # oletools -> pcodedmp requires this legacy Windows-only package, for
@@ -348,6 +361,25 @@ def _uv_install_command(
             )
         )
     return tuple(command)
+
+
+def _uv_requirements_command(
+    uv: Path,
+    python: Path,
+    requirements: Path,
+) -> tuple[str, ...]:
+    """Install an explicitly curated runtime graph without optional dev servers."""
+
+    return (
+        str(uv),
+        "pip",
+        "sync",
+        "--python",
+        str(python),
+        "--only-binary",
+        ":all:",
+        str(requirements),
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -373,6 +405,78 @@ def _install_requirement(package: ScannerPackage) -> str:
             f"(expected {package.bundled_sha256}, got {actual_sha256})"
         )
     return str(wheel.resolve())
+
+
+def _requirement_name(value: str) -> str:
+    match = re.match(r"\s*([A-Za-z0-9_.-]+)", value)
+    if not match:
+        raise InstallError(f"invalid requirement in SkillSpector metadata: {value}")
+    return match.group(1).lower().replace("_", "-")
+
+
+def _skillspector_runtime_requirements(
+    package: ScannerPackage,
+    python: Path,
+    *,
+    platform_name: str | None = None,
+) -> Path:
+    """Return and validate the real CLI runtime dependencies for SkillSpector.
+
+    NVIDIA 2.5.1 declares ``langgraph-cli[inmem]`` as a mandatory dependency,
+    although no module in the wheel imports it.  It is a LangGraph Studio
+    development server and pulls source-only packages on Windows.  Keep the
+    official wheel unchanged, validate that every other direct runtime
+    dependency is covered, and install the wheel itself with ``--no-deps``.
+    """
+
+    wheel = Path(_install_requirement(package))
+    declared: set[str] = set()
+    imports_dev_server = False
+    with zipfile.ZipFile(wheel) as archive:
+        metadata_name = next(
+            (name for name in archive.namelist() if name.endswith(".dist-info/METADATA")),
+            None,
+        )
+        if metadata_name is None:
+            raise InstallError(f"SkillSpector wheel has no METADATA: {wheel}")
+        for line in archive.read(metadata_name).decode("utf-8").splitlines():
+            if not line.startswith("Requires-Dist:"):
+                continue
+            requirement = line.partition(":")[2].strip()
+            if "extra ==" not in requirement:
+                declared.add(_requirement_name(requirement))
+        for name in archive.namelist():
+            if not name.startswith("skillspector/") or not name.endswith(".py"):
+                continue
+            source = archive.read(name).decode("utf-8", errors="replace")
+            if "langgraph_cli" in source:
+                imports_dev_server = True
+                break
+
+    input_names = {
+        _requirement_name(line)
+        for line in SKILLSPECTOR_RUNTIME_INPUT.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    expected = declared - {SKILLSPECTOR_EXCLUDED_RUNTIME_DEPENDENCY}
+    if imports_dev_server or input_names != expected:
+        missing = sorted(expected - input_names)
+        extra = sorted(input_names - expected)
+        raise InstallError(
+            "SkillSpector runtime dependency manifest no longer matches the verified wheel "
+            f"(missing={missing}, extra={extra}, imports_langgraph_cli={imports_dev_server})"
+        )
+
+    identity = _python_identity((str(python),))
+    platform_value = os.name if platform_name is None else platform_name
+    if platform_value == "nt" and identity is not None and identity[1] == (3, 13):
+        if _sha256(SKILLSPECTOR_WINDOWS_LOCK) != SKILLSPECTOR_WINDOWS_LOCK_SHA256:
+            raise InstallError(
+                f"SkillSpector Windows dependency lock SHA-256 mismatch: "
+                f"{SKILLSPECTOR_WINDOWS_LOCK}"
+            )
+        return SKILLSPECTOR_WINDOWS_LOCK.resolve()
+    return SKILLSPECTOR_RUNTIME_INPUT.resolve()
 
 
 def _metadata_version_command(
@@ -415,8 +519,20 @@ def install_scanner(
     environment = root / package.name
     python = _ensure_scanner_environment(environment, base_python)
     requirement = _install_requirement(package)
+    if package.name == "skillspector":
+        runtime_requirements = _skillspector_runtime_requirements(package, python)
+        _run(
+            _uv_requirements_command(uv, python, runtime_requirements),
+            env=package_environment,
+        )
     _run(
-        _uv_install_command(uv, python, package, requirement=requirement),
+        _uv_install_command(
+            uv,
+            python,
+            package,
+            requirement=requirement,
+            no_deps=package.name == "skillspector",
+        ),
         env=package_environment,
     )
 
@@ -485,8 +601,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"扫描器安装失败: {exc}", file=sys.stderr)
         print(
             f"请确认公司 pip 源已同步 uv=={UV_VERSION}、"
-            "cisco-ai-skill-scanner==2.0.13 及两套扫描器的全部依赖；"
-            "SkillSpector 官方 wheel 应存在于 batch-review/packages。",
+            "cisco-ai-skill-scanner==2.0.13，以及 SkillSpector Windows 锁定清单中的 wheel；"
+            "官方 SkillSpector wheel 和运行依赖清单应存在于 batch-review/packages。",
             file=sys.stderr,
         )
         return 1

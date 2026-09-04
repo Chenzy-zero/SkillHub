@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -63,6 +64,57 @@ class ScannerInstallerTests(unittest.TestCase):
         )
         self.assertEqual(command[-1], requirement)
         self.assertNotEqual(command[-1], package.requirement)
+
+    def test_skillspector_wheel_is_installed_without_metadata_dependencies(self):
+        package = MODULE.SCANNERS[1]
+        command = MODULE._uv_install_command(
+            Path("resolver/uv"),
+            Path("scanner/python"),
+            package,
+            requirement=MODULE._install_requirement(package),
+            no_deps=True,
+        )
+        self.assertIn("--no-deps", command)
+
+    def test_skillspector_runtime_excludes_unused_langgraph_dev_server(self):
+        package = MODULE.SCANNERS[1]
+        with patch.object(
+            MODULE,
+            "_python_identity",
+            return_value=(Path("scanner-python.exe"), (3, 13)),
+        ):
+            requirements = MODULE._skillspector_runtime_requirements(
+                package, Path("scanner-python.exe"), platform_name="nt"
+            )
+        content = requirements.read_text(encoding="utf-8").lower()
+        self.assertNotIn("langgraph-cli", content)
+        self.assertNotIn("forbiddenfruit", content)
+        self.assertNotIn("blockbuster", content)
+        self.assertIn("yara-python==4.5.4", content)
+
+    def test_skillspector_windows_lock_is_integrity_checked(self):
+        package = MODULE.SCANNERS[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            damaged = Path(temporary) / "requirements.txt"
+            damaged.write_text("yara-python==4.5.4\n", encoding="utf-8")
+            with (
+                patch.object(MODULE, "SKILLSPECTOR_WINDOWS_LOCK", damaged),
+                patch.object(MODULE, "_python_identity", return_value=(damaged, (3, 13))),
+                self.assertRaisesRegex(MODULE.InstallError, "SHA-256 mismatch"),
+            ):
+                MODULE._skillspector_runtime_requirements(
+                    package, damaged, platform_name="nt"
+                )
+
+    def test_runtime_requirements_install_remains_wheel_only(self):
+        command = MODULE._uv_requirements_command(
+            Path("resolver/uv"),
+            Path("scanner/python.exe"),
+            Path("packages/runtime.txt"),
+        )
+        self.assertEqual(command[0:3], ("resolver/uv", "pip", "sync"))
+        self.assertIn("--only-binary", command)
+        self.assertEqual(command[-1], "packages/runtime.txt")
 
     def test_index_url_is_passed_by_environment_not_command_line(self):
         environment = MODULE._pip_environment("https://mirror.example/simple")

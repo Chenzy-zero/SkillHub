@@ -1,0 +1,4 @@
+batch-review/packages/*.in text eol=lf
+batch-review/packages/*.txt text eol=lf
+batch-review/packages/*.whl binary
+batch-review/packages/*.exe binary
