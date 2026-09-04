@@ -114,6 +114,178 @@ class PartialDownload:
     transport: str = "partial_clone"
 
 
+@dataclass(frozen=True, slots=True)
+class RepositoryDownload:
+    """One frozen repository archive shared by every listed Skill in it."""
+
+    workspace_root: Path
+    repository: str
+    branch: str
+    revision: str
+    skills: Mapping[str, PartialDownload]
+    transport: str
+
+
+def _repository_task_id(repository: str, branch: str) -> str:
+    encoded = json.dumps(
+        [repository, branch], ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    return "repo-" + hashlib.sha256(encoded).hexdigest()[:24]
+
+
+def download_repository_skills(
+    config: ReviewConfig,
+    *,
+    batch_id: str,
+    rows: Sequence[InventoryRow],
+    runner: GitRunner | None = None,
+) -> RepositoryDownload:
+    """Download one frozen repository revision and extract all listed Skills.
+
+    Gerrit in the target environment does not support path-limited archives or
+    partial clone filtering. Consequently the transport downloads one
+    history-free tar for a repository/branch, while the materializer writes
+    only the CSV allowlisted Skill roots. The tar is deleted before return.
+    """
+
+    if not rows:
+        raise PerSkillError("repository download requires at least one Skill")
+    repository_name = rows[0].repo_name
+    branch = rows[0].branch
+    if any(row.repo_name != repository_name or row.branch != branch for row in rows):
+        raise PerSkillError("repository download rows must share repo_name and branch")
+    if len({row.source_row_id for row in rows}) != len(rows):
+        raise PerSkillError("repository download contains duplicate Skill rows")
+    for row in rows:
+        root_name = _component(skill_root_name(row.skill_path, row.skill_name), "skill_name")
+        if row.skill_name != root_name:
+            raise PerSkillError(
+                f"skill_name {row.skill_name!r} must equal Skill Root directory name {root_name!r}"
+            )
+
+    batch_root = (config.workspace.git_download_root / batch_id).resolve()
+    workspace_root = (batch_root / _repository_task_id(repository_name, branch)).resolve()
+    download_root = config.workspace.git_download_root.resolve()
+    if workspace_root.parent.parent != download_root:
+        raise PerSkillError("repository workspace escaped git_download_root")
+    if batch_root.exists():
+        leftovers = list(batch_root.iterdir())
+        if (
+            len(leftovers) == 1
+            and leftovers[0] == workspace_root
+            and workspace_root.is_dir()
+            and not workspace_root.is_symlink()
+            and not config.workspace.keep_failed_workspace
+        ):
+            remove_tree(workspace_root)
+            leftovers = []
+        if leftovers:
+            raise PerSkillError(
+                "git_download is not empty; finish the current repository first: "
+                + ", ".join(path.name for path in leftovers[:5])
+            )
+    workspace_root.mkdir(parents=True)
+
+    active_runner = runner
+    if active_runner is None:
+        environment = os.environ.copy()
+        if config.gerrit.ssh_identity_file is not None:
+            environment["GIT_SSH_COMMAND"] = " ".join(
+                shlex.quote(value)
+                for value in (
+                    "ssh",
+                    "-i",
+                    str(config.gerrit.ssh_identity_file),
+                    "-o",
+                    "IdentitiesOnly=yes",
+                    "-o",
+                    "BatchMode=yes",
+                )
+            )
+        active_runner = GitRunner(env=environment)
+
+    url = config.gerrit.repository_url(repository_name, branch=branch)
+    ref = f"refs/heads/{branch}"
+    archive_path = workspace_root / ".repository-archive.tar"
+    try:
+        remote = active_runner.checked(("ls-remote", "--exit-code", url, ref), cwd=workspace_root)
+        matches = [line.split() for line in remote.stdout.splitlines() if line.strip()]
+        if len(matches) != 1 or len(matches[0]) != 2 or matches[0][1] != ref:
+            raise PerSkillError(f"cannot resolve exactly one remote branch: {ref}")
+        revision = matches[0][0].lower()
+        if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", revision):
+            raise PerSkillError("Gerrit returned an invalid branch revision")
+
+        active_runner.checked(
+            (
+                "archive",
+                f"--remote={url}",
+                "--format=tar",
+                f"--output={archive_path}",
+                revision,
+            ),
+            cwd=workspace_root,
+        )
+        if not archive_path.is_file():
+            raise PerSkillError("Gerrit reported success without a repository archive")
+
+        downloads: dict[str, PartialDownload] = {}
+        for row in rows:
+            task_root = workspace_root / _task_id(row)
+            root_name = _component(skill_root_name(row.skill_path, row.skill_name), "skill_name")
+            snapshot = export_skill_archive_snapshot(
+                archive_path,
+                repository_name,
+                revision,
+                row.skill_path,
+                task_root / root_name,
+            )
+            downloads[row.source_row_id] = PartialDownload(
+                task_root,
+                workspace_root,
+                revision,
+                snapshot=snapshot,
+                transport="whole_repository_archive",
+            )
+        archive_path.unlink()
+        return RepositoryDownload(
+            workspace_root,
+            repository_name,
+            branch,
+            revision,
+            downloads,
+            "whole_repository_archive",
+        )
+    except Exception as operation_error:
+        if workspace_root.exists() and not config.workspace.keep_failed_workspace:
+            try:
+                remove_tree(workspace_root)
+            except OSError as cleanup_error:
+                raise PerSkillError(
+                    f"{operation_error}; repository workspace cleanup also failed: {cleanup_error}"
+                ) from operation_error
+        raise
+
+
+def cleanup_repository_download(
+    config: ReviewConfig, *, batch_id: str, repository: str, branch: str
+) -> bool:
+    target = (
+        config.workspace.git_download_root
+        / batch_id
+        / _repository_task_id(repository, branch)
+    ).resolve()
+    root = config.workspace.git_download_root.resolve()
+    if target.parent.parent != root or not target.name.startswith("repo-"):
+        raise PerSkillError("repository cleanup target escaped git_download_root")
+    if not target.exists():
+        return False
+    if target.is_symlink() or not target.is_dir():
+        raise PerSkillError("repository cleanup target is not a real directory")
+    remove_tree(target)
+    return True
+
+
 def partial_fetch_skill_repository(
     config: ReviewConfig,
     *,
@@ -441,6 +613,7 @@ def prepare_skill(
     batch_id: str,
     row: InventoryRow,
     downloader: Callable[..., PartialDownload] = partial_fetch_skill_repository,
+    downloaded: PartialDownload | None = None,
     adapters: Mapping[str, ScannerAdapter] | None = None,
 ) -> SkillPreparation:
     """Download, archive and statically review exactly one CSV Skill."""
@@ -451,7 +624,9 @@ def prepare_skill(
         raise PerSkillError(
             f"skill_name {row.skill_name!r} must equal Skill Root directory name {root_name!r}"
         )
-    downloaded = downloader(config, batch_id=batch_id, row=row, task_id=task_id)
+    downloaded = downloaded or downloader(
+        config, batch_id=batch_id, row=row, task_id=task_id
+    )
     export_root = downloaded.task_root / root_name
     snapshot = downloaded.snapshot or export_skill_snapshot(
         downloaded.repository,
@@ -820,8 +995,11 @@ def cleanup_skill_download(config: ReviewConfig, *, batch_id: str, task_id: str)
 __all__ = [
     "PartialDownload",
     "PerSkillError",
+    "RepositoryDownload",
     "SkillPreparation",
+    "cleanup_repository_download",
     "cleanup_skill_download",
+    "download_repository_skills",
     "finalize_skill",
     "partial_fetch_skill_repository",
     "prepare_skill",

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -82,92 +83,129 @@ def _batch_id(operator: dict[str, Any]) -> str:
     return f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
 
 
-def main() -> int:
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Skill 安全审查免参数编排入口。")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="由已授权的自动审查 Skill 调用；不重复询问计划、启动和推进确认",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    run_authorized = bool(args.auto)
     try:
-        status = _status()
-        _print_status(status)
-        action = status.get("next_action")
-        if action == "INITIALIZE":
-            if _confirm("是否现在初始化项目"):
-                return _run((sys.executable, str(INIT_SCRIPT)))
-            return 0
-        if action == "EDIT_CONFIG":
-            print("请只修改上面显示的本机配置文件；保存后再次运行本入口。")
-            return 0
-        if action == "INSTALL_SCANNERS":
-            if not _confirm(
-                "是否现在安装两套扫描器及必要的项目专用 Python 3.13"
-            ):
+        while True:
+            status = _status()
+            _print_status(status)
+            action = status.get("next_action")
+            if action == "INITIALIZE":
+                if args.auto:
+                    print("自动模式不会替代首次初始化，请先运行 init.cmd。")
+                    return 2
+                if _confirm("是否现在初始化项目"):
+                    return _run((sys.executable, str(INIT_SCRIPT)))
                 return 0
-            code = _run((sys.executable, str(INSTALLER), "--root", str(BATCH_REVIEW_DIR / ".scanner-tools")))
-            if code == 0:
-                print("扫描器已安装。再次双击 review.cmd，程序会继续判断下一步。")
-            return code
-        if action == "PLAN":
-            if not _confirm("是否现在生成新的逐 Skill 审查计划（不会联网和扫描）"):
+            if action == "EDIT_CONFIG":
+                print("请只修改上面显示的本机配置文件；保存后再次运行本入口。")
                 return 0
-            operator = _operator()
-            batch_id = _batch_id(operator)
-            code = _run(
-                (
-                    sys.executable,
-                    str(LAUNCHER),
-                    "plan",
-                    "--config",
-                    str(operator["config_path"]),
-                    "--batch-id",
-                    batch_id,
+            if action == "INSTALL_SCANNERS":
+                if args.auto:
+                    print("自动模式不会静默安装扫描器，请先双击 review.cmd 完成安装确认。")
+                    return 2
+                if not _confirm(
+                    "是否现在安装两套扫描器及必要的项目专用 Python 3.13"
+                ):
+                    return 0
+                code = _run(
+                    (
+                        sys.executable,
+                        str(INSTALLER),
+                        "--root",
+                        str(BATCH_REVIEW_DIR / ".scanner-tools"),
+                    )
                 )
-            )
-            if code == 0:
+                if code == 0:
+                    print("扫描器已安装；本入口将继续检查并启动批次。")
+                    continue
+                return code
+            if action == "PLAN":
+                if not run_authorized and not _confirm(
+                    "是否启动全自动批次（生成计划后将直接下载并静态扫描）"
+                ):
+                    return 0
+                run_authorized = True
+                operator = _operator()
+                batch_id = _batch_id(operator)
+                code = _run(
+                    (
+                        sys.executable,
+                        str(LAUNCHER),
+                        "plan",
+                        "--config",
+                        str(operator["config_path"]),
+                        "--batch-id",
+                        batch_id,
+                    )
+                )
+                if code != 0:
+                    return code
                 operator["batch_id"] = batch_id
                 _save_operator(operator)
-                print("计划已生成。再次双击 review.cmd 即可开始第一个 Skill。")
-            return code
-        if action == "START":
-            if not _confirm("是否现在连接 Git 并下载、扫描第一个 Skill"):
-                return 0
-            operator = _operator()
-            return _run(
-                (
-                    sys.executable,
-                    str(LAUNCHER),
-                    "start",
-                    "--config",
-                    str(operator["config_path"]),
-                    "--batch-id",
-                    str(operator["batch_id"]),
-                    "--execute",
+                continue
+            if action == "START":
+                if not run_authorized and not _confirm(
+                    "是否开始自动下载仓库并逐一执行静态扫描"
+                ):
+                    return 0
+                run_authorized = True
+                operator = _operator()
+                code = _run(
+                    (
+                        sys.executable,
+                        str(LAUNCHER),
+                        "start",
+                        "--config",
+                        str(operator["config_path"]),
+                        "--batch-id",
+                        str(operator["batch_id"]),
+                        "--execute",
+                    )
                 )
-            )
-        if action == "AI_REVIEW":
-            print("请在当前仓库的 Claude Code 会话输入：/ask-cc")
-            print("ask-cc 会读取当前交接文件并明确告诉你下一步，不需要记路径或参数。")
-            return 0
-        if action == "ADVANCE":
-            if not _confirm("是否保存当前结果、清理本次临时下载并进入下一个 Skill"):
+                if code != 0:
+                    return code
+                continue
+            if action == "AI_REVIEW":
+                print("请在当前仓库的 Claude Code 会话输入：/auto-skill-review")
+                print("它会完成当前及后续 AI 审查，并自动推进到下一 Skill 和下一仓库。")
                 return 0
-            operator = _operator()
-            return _run(
-                (
-                    sys.executable,
-                    str(LAUNCHER),
-                    "advance",
-                    "--config",
-                    str(operator["config_path"]),
-                    "--batch-id",
-                    str(operator["batch_id"]),
-                    "--execute",
-                    "--confirm-cleanup",
+            if action == "ADVANCE":
+                operator = _operator()
+                code = _run(
+                    (
+                        sys.executable,
+                        str(LAUNCHER),
+                        "advance",
+                        "--config",
+                        str(operator["config_path"]),
+                        "--batch-id",
+                        str(operator["batch_id"]),
+                        "--execute",
+                        "--confirm-cleanup",
+                    )
                 )
-            )
-        if action == "VIEW_RESULTS":
-            results = status.get("result_paths") or {}
-            print(f"结果 CSV：{results.get('csv', '')}")
-            print(f"结果 JSON：{results.get('json', '')}")
-            return 0
-        print("当前状态需要人工检查，程序没有执行修改操作。")
-        return 2
+                if code != 0:
+                    return code
+                continue
+            if action == "VIEW_RESULTS":
+                results = status.get("result_paths") or {}
+                print(f"结果 CSV：{results.get('csv', '')}")
+                print(f"结果 JSON：{results.get('json', '')}")
+                return 0
+            print("当前状态需要人工检查，程序没有执行修改操作。")
+            return 2
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"操作入口失败：{exc}", file=sys.stderr)
         return 2

@@ -32,7 +32,7 @@ Act as the read-only project guide for this repository. Determine the real curre
    - `batch-review/.batch-review/operator-state.json`;
    - the active batch's `ai-review-current.json` under the configured manifest directory.
 
-   Confirm that the handoff and expected result paths exist. Then tell the user to invoke `/skill-security-review` with the handoff JSON. Do not perform the security review inside `ask-cc`, because the dedicated Skill has stricter read-only evidence rules.
+   Confirm that the handoff and expected result paths exist. Then tell the user to invoke `/auto-skill-review`. Do not perform the security review inside `ask-cc`; the automatic Skill applies the dedicated review rules and advances persisted state.
 4. For other states, use [references/workflow.md](references/workflow.md) to explain what the state means. Prefer the parameter-free entry points `init.cmd`/`init.sh` and `review.cmd`/`review.sh`; do not make the user copy the underlying command with a config path and batch ID.
 5. If status checking fails or a state is inconsistent, report the exact file or check that failed and stop. Do not repair or delete state automatically.
 

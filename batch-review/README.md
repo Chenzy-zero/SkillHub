@@ -1,27 +1,27 @@
 # Skill 批量安全审查执行程序
 
 本目录实现 `docs/13-skill-batch-security-review-and-scoring-design.md` 的本地执行部分。
-默认启动器现在按 CSV 中的 Skill 逐个处理；原仓库级命令仍保留为兼容入口。
+默认启动器现在按仓库一次下载、提取全部台账 Skill 后逐一处理；原仓库级命令仍保留为兼容入口。
 
 首次配置和一键启动见 [`docs/16-skill-batch-review-quick-start.md`](../docs/16-skill-batch-review-quick-start.md)；完整配置字段、逐仓库操作、Claude Code 执行、输出目录和故障处理见 [`docs/15-skill-batch-review-script-user-guide.md`](../docs/15-skill-batch-review-script-user-guide.md)。
 
 ```text
 CSV 台账
-  → 生成 Skill 顺序（不联网）
-  → 单 Skill Blobless Partial Fetch
-  → 校验 CSV Commit 等于分支 HEAD
-  → 只导出目标 Skill 并迁移到 skills/<skill_id>/<skill_name>
+  → 生成仓库/Skill 顺序（不联网）
+  → 按 repo_name + branch 冻结一次分支 HEAD
+  → 下载一次整仓无历史 tar，只提取该组全部台账 Skill
+  → 分别迁移到 skills/<skill_id>/<skill_name>
   → 生成 SHA-256 Digest 和 content_id
   → 检查同名同内容的已通过结果能否复用
   → 同名 Skill Root 内容一致时复用已通过结果
   → Cisco + SkillSpector 并行静态检查
   → 生成 Claude Code 只读交接任务
-  → 人工在公司内网模型环境运行项目 Skill /skill-security-review
+  → 在公司内网模型环境调用一次 /auto-skill-review
   → 导入并校验 AI JSON
   → 合并问题、安全判定、独立质量评分
   → 在 skill_id 目录写入 review-result.json
   → 原子更新批次结果 CSV/JSON
-  → 明确确认后清理当前 Skill 的 git_download 临时目录
+  → 清理当前仓库临时目录并自动进入下一仓库
 ```
 
 程序不会执行被审查 Skill 的脚本、安装依赖或调用其中的工具；不会自动调用模型；不会 Commit、Push 或上架候选内容。原始扫描报告保存在受限证据区，不进入私密候选目录。
@@ -38,7 +38,7 @@ CSV 台账
 - Claude Code AI 审查交接、JSON Schema 和冻结版本一致性校验；
 - 问题归一化、去重、安全门禁和独立 0–100 质量得分；
 - 受限证据、可恢复状态、本地私密候选、批次报告和受控清理；
-- 逐 Skill partial fetch、`skills/<skill_id>/<skill_name>` 归档和单项 JSON；
+- 仓库级一次归档、全部台账 Skill 提取、`skills/<skill_id>/<skill_name>` 归档和单项 JSON；
 - 同名同内容的 `content_id` 关联、已通过结果复用和批次 CSV/JSON；
 - 本地集成测试覆盖完整的两阶段单仓库流程。
 
@@ -81,7 +81,8 @@ Linux/CentOS 第一次执行：
 默认绝不覆盖。检查配置后，Windows 始终双击 `batch-review\review.cmd`，Linux/CentOS 始终执行
 `./batch-review/review.sh`。该入口会读取真实状态并只提供当前可执行的下一步。
 
-在 Claude Code 中输入 `/ask-cc` 可以只读检查同一状态；它不会修改配置、执行扫描或清理目录。
+在 Claude Code 中输入 `/ask-cc` 可以只读检查状态；输入 `/auto-skill-review` 可自动完成当前及
+后续 AI 审查并推进到下一 Skill、下一仓库。
 
 ## 3. 配置
 
@@ -146,9 +147,8 @@ python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
 ```text
 首次运行 init.cmd / init.sh
 → 后续始终运行 review.cmd / review.sh
-→ 等待 AI 时在 Claude Code 输入 /ask-cc
-→ 按提示调用 /skill-security-review
-→ 再次运行 review 入口
+→ 等待 AI 时在 Claude Code 输入 /auto-skill-review
+→ 自动审查并推进到批次完成或真实阻塞
 ```
 
 以下带参数命令保留用于自动化运维和故障排查，普通执行人员无需记忆：
@@ -164,7 +164,7 @@ python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
 Windows 将 `run.sh` 替换为 `run.cmd`。启动器生成 AI 队列后，在 Claude Code 中调用
 `/skill-security-review`；完整操作见快速使用说明。
 
-`run.sh` / `run.cmd` 会逐 Skill 维护状态，并把结果写入 `skills_root` 与 `results_root`。
+`run.sh` / `run.cmd` 会维护仓库和 Skill 状态，并把结果写入 `skills_root` 与 `results_root`。
 
 ## 5. 仓库级兼容命令
 
@@ -236,8 +236,8 @@ skill-batch-review cleanup-repository review.toml \
   --confirm-cleanup
 ```
 
-兼容命令的清理只允许删除 `workspace.root/<batch_id>/repositories/<当前仓库>/`，并要求该仓库所有 AI 任务已有持久化结果。逐 Skill 默认入口只清理
-`git_download_root/<batch_id>/<当前任务>/`。受限证据、永久 Skill、结果表和私密候选均不会被清理。
+兼容命令的清理只允许删除 `workspace.root/<batch_id>/repositories/<当前仓库>/`，并要求该仓库所有 AI 任务已有持久化结果。默认入口只清理
+`git_download_root/<batch_id>/<当前仓库任务>/`。受限证据、永久 Skill、结果表和私密候选均不会被清理。
 
 ## 6. 输出目录
 
@@ -246,7 +246,7 @@ workspace.root/                 临时镜像、快照和扫描输出，可受控
 workspace.evidence_root/        原始报告、Manifest、交接和最终结论，限制访问
 workspace.candidate_root/       仅安全与质量均符合要求的本地私密候选
 workspace.manifest_root/        仓库计划、仓库索引和结果索引
-workspace.git_download_root/    当前 Skill 的 partial fetch 临时目录
+workspace.git_download_root/    当前仓库的无历史 tar 与白名单 Skill 临时目录
 workspace.skills_root/          skills/<skill_id>/<skill_name> 与单项 JSON
 workspace.results_root/         每个批次的结果 CSV 和 JSON
 ```

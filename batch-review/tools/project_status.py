@@ -261,30 +261,30 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
                 state="AI_RESULT_READY",
                 summary="当前 Skill 的 AI 结果已保存，可以合并结果并进入下一个 Skill。",
                 next_action="ADVANCE",
-                next_instruction="双击 review.cmd，确认保存结果和清理本次临时下载。",
+                next_instruction="运行 review.cmd；程序会校验并保存结果，然后自动继续。",
                 **common,
             )
         return ProjectStatus(
             state="WAITING_FOR_AI",
             summary="当前 Skill 的静态扫描已完成，正在等待 AI 安全与质量审查。",
             next_action="AI_REVIEW",
-            next_instruction="在 Claude Code 输入 /ask-cc；它会定位交接文件并告诉你如何完成当前 AI 审查。",
+            next_instruction="在 Claude Code 输入 /auto-skill-review；它会完成当前及后续 AI 审查并自动推进批次。",
             **common,
         )
     if batch_status == "READY_TO_ADVANCE":
         return ProjectStatus(
-            state="READY_TO_ADVANCE",
-            summary="当前 Skill 已复用合格结果，无需重复 AI 审查。",
-            next_action="ADVANCE",
-            next_instruction="双击 review.cmd，确认写入复用记录并进入下一个 Skill。",
+        state="READY_TO_ADVANCE",
+        summary="当前 Skill 已复用合格结果，无需重复 AI 审查。",
+        next_action="ADVANCE",
+        next_instruction="运行 review.cmd；程序会写入复用记录并自动进入下一个 Skill。",
             **common,
         )
     if batch_status == "READY":
         return ProjectStatus(
-            state="READY_TO_START",
-            summary="批次计划已建立，尚未下载和扫描第一个 Skill。",
-            next_action="START",
-            next_instruction="双击 review.cmd，确认后开始下载和扫描第一个 Skill。",
+        state="READY_TO_START",
+        summary="批次计划已建立，尚未按仓库下载和扫描。",
+        next_action="START",
+        next_instruction="双击 review.cmd，一次确认后按仓库自动下载并逐一扫描。",
             **common,
         )
     return ProjectStatus(

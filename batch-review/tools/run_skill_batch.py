@@ -24,14 +24,18 @@ if str(SRC_DIR) not in sys.path:
 from skill_batch_review.config import ReviewConfig, load_config  # noqa: E402
 from skill_batch_review.inventory import InventoryDocument, InventoryRow, load_inventory_csv  # noqa: E402
 from skill_batch_review.per_skill import (  # noqa: E402
+    PartialDownload,
     PerSkillError,
+    cleanup_repository_download,
     cleanup_skill_download,
+    download_repository_skills,
     finalize_skill,
     prepare_skill,
     skill_task_id,
     write_skill_result_tables,
 )
 from skill_batch_review.preflight import review_preflight  # noqa: E402
+from skill_batch_review.snapshot import CoverageIssue, PackageEntry, SnapshotResult  # noqa: E402
 
 
 _BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -125,6 +129,8 @@ def _new_state(config: ReviewConfig, batch_id: str) -> dict[str, Any]:
                 "source_row_id": row.source_row_id,
                 "skill_id": row.trace_values["skill_id"],
                 "skill_name": row.skill_name,
+                "repo_name": row.repo_name,
+                "branch": row.branch,
                 "status": "PENDING",
                 "index_path": None,
             }
@@ -143,6 +149,22 @@ def _load_state(config: ReviewConfig, batch_id: str) -> dict[str, Any]:
         raise LauncherError(f"批次状态无效: {path}")
     if value.get("config_sha256") != _sha256(config.path):
         raise LauncherError("批次创建后配置文件发生变化，请恢复原配置或创建新批次")
+    row_lookup = {row.source_row_id: row for row in _rows(config, _inventory(config))}
+    migrated = False
+    for item in value["items"]:
+        if not isinstance(item, dict):
+            continue
+        row = row_lookup.get(str(item.get("source_row_id") or ""))
+        if row is None:
+            continue
+        if not item.get("repo_name"):
+            item["repo_name"] = row.repo_name
+            migrated = True
+        if not item.get("branch"):
+            item["branch"] = row.branch
+            migrated = True
+    if migrated:
+        _save(config, value)
     return value
 
 
@@ -171,59 +193,231 @@ def _preflight(config: ReviewConfig) -> None:
         raise LauncherError("运行前检查未通过：\n" + "\n".join(f"- [{i.code}] {i.message}" for i in issues))
 
 
+def _activate_waiting(config: ReviewConfig, state: dict[str, Any], item: dict[str, Any]) -> None:
+    state["current_task_id"] = item["task_id"]
+    state["status"] = "WAITING_FOR_AI"
+    queue = {
+        "batch_id": state["batch_id"],
+        "task_id": item["task_id"],
+        "skill_id": item["skill_id"],
+        "skill_name": item["skill_name"],
+        "repo_name": item["repo_name"],
+        "branch": item["branch"],
+        "handoff": item["handoff_path"],
+        "expected_result": item["ai_result_path"],
+        "skill_trigger": "/skill-security-review",
+    }
+    _atomic_json(
+        config.workspace.manifest_root / str(state["batch_id"]) / "ai-review-current.json",
+        queue,
+    )
+    _save(config, state)
+    print(f"等待 AI 审查: {item['skill_id']}/{item['skill_name']}")
+
+
+def _snapshot_from_item(item: Mapping[str, Any]) -> SnapshotResult:
+    stored = item.get("download_snapshot")
+    if not isinstance(stored, Mapping):
+        raise LauncherError("当前 Skill 缺少仓库提取快照")
+    manifest = stored.get("manifest")
+    if not isinstance(manifest, Mapping):
+        raise LauncherError("当前 Skill 的仓库提取快照无效")
+    entries = tuple(
+        PackageEntry(
+            relative_path=str(entry["relative_path"]),
+            file_type=str(entry["type"]),
+            mode=str(entry["mode"]),
+            size=int(entry["size"]),
+            sha256=entry.get("sha256"),
+            symlink_target=entry.get("symlink_target"),
+            git_object_id=entry.get("git_object_id"),
+        )
+        for entry in manifest.get("entries", [])
+        if isinstance(entry, Mapping)
+    )
+    issues = tuple(
+        CoverageIssue(
+            code=str(issue["code"]),
+            path=issue.get("path"),
+            detail=str(issue["detail"]),
+            blocking=bool(issue.get("blocking", True)),
+        )
+        for issue in manifest.get("coverage_issues", [])
+        if isinstance(issue, Mapping)
+    )
+    return SnapshotResult(
+        repository=str(manifest["repository"]),
+        source_revision=str(manifest["source_revision"]),
+        skill_path=str(manifest["skill_path"]),
+        snapshot_path=Path(str(stored["snapshot_path"])),
+        entries=entries,
+        skill_digest=str(manifest["skill_digest"]),
+        coverage_issues=issues,
+        package_size_bytes=int(manifest.get("package_size_bytes", 0)),
+    )
+
+
 def _prepare_next(config: ReviewConfig, state: dict[str, Any]) -> None:
-    next_item = next((item for item in state["items"] if item.get("status") == "PENDING"), None)
-    if next_item is None:
-        document = _inventory(config)
+    """Download one repository, then review its extracted Skills one by one."""
+
+    document = _inventory(config)
+    rows = _rows(config, document)
+    row_lookup = {row.source_row_id: row for row in rows}
+    waiting = next(
+        (item for item in state["items"] if item.get("status") == "WAITING_FOR_AI"),
+        None,
+    )
+    if waiting is not None:
+        _activate_waiting(config, state, waiting)
+        return
+
+    while True:
+        next_item = next(
+            (item for item in state["items"] if item.get("status") == "PENDING"),
+            None,
+        )
+        if next_item is None:
+            active = state.get("active_repository")
+            if isinstance(active, Mapping):
+                repository = str(active["repo_name"])
+                branch = str(active["branch"])
+                cleanup_repository_download(
+                    config,
+                    batch_id=str(state["batch_id"]),
+                    repository=repository,
+                    branch=branch,
+                )
+                for item in state["items"]:
+                    if item.get("repo_name") == repository and item.get("branch") == branch:
+                        item["workspace_cleaned"] = True
+                state.setdefault("completed_repositories", []).append(
+                    {**dict(active), "completed_at": _utc_now()}
+                )
+                state["active_repository"] = None
+                _save(config, state)
+            csv_path, json_path = write_skill_result_tables(
+                config, document, batch_id=str(state["batch_id"])
+            )
+            state["status"] = "COMPLETE"
+            state["current_task_id"] = None
+            state["result_csv"] = str(csv_path)
+            state["result_json"] = str(json_path)
+            _save(config, state)
+            print(f"批次已完成: {state['batch_id']}")
+            return
+
+        active = state.get("active_repository")
+        if isinstance(active, Mapping):
+            repository = str(active["repo_name"])
+            branch = str(active["branch"])
+            active_pending = next(
+                (
+                    item
+                    for item in state["items"]
+                    if item.get("status") == "PENDING"
+                    and item.get("repo_name") == repository
+                    and item.get("branch") == branch
+                ),
+                None,
+            )
+            if active_pending is None:
+                cleanup_repository_download(
+                    config,
+                    batch_id=str(state["batch_id"]),
+                    repository=repository,
+                    branch=branch,
+                )
+                for item in state["items"]:
+                    if item.get("repo_name") == repository and item.get("branch") == branch:
+                        item["workspace_cleaned"] = True
+                state.setdefault("completed_repositories", []).append(
+                    {
+                        **dict(active),
+                        "completed_at": _utc_now(),
+                    }
+                )
+                state["active_repository"] = None
+                _save(config, state)
+                print(f"仓库已完成，自动进入下一仓库: {repository}")
+                continue
+            next_item = active_pending
+        else:
+            repository = str(next_item["repo_name"])
+            branch = str(next_item["branch"])
+            group_items = [
+                item
+                for item in state["items"]
+                if item.get("status") == "PENDING"
+                and item.get("repo_name") == repository
+                and item.get("branch") == branch
+            ]
+            group_rows = [row_lookup[str(item["source_row_id"])] for item in group_items]
+            print(f"开始仓库: {repository} ({branch})，Skill 数量: {len(group_rows)}")
+            downloaded = download_repository_skills(
+                config,
+                batch_id=str(state["batch_id"]),
+                rows=group_rows,
+            )
+            for item, row in zip(group_items, group_rows):
+                skill_download = downloaded.skills[row.source_row_id]
+                if skill_download.snapshot is None:
+                    raise LauncherError("仓库归档没有生成 Skill 快照")
+                item["task_id"] = skill_task_id(row)
+                item["download_snapshot"] = {
+                    "snapshot_path": str(skill_download.snapshot.snapshot_path),
+                    "task_root": str(skill_download.task_root),
+                    "manifest": skill_download.snapshot.manifest_dict(),
+                }
+                item["source_revision"] = downloaded.revision
+                item["download_transport"] = downloaded.transport
+            state["active_repository"] = {
+                "repo_name": repository,
+                "branch": branch,
+                "source_revision": downloaded.revision,
+                "skill_count": len(group_rows),
+            }
+            _save(config, state)
+            next_item = group_items[0]
+
+        row = row_lookup[str(next_item["source_row_id"])]
+        stored = next_item["download_snapshot"]
+        snapshot = _snapshot_from_item(next_item)
+        prepared = prepare_skill(
+            config,
+            batch_id=str(state["batch_id"]),
+            row=row,
+            downloaded=PartialDownload(
+                Path(str(stored["task_root"])),
+                Path(str(stored["task_root"])).parent,
+                snapshot.source_revision,
+                snapshot=snapshot,
+                transport=str(next_item["download_transport"]),
+            ),
+        )
+        next_item["index_path"] = str(prepared.index_path)
+        next_item.pop("download_snapshot", None)
+        if prepared.requires_ai:
+            result_path = (
+                config.workspace.manifest_root
+                / str(state["batch_id"])
+                / "ai-results"
+                / f"{prepared.task_id}.json"
+            )
+            next_item["status"] = "WAITING_FOR_AI"
+            next_item["handoff_path"] = str(prepared.handoff_path)
+            next_item["ai_result_path"] = str(result_path)
+            _activate_waiting(config, state, next_item)
+            return
+
+        next_item["status"] = "COMPLETE"
+        next_item["workspace_cleaned"] = False
         csv_path, json_path = write_skill_result_tables(
             config, document, batch_id=str(state["batch_id"])
         )
-        state["status"] = "COMPLETE"
         state["result_csv"] = str(csv_path)
         state["result_json"] = str(json_path)
         _save(config, state)
-        print(f"批次已完成: {state['batch_id']}")
-        return
-    rows = _rows(config, _inventory(config))
-    row = _row_by_id(rows, str(next_item["source_row_id"]))
-    next_item["task_id"] = skill_task_id(row)
-    try:
-        prepared = prepare_skill(config, batch_id=str(state["batch_id"]), row=row)
-    except Exception as operation_error:
-        if not config.workspace.keep_failed_workspace:
-            try:
-                cleanup_skill_download(
-                    config,
-                    batch_id=str(state["batch_id"]),
-                    task_id=str(next_item["task_id"]),
-                )
-            except OSError as cleanup_error:
-                raise LauncherError(
-                    f"{operation_error}; temporary Git cleanup also failed: {cleanup_error}"
-                ) from operation_error
-        raise
-    next_item["task_id"] = prepared.task_id
-    next_item["index_path"] = str(prepared.index_path)
-    next_item["download_root"] = str(prepared.download_root)
-    next_item["status"] = "WAITING_FOR_AI" if prepared.requires_ai else "READY_TO_ADVANCE"
-    state["current_task_id"] = prepared.task_id
-    state["status"] = next_item["status"]
-    if prepared.handoff_path:
-        result_path = config.workspace.manifest_root / str(state["batch_id"]) / "ai-results" / f"{prepared.task_id}.json"
-        next_item["ai_result_path"] = str(result_path)
-        queue = {
-            "batch_id": state["batch_id"],
-            "task_id": prepared.task_id,
-            "skill_id": prepared.skill_id,
-            "skill_name": row.skill_name,
-            "handoff": str(prepared.handoff_path),
-            "expected_result": str(result_path),
-            "skill_trigger": "/skill-security-review",
-        }
-        _atomic_json(config.workspace.manifest_root / str(state["batch_id"]) / "ai-review-current.json", queue)
-    _save(config, state)
-    print(f"已准备 Skill: {prepared.skill_id}/{row.skill_name}")
-    print(f"状态: {next_item['status']}")
+        print(f"Skill 无需 AI 等待，自动继续: {prepared.skill_id}/{row.skill_name}")
 
 
 def _finish_current(config: ReviewConfig, state: dict[str, Any], *, confirm_cleanup: bool) -> None:
@@ -244,7 +438,15 @@ def _finish_current(config: ReviewConfig, state: dict[str, Any], *, confirm_clea
     csv_path, json_path = write_skill_result_tables(
         config, document, batch_id=str(state["batch_id"])
     )
-    cleanup_skill_download(config, batch_id=str(state["batch_id"]), task_id=str(task_id))
+    if (
+        not item.get("workspace_cleaned")
+        and item.get("download_transport") != "whole_repository_archive"
+    ):
+        cleanup_skill_download(
+            config,
+            batch_id=str(state["batch_id"]),
+            task_id=str(task_id),
+        )
     item["status"] = "COMPLETE"
     item["result_csv"] = str(csv_path)
     item["result_json"] = str(json_path)

@@ -15,7 +15,9 @@ from skill_batch_review.git_source import GitCommandError, GitResult
 from skill_batch_review.per_skill import (
     PartialDownload,
     PerSkillError,
+    cleanup_repository_download,
     cleanup_skill_download,
+    download_repository_skills,
     finalize_skill,
     partial_fetch_skill_repository,
     prepare_skill,
@@ -251,6 +253,64 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
         self.assertFalse((result.task_root / ".transport.git").exists())
         self.assertFalse((result.task_root / ".skill-archive.tar").exists())
         cleanup_skill_download(config, batch_id="archive", task_id="skill-archive")
+
+    def test_repository_archive_is_downloaded_once_for_all_listed_skills(self):
+        inventory = parse_inventory_csv(
+            (
+                "skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status\n"
+                f"id-one,first,team/one,main,skills/first,{'a' * 40},否,active\n"
+                f"id-two,second,team/one,main,skills/second,{'b' * 40},否,active\n"
+            ),
+            status_mapping={"active": "ACTIVE"},
+        )
+
+        class RepositoryArchiveRunner:
+            def __init__(self, revision):
+                self.revision = revision
+                self.archive_calls = 0
+
+            def checked(self, args, *, cwd=None, timeout=None):
+                if args[0] == "ls-remote":
+                    return GitResult(tuple(args), 0, f"{self.revision}\trefs/heads/main\n", "")
+                if args[0] == "archive":
+                    self.archive_calls += 1
+                    output = Path(next(item.split("=", 1)[1] for item in args if item.startswith("--output=")))
+                    with tarfile.open(output, "w") as archive:
+                        for name in ("first", "second"):
+                            content = f"---\nname: {name}\n---\n".encode()
+                            info = tarfile.TarInfo(f"skills/{name}/SKILL.md")
+                            info.size = len(content)
+                            info.mode = 0o644
+                            archive.addfile(info, io.BytesIO(content))
+                    return GitResult(tuple(args), 0, "", "")
+                raise AssertionError(f"unexpected Git command: {args}")
+
+        config = self.config()
+        runner = RepositoryArchiveRunner(self.revision)
+        result = download_repository_skills(
+            config,
+            batch_id="repository-batch",
+            rows=inventory.rows,
+            runner=runner,
+        )
+        self.assertEqual(runner.archive_calls, 1)
+        self.assertEqual(result.revision, self.revision)
+        self.assertEqual(result.transport, "whole_repository_archive")
+        self.assertEqual(set(result.skills), {row.source_row_id for row in inventory.rows})
+        for row in inventory.rows:
+            snapshot = result.skills[row.source_row_id].snapshot
+            self.assertIsNotNone(snapshot)
+            self.assertTrue((snapshot.snapshot_path / "SKILL.md").is_file())
+            self.assertEqual(snapshot.source_revision, self.revision)
+        self.assertFalse((result.workspace_root / ".repository-archive.tar").exists())
+        self.assertTrue(
+            cleanup_repository_download(
+                config,
+                batch_id="repository-batch",
+                repository="team/one",
+                branch="main",
+            )
+        )
 
     def test_partial_fetch_recovers_same_task_left_by_failed_windows_cleanup(self):
         class SuccessfulRunner:

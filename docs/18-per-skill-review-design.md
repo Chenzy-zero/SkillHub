@@ -5,23 +5,19 @@
 ```text
 读取并冻结 CSV
   ↓
-按输入顺序取得一条 Skill
+按 repo_name + branch 取得一个仓库组
   ↓
-校验 skill_id、名称、仓库、分支、路径和 Commit
+冻结远程分支 HEAD
   ↓
-清理并建立本项 git_download 临时目录
+一次下载该 revision 的整仓无历史 tar
   ↓
-核对远程分支 Commit
-  ↓
-远程归档 skill_path（优先）/ Blobless Partial Fetch（备用）
-  ↓
-只导出 skill_path
+只提取 CSV 登记的全部 skill_path
   ↓
 计算 Package Manifest 与 SHA-256 Digest
   ↓
 原子迁移到 skills/<skill_id>/<skill_name>/
   ↓
-同名 + 同 Digest + 审查版本一致？
+逐 Skill 判断：同名 + 同 Digest + 审查版本一致？
   ├── 是：生成当前 Skill 的 RESULT_REUSED 结果
   └── 否：Cisco 与 SkillSpector → AI → 综合判定
   ↓
@@ -29,9 +25,9 @@
   ↓
 原子重建批次 CSV/JSON
   ↓
-清理当前 git_download
+同仓库全部完成后清理当前仓库 git_download
   ↓
-下一条 Skill
+下一仓库
 ```
 
 ## 2. 下载边界
@@ -39,27 +35,22 @@
 临时目录结构：
 
 ```text
-git_download/<batch_id>/<task_id>/
-├── .transport.git/       仅在备用 partial fetch 时出现
-└── <skill_name>/         从已核对分支导出的纯 Skill 文件夹
+git_download/<batch_id>/<repository_task_id>/
+├── .repository-archive.tar       提取完成后立即删除
+└── <skill_task_id>/<skill_name>/ 当前仓库各 Skill 的临时纯目录
 ```
 
 传输命令使用参数数组，不经过 Shell。默认顺序：
 
 ```text
 git ls-remote --exit-code <受控 Gerrit URL> refs/heads/<branch>
-git archive --remote=<受控 Gerrit URL> --format=tar refs/heads/<branch> -- <skill_path>
-
-# 仅在远程归档不可用时探测：
-git init --bare .transport.git
-git remote add origin <受控 Gerrit URL>
-git fetch --no-tags --depth=1 --filter=blob:none origin refs/heads/<branch>
+git archive --remote=<受控 Gerrit URL> --format=tar <冻结的分支 HEAD>
 ```
 
-归档前后均核对分支仍指向 CSV Commit。归档逐项校验路径、类型、大小和权限，不使用
-`extractall`，不生成符号链接。若远程归档不可用且服务端又忽略 `filter`，任务以
-`SKILL_ONLY_DOWNLOAD_UNSUPPORTED` 停止。备用导出使用 `git ls-tree` 和 `git cat-file` 按需读取
-目标 Skill Blob。不 Checkout、不运行 Hook、不运行仓库内容，也不回退完整仓库下载。
+公司 Gerrit 已实测不支持路径受限归档和 partial clone，因此每个仓库分支传输一次整仓、
+无历史的 tar。程序逐项校验路径、类型、大小和权限，不使用 `extractall`，只物化 CSV 白名单
+中的 Skill Root，不生成符号链接。提取完成立即删除 tar；不 Checkout、不运行 Hook，也不运行
+仓库内容。`inventory_revision` 保留台账追溯，`source_revision` 统一记录本批冻结的分支 HEAD。
 
 ## 3. 永久 Skill 目录
 

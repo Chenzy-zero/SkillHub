@@ -24,4 +24,4 @@ if ! python_command="$(resolve_python)"; then
   exit 2
 fi
 
-exec "$python_command" "$script_dir/tools/review_assistant.py"
+exec "$python_command" "$script_dir/tools/review_assistant.py" "$@"

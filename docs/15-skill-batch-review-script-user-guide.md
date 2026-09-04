@@ -16,17 +16,19 @@
 
 ## 当前默认启动方式
 
-`batch-review/run.sh` 和 `run.cmd` 已切换为逐 Skill 启动器。CSV 中每个纳入行必须有唯一
+`batch-review/run.sh` 和 `run.cmd` 使用仓库/Skill 两级启动器。CSV 中每个纳入行必须有唯一
 `skill_id`，并由上游保证是需要审查的最终版本。默认流程为：
 
 ```text
-逐 Skill 远程目录归档（优先）/ partial fetch（备用）
-→ 只导出 skill_path
+按 repo_name + branch 分组并冻结分支 HEAD
+→ 每仓库分支下载一次整仓无历史 tar
+→ 只提取该组 CSV 登记的全部 skill_path
 → skills/<skill_id>/<skill_name>/
 → 静态与 AI 审查或结果复用
 → skills/<skill_id>/review-result.json
 → results/<batch_id>/skill-review-results.csv/json
-→ 清理当前 git_download
+→ 同仓库全部完成后清理当前仓库 git_download
+→ 自动进入下一仓库
 ```
 
 新增配置：
@@ -38,14 +40,15 @@ skills_root = "/data/skill-review/skills"
 results_root = "/data/skill-review/results"
 ```
 
-程序先用 `git ls-remote` 核对分支版本，再优先通过 Gerrit `git-upload-archive` 仅下载
-`skill_path`。若远程归档被禁用，才尝试 `--filter=blob:none`；两种能力都不可用时返回
-`SKILL_ONLY_DOWNLOAD_UNSUPPORTED`，不会静默退回完整仓库下载。可选清单字段统一使用
-`product_line`、`user_name`、`user_email`。
+程序先用 `git ls-remote` 冻结分支版本，再通过公司 Gerrit 已验证可用的
+`git-upload-archive` 下载一次整仓无历史 tar。由于该 Gerrit 不支持路径受限归档和 partial
+clone，网络临时文件包含整个 revision；程序只物化 CSV 白名单 Skill，且提取完成立即删除 tar。
+可选清单字段统一使用 `product_line`、`user_name`、`user_email`。
 
 面向普通操作人员的默认入口进一步简化为：首次使用 `init.cmd`/`init.sh`，之后始终使用
 `review.cmd`/`review.sh`。免参数入口自动保存本机配置路径和当前批次号，并根据状态调用底层
-逐 Skill 启动器。原 `run.sh`/`run.cmd` 继续作为带参数的运维入口。
+启动器。一次确认后会连续执行计划和静态阶段；AI 阶段可在 Claude Code 输入
+`/auto-skill-review` 自动推进。原 `run.sh`/`run.cmd` 继续作为带参数的运维入口。
 
 ## 1. 文档目的
 
@@ -65,7 +68,7 @@ results_root = "/data/skill-review/results"
 → 清理单仓库临时工作区
 ```
 
-本文只说明当前已经实现的命令和操作步骤，不把尚未实现的自动调度能力描述成可用功能。
+本文只说明当前已经实现的命令和操作步骤。
 
 ## 2. 重要边界
 
@@ -94,26 +97,27 @@ results_root = "/data/skill-review/results"
 
 ## 3. 当前版本的执行限制
 
-### 3.1 默认按 Skill 逐个执行
+### 3.1 默认按仓库下载、按 Skill 审查
 
-默认启动器一次只准备一个 CSV Skill。由 `start` 和 `advance` 按输入顺序重复以下流程：
+默认启动器按 `repo_name + branch` 处理：
 
 ```text
-准备一个 Skill
-→ 完成该 Skill 的 AI 审查或确认复用
-→ 导入结果
-→ 写入单项和批次结果
-→ 清理该 Skill 的 git_download
-→ 处理下一个 Skill
+下载一次仓库无历史归档
+→ 提取并静态扫描该仓库全部台账 Skill
+→ 逐一完成 AI 审查或确认复用
+→ 写入各单项和批次结果
+→ 清理该仓库 git_download
+→ 自动处理下一仓库
 ```
 
-`batch-review/run.sh` 与 `run.cmd` 已负责记住当前进度、完成当前 Skill 并准备下一个 Skill。
-AI 审查仍是明确的人工检查点，因此不会用一条无人值守命令自动跑完整个批次。
+`batch-review/run.sh` 与 `run.cmd` 负责记住仓库和 Skill 进度。Claude Code 中显式调用
+`/auto-skill-review` 后，可自动完成后续 AI 交接和状态推进，直到完成或遇到真实阻塞。
 原来的 `skill-batch-review prepare-repository/finalize-repository` 保留为兼容入口。
 
-### 3.2 Claude Code 必须人工执行
+### 3.2 Claude Code 需要显式启动一次
 
-`prepare-repository` 只生成 AI 任务，不会启动 Claude Code。执行人员必须在公司内网模型环境中调用项目级 `/skill-security-review`，再把纯 JSON 结果保存到约定目录。
+普通脚本不会自行启动模型。执行人员在公司内网模型环境中调用一次项目级
+`/auto-skill-review`；该 Skill 按 `/skill-security-review` 的严格规则逐项生成 JSON 并推进批次。
 
 ### 3.3 全批次统一截止时间尚未自动冻结
 
@@ -121,19 +125,18 @@ AI 审查仍是明确的人工检查点，因此不会用一条无人值守命�
 
 首轮小批量联调可以按仓库处理时冻结；全量正式批次不应忽略这一差异。
 
-### 3.4 重试和并发配置尚未成为全自动调度
+### 3.4 重试和并发边界
 
-配置中的 `[retry]` 和 `[concurrency]` 用于固定批次运行策略。启动器会按计划逐仓库推进，
-但不会绕过每仓库 AI 检查点连续跑完整批次，也不会按照这些值自动完成跨仓库重试。
+配置中的 `[retry]` 和 `[concurrency]` 用于固定批次运行策略。启动器和
+`/auto-skill-review` 会按计划逐仓库推进，但不会跳过失败任务，也不会自行扩大并发或无限重试。
 
 当前已实现的并行行为只有：同一个 Skill 的 Cisco 与 SkillSpector 静态检查并行执行。
 
-### 3.5 清理必须显式执行
+### 3.5 清理边界
 
-使用底层 `finalize-repository` 时，仍需单独运行
-`cleanup-repository --confirm-cleanup`。使用启动器时，执行
-`advance --execute --confirm-cleanup` 会在结果持久化后清理当前仓库，再进入下一仓库；
-缺少确认参数时不会清理或推进。
+使用底层兼容命令时仍需显式确认清理。默认启动器在全部台账 Skill 已完成提取和静态扫描、
+快照已迁移到永久目录后自动清理当前仓库临时区；AI 结果、受限证据、永久 Skill 和批次结果
+不在清理范围内。
 
 ## 4. 目录结构
 

@@ -162,7 +162,14 @@ class ProjectSetupTests(unittest.TestCase):
         self._write_operator(config, batch_id)
         status = project_status.inspect_project(operator_state_path=self.operator)
         self.assertEqual(status.next_action, "AI_REVIEW")
-        self.assertIn("/ask-cc", status.next_instruction)
+        self.assertIn("/auto-skill-review", status.next_instruction)
+
+    def test_auto_review_skill_is_discoverable_and_bounded(self):
+        skill = BATCH_REVIEW_DIR.parent / ".claude" / "skills" / "auto-skill-review" / "SKILL.md"
+        content = skill.read_text(encoding="utf-8")
+        self.assertIn("name: auto-skill-review", content)
+        self.assertIn("review.cmd --auto", content)
+        self.assertIn("Do not use Git", content)
 
     def test_duplicate_skill_id_is_reported_before_plan(self):
         config, _ = self._ready_config()
