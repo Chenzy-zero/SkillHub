@@ -13,11 +13,10 @@
 
 安装器在使用前会核对 SHA-256；文件丢失或内容变化时安装会立即停止。
 
-### Windows 运行依赖清单
+### 运行依赖清单
 
-- `skillspector-runtime.in`：从 NVIDIA v2.5.1 官方锁文件提取的实际扫描运行依赖
-- `skillspector-runtime-windows-py313.txt`：已按 Windows x86-64 / Python 3.13 完整解析的 62 个固定版本 wheel
-- 锁文件 SHA-256：`7661004da68119b3350158d809cbfc6d8060c10c0c3d3bf9f45a3c2db1cce367`
+- `skillspector-runtime.in`：从 NVIDIA v2.5.1 官方 wheel 元数据提取的实际扫描运行依赖范围
+- 解析来源：只使用当前配置的公司 pip 源，不使用公网解析结果固定公司源中不存在的传递版本
 
 官方 wheel 将 `langgraph-cli[inmem]` 声明成必装项，但 SkillSpector 扫描代码没有引用
 `langgraph_cli`。该组件用于 LangGraph Studio 开发服务，并会额外引入 Windows 无 wheel 的

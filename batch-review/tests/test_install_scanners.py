@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -78,33 +77,18 @@ class ScannerInstallerTests(unittest.TestCase):
 
     def test_skillspector_runtime_excludes_unused_langgraph_dev_server(self):
         package = MODULE.SCANNERS[1]
-        with patch.object(
-            MODULE,
-            "_python_identity",
-            return_value=(Path("scanner-python.exe"), (3, 13)),
-        ):
-            requirements = MODULE._skillspector_runtime_requirements(
-                package, Path("scanner-python.exe"), platform_name="nt"
-            )
-        content = requirements.read_text(encoding="utf-8").lower()
+        requirements = MODULE._skillspector_runtime_requirements(package)
+        content = "\n".join(
+            line
+            for line in requirements.read_text(encoding="utf-8").lower().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
         self.assertNotIn("langgraph-cli", content)
         self.assertNotIn("forbiddenfruit", content)
         self.assertNotIn("blockbuster", content)
-        self.assertIn("yara-python==4.5.4", content)
-
-    def test_skillspector_windows_lock_is_integrity_checked(self):
-        package = MODULE.SCANNERS[1]
-        with tempfile.TemporaryDirectory() as temporary:
-            damaged = Path(temporary) / "requirements.txt"
-            damaged.write_text("yara-python==4.5.4\n", encoding="utf-8")
-            with (
-                patch.object(MODULE, "SKILLSPECTOR_WINDOWS_LOCK", damaged),
-                patch.object(MODULE, "_python_identity", return_value=(damaged, (3, 13))),
-                self.assertRaisesRegex(MODULE.InstallError, "SHA-256 mismatch"),
-            ):
-                MODULE._skillspector_runtime_requirements(
-                    package, damaged, platform_name="nt"
-                )
+        self.assertNotIn("botocore", content)
+        self.assertIn("boto3>=1.34.0", content)
+        self.assertIn("yara-python>=4.5.0", content)
 
     def test_runtime_requirements_install_remains_wheel_only(self):
         command = MODULE._uv_requirements_command(

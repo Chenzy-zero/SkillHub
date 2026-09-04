@@ -34,12 +34,6 @@ BUNDLED_PACKAGES_DIR = Path(__file__).resolve().parents[1] / "packages"
 WINDOWS_PYTHON_FILENAME = "python-3.13.15-amd64.exe"
 WINDOWS_PYTHON_SHA256 = "edec09c4853aeae9ac36efb8c9f95b6b8e2fee65eee56d9767a8b7c69c574403"
 SKILLSPECTOR_RUNTIME_INPUT = BUNDLED_PACKAGES_DIR / "skillspector-runtime.in"
-SKILLSPECTOR_WINDOWS_LOCK = (
-    BUNDLED_PACKAGES_DIR / "skillspector-runtime-windows-py313.txt"
-)
-SKILLSPECTOR_WINDOWS_LOCK_SHA256 = (
-    "7661004da68119b3350158d809cbfc6d8060c10c0c3d3bf9f45a3c2db1cce367"
-)
 SKILLSPECTOR_EXCLUDED_RUNTIME_DEPENDENCY = "langgraph-cli"
 
 
@@ -416,9 +410,6 @@ def _requirement_name(value: str) -> str:
 
 def _skillspector_runtime_requirements(
     package: ScannerPackage,
-    python: Path,
-    *,
-    platform_name: str | None = None,
 ) -> Path:
     """Return and validate the real CLI runtime dependencies for SkillSpector.
 
@@ -467,15 +458,6 @@ def _skillspector_runtime_requirements(
             f"(missing={missing}, extra={extra}, imports_langgraph_cli={imports_dev_server})"
         )
 
-    identity = _python_identity((str(python),))
-    platform_value = os.name if platform_name is None else platform_name
-    if platform_value == "nt" and identity is not None and identity[1] == (3, 13):
-        if _sha256(SKILLSPECTOR_WINDOWS_LOCK) != SKILLSPECTOR_WINDOWS_LOCK_SHA256:
-            raise InstallError(
-                f"SkillSpector Windows dependency lock SHA-256 mismatch: "
-                f"{SKILLSPECTOR_WINDOWS_LOCK}"
-            )
-        return SKILLSPECTOR_WINDOWS_LOCK.resolve()
     return SKILLSPECTOR_RUNTIME_INPUT.resolve()
 
 
@@ -520,7 +502,7 @@ def install_scanner(
     python = _ensure_scanner_environment(environment, base_python)
     requirement = _install_requirement(package)
     if package.name == "skillspector":
-        runtime_requirements = _skillspector_runtime_requirements(package, python)
+        runtime_requirements = _skillspector_runtime_requirements(package)
         _run(
             _uv_requirements_command(uv, python, runtime_requirements),
             env=package_environment,
@@ -601,7 +583,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"扫描器安装失败: {exc}", file=sys.stderr)
         print(
             f"请确认公司 pip 源已同步 uv=={UV_VERSION}、"
-            "cisco-ai-skill-scanner==2.0.13，以及 SkillSpector Windows 锁定清单中的 wheel；"
+            "cisco-ai-skill-scanner==2.0.13，以及 SkillSpector 运行依赖的可用 wheel；"
             "官方 SkillSpector wheel 和运行依赖清单应存在于 batch-review/packages。",
             file=sys.stderr,
         )

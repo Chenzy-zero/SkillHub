@@ -251,15 +251,16 @@ LangGraph Studio 开发服务，扫描代码本身没有引用它，却会继续
 没有 wheel。项目不会为此放开任意源码构建，也不会修改官方 wheel。安装器会：
 
 1. 校验官方 wheel 内容与依赖声明；
-2. 使用 `packages/skillspector-runtime-windows-py313.txt` 安装已在 Windows Python 3.13
-   完整解析通过的 62 个固定版本运行包；
+2. 从官方 wheel 元数据提取真实运行依赖范围，并只在当前公司 pip 源中解析可用版本；
 3. 排除未被扫描代码使用的 `langgraph-cli[inmem]` 开发服务链；
 4. 使用 `--no-deps` 安装原始官方 SkillSpector wheel；
 5. 再核对 SkillSpector 版本和命令行文件。
 
 这会同时避开 `forbiddenfruit`、`blockbuster` 和 `langgraph-runtime-inmem`，不需要逐个补包。
 依赖安装使用同步模式，会自动移除 SkillSpector 隔离环境内此前失败尝试遗留的多余包；无需手工清理
-`jmespath` 或其他依赖。锁文件本身也有固定 SHA-256，若被修改安装会直接停止。
+`jmespath` 或其他依赖。不能使用公网 PyPI 解析出的传递依赖锁定文件，因为公司源的同步进度可能较慢，
+例如公网已有 `botocore 1.43.88` 时公司源可能只有 `1.43.87`。顶层扫描器版本仍固定，实际解析出的
+运行包版本可通过扫描环境追溯。
 
 在仓库根目录执行：
 
@@ -300,8 +301,8 @@ python3.12 batch-review/tools/install_scanners.py \
 
 脚本会从显式 `--index-url`、`PIP_INDEX_URL` 或现有 `pip.ini`/`pip.conf` 读取同一个包源，
 再安全地传给 uv；不会访问 GitHub。SkillSpector 顶层 wheel 优先从项目 `packages/` 读取，
-依赖仍只从公司源下载。Windows Python 3.13 使用项目内已经完整解析的固定依赖清单，其他受支持
-环境使用同一组由 NVIDIA v2.5.1 锁定的直接运行依赖。默认强制只安装 wheel。Windows 下 Cisco 的依赖链
+依赖仍只从公司源下载。所有受支持环境使用 NVIDIA v2.5.1 官方声明的直接运行依赖范围，并由公司源
+选择其中实际存在的兼容版本。默认强制只安装 wheel。Windows 下 Cisco 的依赖链
 `oletools → pcodedmp → win-unicode-console` 存在一个上游未发布 wheel 的例外，因此安装器仅
 允许固定的 `win-unicode-console==0.5` 从源码包在隔离构建环境中生成 wheel。该例外不扩展到
 其他包；Linux/CentOS 仍保持全部 wheel。公司包源需要同步这个固定版本的源码制品并完成内部
