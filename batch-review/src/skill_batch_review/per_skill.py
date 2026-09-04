@@ -26,6 +26,7 @@ from .ai_review import (
 )
 from .artifacts import EvidenceStore, safe_join
 from .config import ReviewConfig
+from .filesystem import remove_tree
 from .git_source import GitRunner
 from .inventory import InventoryDocument, InventoryRow
 from .orchestrator import _default_adapters, _run_static_scans, _scan_summary
@@ -128,6 +129,18 @@ def partial_fetch_skill_repository(
         raise PerSkillError("temporary download target escaped git_download_root")
     if batch_root.exists():
         leftovers = [path for path in batch_root.iterdir()]
+        if (
+            len(leftovers) == 1
+            and leftovers[0] == task_root
+            and task_root.is_dir()
+            and not task_root.is_symlink()
+            and not config.workspace.keep_failed_workspace
+        ):
+            # A prior attempt of this exact deterministic task may have been
+            # interrupted while Windows still marked Git pack files read-only.
+            # This is the only stale directory that can be removed implicitly.
+            remove_tree(task_root)
+            leftovers = []
         if leftovers:
             raise PerSkillError(
                 "git_download is not empty; finish and clean the previous Skill before continuing: "
@@ -182,9 +195,14 @@ def partial_fetch_skill_repository(
                 f"STALE_INVENTORY: branch head {head} differs from CSV {row.inventory_revision}"
             )
         return PartialDownload(task_root, repository, head)
-    except Exception:
+    except Exception as operation_error:
         if task_root.exists() and not config.workspace.keep_failed_workspace:
-            shutil.rmtree(task_root)
+            try:
+                remove_tree(task_root)
+            except OSError as cleanup_error:
+                raise PerSkillError(
+                    f"{operation_error}; temporary Git cleanup also failed: {cleanup_error}"
+                ) from operation_error
         raise
 
 
@@ -222,7 +240,7 @@ def _archive_snapshot(config: ReviewConfig, row: InventoryRow, snapshot: Snapsho
         existing = json.loads(metadata_path.read_text(encoding="utf-8"))
         if existing != metadata:
             raise PerSkillError(f"OUTPUT_CONFLICT: skill_id {identifier} already contains different content")
-        shutil.rmtree(snapshot.snapshot_path)
+        remove_tree(snapshot.snapshot_path)
     else:
         try:
             os.replace(snapshot.snapshot_path, target)
@@ -233,15 +251,15 @@ def _archive_snapshot(config: ReviewConfig, row: InventoryRow, snapshot: Snapsho
             try:
                 shutil.copytree(snapshot.snapshot_path, staging, symlinks=True)
                 os.replace(staging, target)
-                shutil.rmtree(snapshot.snapshot_path)
+                remove_tree(snapshot.snapshot_path)
             finally:
                 if staging.exists():
-                    shutil.rmtree(staging)
+                    remove_tree(staging)
         try:
             _atomic_json(metadata_path, metadata)
         except Exception:
             if target.exists() and not target.is_symlink():
-                shutil.rmtree(target)
+                remove_tree(target)
             raise
     return replace(snapshot, snapshot_path=target)
 
@@ -713,7 +731,7 @@ def cleanup_skill_download(config: ReviewConfig, *, batch_id: str, task_id: str)
         return False
     if target.is_symlink() or not target.is_dir():
         raise PerSkillError("cleanup target is not a real task directory")
-    shutil.rmtree(target)
+    remove_tree(target)
     return True
 
 

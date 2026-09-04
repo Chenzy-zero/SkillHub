@@ -210,6 +210,61 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
             )
         self.assertFalse((config.workspace.git_download_root / "unsupported/skill-test").exists())
 
+    def test_partial_fetch_recovers_same_task_left_by_failed_windows_cleanup(self):
+        class SuccessfulRunner:
+            def checked(self, args, *, cwd=None, timeout=None):
+                if args[0] == "init":
+                    self.assert_repository_was_removed = not Path(args[-1]).exists()
+                    return GitResult(tuple(args), 0, "", "")
+                if args[0] == "rev-parse":
+                    return GitResult(tuple(args), 0, self.revision + "\n", "")
+                return GitResult(tuple(args), 0, "", "")
+
+            def run(self, args, *, cwd=None, timeout=None, check=True, input_text=None):
+                return GitResult(tuple(args), 0, "", "")
+
+        config = self.config()
+        row = self.inventory().rows[0]
+        task_id = "skill-stale-retry"
+        stale = config.workspace.git_download_root / "retry" / task_id / ".transport.git"
+        pack = stale / "objects/pack/stale.idx"
+        pack.parent.mkdir(parents=True)
+        pack.write_bytes(b"stale")
+        pack.chmod(0o400)
+        runner = SuccessfulRunner()
+        runner.revision = self.revision
+
+        result = partial_fetch_skill_repository(
+            config,
+            batch_id="retry",
+            row=row,
+            task_id=task_id,
+            runner=runner,
+        )
+        self.assertTrue(runner.assert_repository_was_removed)
+        self.assertEqual(result.revision, self.revision)
+        cleanup_skill_download(config, batch_id="retry", task_id=task_id)
+
+    def test_cleanup_removes_read_only_git_object(self):
+        config = self.config()
+        target = config.workspace.git_download_root / "batch-1/skill-readonly"
+        pack = target / ".transport.git/objects/pack/example.idx"
+        pack.parent.mkdir(parents=True)
+        pack.write_bytes(b"git-index")
+        pack.chmod(0o400)
+        try:
+            self.assertTrue(
+                cleanup_skill_download(
+                    config,
+                    batch_id="batch-1",
+                    task_id="skill-readonly",
+                )
+            )
+            self.assertFalse(target.exists())
+        finally:
+            if pack.exists():
+                pack.chmod(0o600)
+
 
 if __name__ == "__main__":
     unittest.main()

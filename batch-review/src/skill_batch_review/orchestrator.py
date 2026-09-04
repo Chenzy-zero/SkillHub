@@ -25,7 +25,6 @@ import hashlib
 import json
 import os
 import shlex
-import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -42,6 +41,7 @@ from .ai_review import (
 )
 from .artifacts import EvidenceStore, export_private_candidate, safe_join
 from .config import ReviewConfig
+from .filesystem import remove_tree
 from .git_source import (
     BRANCH_CONTENT_CONFLICT,
     SELECTED,
@@ -1022,7 +1022,7 @@ def cleanup_repository_workspace(
         return False
     if target.is_symlink() or not target.is_dir():
         raise OrchestrationError("cleanup target is not a real directory")
-    shutil.rmtree(target)
+    remove_tree(target)
     return True
 
 

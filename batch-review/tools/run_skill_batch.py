@@ -189,13 +189,18 @@ def _prepare_next(config: ReviewConfig, state: dict[str, Any]) -> None:
     next_item["task_id"] = skill_task_id(row)
     try:
         prepared = prepare_skill(config, batch_id=str(state["batch_id"]), row=row)
-    except Exception:
+    except Exception as operation_error:
         if not config.workspace.keep_failed_workspace:
-            cleanup_skill_download(
-                config,
-                batch_id=str(state["batch_id"]),
-                task_id=str(next_item["task_id"]),
-            )
+            try:
+                cleanup_skill_download(
+                    config,
+                    batch_id=str(state["batch_id"]),
+                    task_id=str(next_item["task_id"]),
+                )
+            except OSError as cleanup_error:
+                raise LauncherError(
+                    f"{operation_error}; temporary Git cleanup also failed: {cleanup_error}"
+                ) from operation_error
         raise
     next_item["task_id"] = prepared.task_id
     next_item["index_path"] = str(prepared.index_path)
