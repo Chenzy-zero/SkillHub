@@ -931,7 +931,9 @@ def write_skill_result_tables(
             "skills": [dict(results[row.source_row_id]) for row in inventory.rows if row.source_row_id in results],
         },
     )
-    fields = tuple(inventory.headers) + RESULT_COLUMNS
+    fields = tuple(inventory.headers) + tuple(
+        column for column in RESULT_COLUMNS if column not in inventory.headers
+    )
     descriptor, name = tempfile.mkstemp(prefix=".results-", suffix=".csv.tmp", dir=str(output_root))
     temporary = Path(name)
     try:

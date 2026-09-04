@@ -429,9 +429,9 @@ SkillSpector 2.5.1 的问题说明字段使用 `explanation`，部分规则（�
 
 ## 6. CSV 输入说明
 
-### 6.1 固定表头
+### 6.1 必需字段与扩展字段
 
-当前正式 CSV 使用以下字段：
+当前正式 CSV 至少使用以下字段：
 
 ```text
 skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,update_time,history_id
@@ -443,6 +443,8 @@ skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewe
 skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,update_time,history_id
 id-001,jira-query,team/Skill-CM,refs/heads/main,tools/jira-query,1111111111111111111111111111111111111111,否,新增,2026/8/31 10:00:00,1001
 ```
+
+可以在这些字段之外增加任意业务列，例如 `product_line`、`department`、`user_name` 或 `user_email`。程序只校验必需字段、版本字段二选一以及表头不能重复；其他列不会触发“未知字段”错误，并会保留到输出 CSV。扩展列之间的值不同会保留为不同的来源记录，避免丢失归属信息。
 
 ### 6.2 字段含义
 

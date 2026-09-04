@@ -149,16 +149,42 @@ class InventoryParsingTests(unittest.TestCase):
         with self.assertRaisesRegex(InventoryError, "UTF-8, UTF-16 with BOM, or GBK/GB18030"):
             parse_inventory_csv(b"\xff\xff\xff", status_mapping=STATUS_MAP)
 
-    def test_header_must_contain_exactly_the_seven_fixed_columns(self):
+    def test_header_requires_core_columns_and_rejects_duplicates(self):
         base = list(INVENTORY_COLUMNS)
         cases = [
             tuple(column for column in base if column != "status"),
-            tuple(base + ["unexpected"]),
             tuple(base[:-1] + ["status", "status"]),
         ]
         for header in cases:
             with self.subTest(header=header), self.assertRaises(InventoryHeaderError):
                 parse_inventory_csv(csv_text(inventory_row(), header=header), status_mapping=STATUS_MAP)
+
+    def test_unknown_extension_columns_are_accepted_and_retained(self):
+        header = tuple(INVENTORY_COLUMNS) + ("department", "custom_owner")
+        values = inventory_row() + ("研发一部", "owner@example.test")
+        document = parse_inventory_csv(
+            csv_text(values, header=header),
+            status_mapping=STATUS_MAP,
+        )
+
+        self.assertEqual(document.headers, header)
+        self.assertEqual(document.rows[0].raw["department"], "研发一部")
+        self.assertEqual(
+            document.rows[0].to_dict()["raw_values"]["custom_owner"],
+            "owner@example.test",
+        )
+
+    def test_extension_values_keep_otherwise_equal_rows_distinct(self):
+        header = tuple(INVENTORY_COLUMNS) + ("department",)
+        first = inventory_row() + ("研发一部",)
+        second = inventory_row() + ("研发二部",)
+        document = parse_inventory_csv(
+            csv_text(first, second, header=header),
+            status_mapping=STATUS_MAP,
+        )
+
+        self.assertEqual(document.row_count, 2)
+        self.assertNotEqual(document.rows[0].source_row_id, document.rows[1].source_row_id)
 
     def test_legacy_revision_header_remains_compatible(self):
         document = parse_inventory_csv(

@@ -66,10 +66,8 @@ CORE_INVENTORY_COLUMNS: tuple[str, ...] = (
 )
 
 # These columns are emitted by the current release/ref-update inventory and
-# are evidence fields rather than execution controls.  They are explicitly
-# allow-listed so a misspelled required column cannot silently become an
-# ignored extra column.  Their original values are retained in ``raw`` and in
-# the serialised row dictionary.
+# have typed convenience accessors. Other extension columns are also accepted
+# and retained in ``raw`` and result CSV files.
 TRACE_COLUMNS: tuple[str, ...] = (
     "skill_id",
     "update_time",
@@ -95,7 +93,7 @@ class InventoryError(ValueError):
 
 
 class InventoryHeaderError(InventoryError):
-    """The CSV header is missing, duplicated, or contains unknown columns."""
+    """The CSV header is missing, duplicated, or otherwise malformed."""
 
 
 class InventoryRowError(InventoryError):
@@ -176,9 +174,10 @@ def _canonical_row_values(values: Mapping[str, str]) -> str:
         (column, values[column]) for column in CORE_INVENTORY_COLUMNS
     ]
     ordered.append(("commit_revision", values[revision_fields[0]]))
+    semantic_columns = set(CORE_INVENTORY_COLUMNS) | set(REVISION_COLUMNS)
     ordered.extend(
         (column, values[column])
-        for column in sorted(OPTIONAL_INVENTORY_COLUMNS.intersection(values))
+        for column in sorted(set(values) - semantic_columns)
     )
     # JSON avoids ambiguity when a cell itself contains a delimiter.
     return json.dumps(
@@ -435,6 +434,12 @@ def _read_records(text: str) -> tuple[tuple[str, ...], list[tuple[int, tuple[str
 
     if not header:
         raise InventoryHeaderError("CSV header is empty")
+    empty_headers = [index + 1 for index, name in enumerate(header) if not name.strip()]
+    if empty_headers:
+        raise InventoryHeaderError(
+            "CSV header contains empty column names at positions: "
+            + ", ".join(str(index) for index in empty_headers)
+        )
     duplicate_headers = sorted(
         {name for name in header if header.count(name) > 1}
     )
@@ -444,13 +449,6 @@ def _read_records(text: str) -> tuple[tuple[str, ...], list[tuple[int, tuple[str
         )
     missing = [column for column in CORE_INVENTORY_COLUMNS if column not in header]
     revision_columns = [column for column in REVISION_COLUMNS if column in header]
-    unknown = [
-        column
-        for column in header
-        if column not in CORE_INVENTORY_COLUMNS
-        and column not in REVISION_COLUMNS
-        and column not in OPTIONAL_INVENTORY_COLUMNS
-    ]
     problems: list[str] = []
     if missing:
         problems.append("missing " + ", ".join(missing))
@@ -462,8 +460,6 @@ def _read_records(text: str) -> tuple[tuple[str, ...], list[tuple[int, tuple[str
         problems.append(
             "use only one commit revision column: " + ", ".join(revision_columns)
         )
-    if unknown:
-        problems.append("unknown " + ", ".join(unknown))
     if problems:
         raise InventoryHeaderError("invalid CSV header: " + "; ".join(problems))
 

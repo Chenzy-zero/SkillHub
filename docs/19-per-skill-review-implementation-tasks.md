@@ -4,7 +4,7 @@
 
 | 编号 | 任务 | 主要输出 | 完成标准 |
 |---|---|---|---|
-| S01 | 输入契约 | 扩展 CSV 字段与 `skill_id` 校验 | 正式 CSV 可读取；字段保留；未知字段不静默忽略 |
+| S01 | 输入契约 | 必需 CSV 字段与 `skill_id` 校验 | 正式 CSV 可读取；任意扩展字段允许并原样保留；缺少必需字段时明确报错 |
 | S02 | 目录配置 | `git_download_root`、`skills_root`、`results_root` | 目录互不危险重叠；清理目标受限 |
 | S03 | 仓库级下载 | 每个仓库分支一次整仓无历史归档 | 同组多个 Skill 只调用一次 archive；不含 `.git` 和历史 |
 | S04 | 单 Skill 导出与迁移 | `skills/<skill_id>/<skill_name>/` | 无 `.git`；Manifest/Digest 一致；不覆盖冲突内容 |
