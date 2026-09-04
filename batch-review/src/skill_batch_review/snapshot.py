@@ -595,11 +595,15 @@ def export_skill_archive_snapshot(
     *,
     limits: SnapshotLimits | None = None,
 ) -> SnapshotResult:
-    """Safely materialize a single Skill returned by ``git archive --remote``.
+    """Safely materialize one Skill from a ``git archive`` tar.
 
-    Archive members are parsed individually; ``extractall`` is deliberately
-    not used.  Paths, modes, sizes and symlinks receive the same treatment as
-    the local Git-object snapshot path, so scanners never follow links.
+    ``git archive --remote`` is path-limited on stock Git servers, but Gerrit's
+    upload-archive rejects ``-- <path>`` and can only serve a whole-repository tar.
+    The archive may therefore contain members outside the requested Skill Root;
+    those members are ignored and only the subtree below ``skill_path`` is
+    materialized.  Members are parsed individually; ``extractall`` is deliberately
+    not used.  Paths, modes, sizes and symlinks receive the same treatment as the
+    local Git-object snapshot path, so scanners never follow links.
     """
 
     active_limits = limits or SnapshotLimits()
@@ -637,7 +641,10 @@ def export_skill_archive_snapshot(
                 continue
             if prefix:
                 if not name.startswith(prefix):
-                    raise UnsafePathError("remote archive member escaped the requested Skill Root")
+                    # A whole-repository tar (Gerrit cannot restrict upload-archive
+                    # to one path) contains unrelated members outside the requested
+                    # Skill Root; they carry no package content and are ignored.
+                    continue
                 relative = name[len(prefix) :]
             else:
                 relative = name

@@ -100,8 +100,8 @@ active = "ACTIVE"
 [quality]
 candidate_threshold = 70
 [ai]
-skill_path = "{REPO_ROOT / '.claude/skills/skill-security-review'}"
-result_schema_path = "{SCHEMA}"
+skill_path = "{(REPO_ROOT / '.claude/skills/skill-security-review').as_posix()}"
+result_schema_path = "{SCHEMA.as_posix()}"
 policy_version = "policy-1"
 reviewer_model = "intranet-model"
 [scanners.cisco]

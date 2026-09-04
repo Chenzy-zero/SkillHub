@@ -122,7 +122,16 @@ def partial_fetch_skill_repository(
     task_id: str | None = None,
     runner: GitRunner | None = None,
 ) -> PartialDownload:
-    """Fetch one branch bloblessly and refuse a server that ignores filtering."""
+    """Download exactly the Skill Root recorded in the inventory at its pinned CSV revision.
+
+    The pinned CSV revision is reviewed, never the live branch tip, so a newer push
+    cannot silently change what is audited.  Gerrit's ``git archive --remote`` cannot
+    limit paths (it rejects ``-- <path>``), so the server-side transport requests a
+    whole-repository tar at the pinned commit and the archive snapshot keeps only the
+    requested Skill Root.  Servers without upload-archive fall back to a blobless
+    fetch of the branch tip, which is only acceptable when the tip still equals the
+    pinned CSV revision.
+    """
 
     batch_root = (config.workspace.git_download_root / batch_id).resolve()
     task_root = (batch_root / (task_id or _task_id(row))).resolve()
@@ -183,49 +192,79 @@ def partial_fetch_skill_repository(
         head = matches[0][0].lower()
         if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", head):
             raise PerSkillError("Gerrit returned an invalid branch revision")
-        if head != row.inventory_revision.lower():
+        pinned = str(row.inventory_revision or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", pinned):
             raise PerSkillError(
-                f"STALE_INVENTORY: branch head {head} differs from CSV {row.inventory_revision}"
+                f"CSV row has no reviewable pinned revision: {row.inventory_revision!r}"
+            )
+        if pinned != head:
+            print(
+                f"notice: branch {ref} head {head} differs from the pinned CSV revision "
+                f"{pinned}; reviewing the pinned revision as recorded in the inventory"
             )
 
+        # Gerrit upload-archive cannot restrict paths (it rejects "-- <path>"), so a
+        # whole-repository tar at the pinned revision is requested and
+        # export_skill_archive_snapshot materializes only the Skill Root subtree.
         archive_path = task_root / ".skill-archive.tar"
         archive_command = [
             "archive",
             f"--remote={url}",
             "--format=tar",
             f"--output={archive_path}",
-            ref,
+            pinned,
         ]
-        if row.skill_path != ".":
-            archive_command.extend(("--", row.skill_path))
         try:
             active_runner.checked(tuple(archive_command), cwd=task_root)
         except GitCommandError:
-            if archive_path.exists():
-                archive_path.unlink()
+            if pinned != head:
+                raise PerSkillError(
+                    "PINNED_REVISION_UNAVAILABLE: the server cannot remote-archive the pinned "
+                    f"CSV revision {pinned} (branch head is {head}) and partial-clone cannot "
+                    "fetch an unadvertised commit; refresh the CSV revision or use a server "
+                    "that can serve the pinned object"
+                ) from None
+            archive_path.unlink(missing_ok=True)
+            active_runner.checked(("init", "--bare", str(repository)), cwd=task_root)
+            active_runner.checked(("remote", "add", "origin", url), cwd=repository)
+            result = active_runner.run(
+                (
+                    "fetch",
+                    "--no-tags",
+                    "--depth=1",
+                    "--filter=blob:none",
+                    "origin",
+                    f"{ref}:{ref}",
+                ),
+                cwd=repository,
+                check=False,
+            )
+            diagnostic = (result.stdout + "\n" + result.stderr).lower()
+            if any(marker in diagnostic for marker in _FILTER_UNSUPPORTED):
+                raise PerSkillError(
+                    "SKILL_ONLY_DOWNLOAD_UNSUPPORTED: Gerrit supports neither remote archive "
+                    "nor partial-clone filtering; full-repository fallback is disabled"
+                )
+            if not result.ok:
+                raise PerSkillError(f"partial fetch failed with exit code {result.returncode}: {result.stderr[:500]}")
+            fetched_head = active_runner.checked(
+                ("rev-parse", f"{ref}^{{commit}}"), cwd=repository
+            ).stdout.strip().lower()
+            if fetched_head != head:
+                raise PerSkillError(
+                    f"STALE_INVENTORY: fetched branch head {fetched_head} differs from remote {head}"
+                )
+            return PartialDownload(task_root, repository, head, transport="partial_clone")
         else:
             if not archive_path.is_file():
                 raise PerSkillError("Gerrit remote archive reported success without an archive file")
-            remote_after = active_runner.checked(
-                ("ls-remote", "--exit-code", url, ref), cwd=task_root
-            )
-            after_matches = [line.split() for line in remote_after.stdout.splitlines() if line.strip()]
-            if (
-                len(after_matches) != 1
-                or len(after_matches[0]) != 2
-                or after_matches[0][1] != ref
-                or after_matches[0][0].lower() != head
-            ):
-                raise PerSkillError(
-                    "STALE_SOURCE: branch changed while the remote Skill archive was downloaded"
-                )
             root_name = _component(
                 skill_root_name(row.skill_path, row.skill_name), "skill_name"
             )
             snapshot = export_skill_archive_snapshot(
                 archive_path,
                 row.repo_name,
-                head,
+                pinned,
                 row.skill_path,
                 task_root / root_name,
             )
@@ -233,41 +272,10 @@ def partial_fetch_skill_repository(
             return PartialDownload(
                 task_root,
                 task_root,
-                head,
+                pinned,
                 snapshot=snapshot,
                 transport="remote_archive",
             )
-
-        active_runner.checked(("init", "--bare", str(repository)), cwd=task_root)
-        active_runner.checked(("remote", "add", "origin", url), cwd=repository)
-        result = active_runner.run(
-            (
-                "fetch",
-                "--no-tags",
-                "--depth=1",
-                "--filter=blob:none",
-                "origin",
-                f"{ref}:{ref}",
-            ),
-            cwd=repository,
-            check=False,
-        )
-        diagnostic = (result.stdout + "\n" + result.stderr).lower()
-        if any(marker in diagnostic for marker in _FILTER_UNSUPPORTED):
-            raise PerSkillError(
-                "SKILL_ONLY_DOWNLOAD_UNSUPPORTED: Gerrit supports neither remote archive "
-                "nor partial-clone filtering; full-repository fallback is disabled"
-            )
-        if not result.ok:
-            raise PerSkillError(f"partial fetch failed with exit code {result.returncode}: {result.stderr[:500]}")
-        fetched_head = active_runner.checked(
-            ("rev-parse", f"{ref}^{{commit}}"), cwd=repository
-        ).stdout.strip().lower()
-        if fetched_head != head:
-            raise PerSkillError(
-                f"STALE_INVENTORY: fetched branch head {fetched_head} differs from remote {head}"
-            )
-        return PartialDownload(task_root, repository, head, transport="partial_clone")
     except Exception as operation_error:
         if task_root.exists() and not config.workspace.keep_failed_workspace:
             try:
