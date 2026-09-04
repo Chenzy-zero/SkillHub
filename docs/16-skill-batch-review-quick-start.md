@@ -67,7 +67,9 @@ CSV 可直接使用 UTF-8、UTF-8 BOM、带 BOM 的 UTF-16 或 GBK/GB18030，无
 
 批处理程序支持 Python 3.11～3.14。Cisco 可使用 Python 3.12～3.14；SkillSpector 因
 `yara-python` 没有 Python 3.14 wheel，必须使用 Python 3.12 或 3.13。入口会自动为
-SkillSpector 选择兼容解释器，主程序可继续使用 3.14。
+SkillSpector 选择兼容解释器，主程序可继续使用 3.14。Windows 64 位机器如果没有
+兼容解释器，入口会把仓库内经 SHA-256 校验的 Python.org 3.13.15 官方制品安装到
+`.scanner-tools/_python313`，不更改 PATH 或默认 Python。
 
 先从公司的 pip 内网源安装批处理程序：
 

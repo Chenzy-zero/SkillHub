@@ -252,10 +252,12 @@ python3.12 batch-review/tools/install_scanners.py \
   --root /opt/skill-review/scanners
 ```
 
-Windows 上主程序可继续使用 Python 3.14，但必须同时安装 Python 3.12 或 3.13
-供 SkillSpector 使用。这是因为它依赖的 `yara-python 4.5.4` 官方只提供到 CPython 3.13
-的 Windows wheel，不是 SkillSpector 顶层 wheel 丢失。安装器会按 3.13、3.12 的顺序自动查找，
-不需要每次指定。例如主程序仍可以这样启动：
+Windows 上主程序可继续使用 Python 3.14，SkillSpector 使用 Python 3.12 或 3.13。这是因为
+它依赖的 `yara-python 4.5.4` 官方只提供到 CPython 3.13 的 Windows wheel，不是
+SkillSpector 顶层 wheel 丢失。安装器会按 3.13、3.12 的顺序自动查找。如果 Windows 64 位
+机器只有 3.14，则自动使用仓库内的 Python.org 3.13.15 官方安装包，安装到
+`.scanner-tools/_python313`。该过程不要求管理员权限，不添加 PATH、不替换 3.14，不改变默认
+Python。例如主程序仍可以这样启动：
 
 ```powershell
 py -3.14 batch-review/tools/install_scanners.py `
@@ -264,10 +266,10 @@ py -3.14 batch-review/tools/install_scanners.py `
 
 Windows 输出的程序通常位于 `cisco\Scripts\skill-scanner.exe` 和 `skillspector\Scripts\skillspector.exe`。这只用于兼容性试跑；首批正式结果仍以 CentOS/Linux 节点为准。
 
-如果机器只有 Python 3.14，安装器会在处理扫描器之前立即停止并提示安装
-Python 3.13。安装完成后重新双击 `review.cmd` 即可；主程序仍可保留并使用 3.14。
-高级环境如无法自动发现已安装的 3.13，可用 `SKILL_REVIEW_SCANNER_PYTHON` 指向其
-`python.exe`；普通操作不需要设置该变量。
+首次执行时只需确认“安装两套扫描器及必要的项目专用 Python 3.13”，无需另行
+下载或安装 Python。高级环境如希望强制使用已安装的 3.13，可用
+`SKILL_REVIEW_SCANNER_PYTHON` 指向其 `python.exe`；普通操作不需要设置该变量。Linux 节点
+仍由环境管理方预先提供 Python 3.12 或 3.13。
 
 如果公司 pip 地址没有配置在 `pip.conf`，可以临时指定不含明文密码的地址：
 

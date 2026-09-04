@@ -95,7 +95,9 @@ def main() -> int:
             print("请只修改上面显示的本机配置文件；保存后再次运行本入口。")
             return 0
         if action == "INSTALL_SCANNERS":
-            if not _confirm("是否现在从已配置的公司 pip 源安装两套扫描器"):
+            if not _confirm(
+                "是否现在安装两套扫描器及必要的项目专用 Python 3.13"
+            ):
                 return 0
             code = _run((sys.executable, str(INSTALLER), "--root", str(BATCH_REVIEW_DIR / ".scanner-tools")))
             if code == 0:

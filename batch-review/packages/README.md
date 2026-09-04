@@ -12,3 +12,15 @@
 - 许可证：Apache-2.0，许可文本已包含在 wheel 内
 
 安装器在使用前会核对 SHA-256；文件丢失或内容变化时安装会立即停止。
+
+## Python 3.13.15 Windows 64 位
+
+- 文件：`python-3.13.15-amd64.exe`
+- 来源：Python.org 官方 Python 3.13.15 Release
+- 官方下载地址：<https://www.python.org/ftp/python/3.13.15/python-3.13.15-amd64.exe>
+- SHA-256：`edec09c4853aeae9ac36efb8c9f95b6b8e2fee65eee56d9767a8b7c69c574403`
+- 用途：当 Windows 机器只有 Python 3.14 时，为 SkillSpector 提供项目专用的 3.13 运行环境
+- 安装边界：仅当前用户，目标为 `.scanner-tools/_python313`；不添加 PATH、不更改文件关联、不安装新启动器或快捷方式
+- 许可证：Python Software Foundation License
+
+本制品同样在使用前校验 SHA-256；非 Windows 64 位环境不会执行它。

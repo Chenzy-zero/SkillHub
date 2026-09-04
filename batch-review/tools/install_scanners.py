@@ -29,6 +29,8 @@ UV_VERSION = "0.12.9"
 WINDOWS_SOURCE_BUILD_PACKAGE = "win-unicode-console"
 WINDOWS_SOURCE_BUILD_REQUIREMENT = "win-unicode-console==0.5"
 BUNDLED_PACKAGES_DIR = Path(__file__).resolve().parents[1] / "packages"
+WINDOWS_PYTHON_FILENAME = "python-3.13.15-amd64.exe"
+WINDOWS_PYTHON_SHA256 = "edec09c4853aeae9ac36efb8c9f95b6b8e2fee65eee56d9767a8b7c69c574403"
 
 
 @dataclass(frozen=True)
@@ -106,7 +108,60 @@ def _python_identity(command: Sequence[str]) -> tuple[Path, tuple[int, int]] | N
     return Path(lines[-2].strip()).resolve(), (major, minor)
 
 
-def _skillspector_python() -> Path:
+def _bundled_windows_python_installer() -> Path:
+    installer = BUNDLED_PACKAGES_DIR / WINDOWS_PYTHON_FILENAME
+    if not installer.is_file():
+        raise InstallError(f"bundled Python installer is missing: {installer}")
+    actual_sha256 = _sha256(installer)
+    if actual_sha256 != WINDOWS_PYTHON_SHA256:
+        raise InstallError(
+            f"bundled Python installer SHA-256 mismatch: {installer} "
+            f"(expected {WINDOWS_PYTHON_SHA256}, got {actual_sha256})"
+        )
+    return installer.resolve()
+
+
+def _windows_python_install_command(installer: Path, target: Path) -> tuple[str, ...]:
+    """Build a quiet, current-user install that does not change PATH."""
+
+    return (
+        str(installer),
+        "/quiet",
+        "InstallAllUsers=0",
+        f"TargetDir={target}",
+        "Include_launcher=0",
+        "InstallLauncherAllUsers=0",
+        "Include_pip=1",
+        "Include_test=0",
+        "Include_doc=0",
+        "Include_tcltk=0",
+        "Include_symbols=0",
+        "Include_debug=0",
+        "Shortcuts=0",
+        "AssociateFiles=0",
+        "PrependPath=0",
+        "AppendPath=0",
+    )
+
+
+def _install_bundled_windows_python(runtime_root: Path) -> Path:
+    target = (runtime_root / "_python313").resolve()
+    python = target / "python.exe"
+    existing = _python_identity((str(python),)) if python.is_file() else None
+    if existing is not None and existing[1] == (3, 13):
+        return existing[0]
+
+    installer = _bundled_windows_python_installer()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    print(f"正在安装项目专用 Python 3.13: {target}")
+    _run(_windows_python_install_command(installer, target), env=os.environ.copy())
+    installed = _python_identity((str(python),))
+    if installed is None or installed[1] != (3, 13):
+        raise InstallError(f"bundled Python 3.13 installation did not complete: {target}")
+    return installed[0]
+
+
+def _skillspector_python(runtime_root: Path | None = None) -> Path:
     """Find a wheel-compatible Python for SkillSpector and yara-python."""
 
     override = os.environ.get("SKILL_REVIEW_SCANNER_PYTHON", "").strip()
@@ -168,10 +223,13 @@ def _skillspector_python() -> Path:
         if identity is not None and identity[1] in SKILLSPECTOR_PYTHON:
             return identity[0]
 
+    if os.name == "nt" and runtime_root is not None:
+        return _install_bundled_windows_python(runtime_root)
+
     raise InstallError(
         "SkillSpector requires Python 3.12 or 3.13 because yara-python has no "
-        "Python 3.14 wheel. Install Python 3.13 alongside Python 3.14, then "
-        "run review.cmd again; the compatible interpreter will be selected automatically."
+        "Python 3.14 wheel. On Windows, run review.cmd so the bundled project "
+        "runtime can be installed; on Linux, install Python 3.12 or 3.13."
     )
 
 
@@ -405,7 +463,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = args.root.expanduser().resolve()
     installed: dict[str, str] = {}
     try:
-        skillspector_python = _skillspector_python()
+        skillspector_python = _skillspector_python(root)
         print(f"SkillSpector Python: {skillspector_python}")
         uv, package_environment = _ensure_uv(root=root, index_url=args.index_url)
         for package in SCANNERS:

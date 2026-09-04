@@ -46,6 +46,8 @@ CSV 台账
 
 批处理程序支持 Python 3.11～3.14。Cisco 可使用 Python 3.12～3.14；由于 `yara-python`
 官方没有 Python 3.14 wheel，SkillSpector 的 wheel-only 环境使用 Python 3.12 或 3.13。Windows 和 Linux
+环境会优先自动发现已安装的兼容 Python；Windows 64 位机器如果只有 3.14，会使用
+仓库内经 SHA-256 校验的 Python 3.13.15 官方安装包，安装到 `.scanner-tools/_python313`。
 入口会自动优先选择已安装的较新兼容版本：
 
 ```bash

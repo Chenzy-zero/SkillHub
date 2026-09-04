@@ -35,6 +35,23 @@ class ScannerInstallerTests(unittest.TestCase):
             "56196f2f8689cc6e7f565181f06db5e489ba010ef0e5da19855d99043a5f6415",
         )
 
+    def test_bundled_windows_python_matches_official_digest(self):
+        installer = MODULE._bundled_windows_python_installer()
+        self.assertEqual(installer.name, "python-3.13.15-amd64.exe")
+        self.assertEqual(MODULE._sha256(installer), MODULE.WINDOWS_PYTHON_SHA256)
+
+    def test_windows_python_install_is_private_and_does_not_change_path(self):
+        command = MODULE._windows_python_install_command(
+            Path("python-3.13.15-amd64.exe"),
+            Path("scanner-tools/python313"),
+        )
+        self.assertIn("InstallAllUsers=0", command)
+        self.assertIn("Include_launcher=0", command)
+        self.assertIn("PrependPath=0", command)
+        self.assertIn("AppendPath=0", command)
+        self.assertIn("Shortcuts=0", command)
+        self.assertIn("AssociateFiles=0", command)
+
     def test_uv_uses_bundled_skillspector_wheel(self):
         package = MODULE.SCANNERS[1]
         requirement = MODULE._install_requirement(package)
