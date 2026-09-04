@@ -44,7 +44,8 @@ CSV 台账
 
 ## 2. 安装
 
-批处理程序支持 Python 3.11～3.14，扫描器安装支持 Python 3.12～3.14。Windows 和 Linux
+批处理程序支持 Python 3.11～3.14。Cisco 可使用 Python 3.12～3.14；由于 `yara-python`
+官方没有 Python 3.14 wheel，SkillSpector 的 wheel-only 环境使用 Python 3.12 或 3.13。Windows 和 Linux
 入口会自动优先选择已安装的较新兼容版本：
 
 ```bash

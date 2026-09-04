@@ -410,4 +410,4 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 - `.claude/skills/skill-security-review/`：供 Claude Code 自动发现和调用的项目级只读 AI 安全与质量审查入口（参考 `skill-vetter`/`skill-auditor`，非上游副本）
 - `.claude/skills/ask-cc/`：只读分析当前项目状态并给出唯一下一步的 Claude Code 项目级入口
 
-当前 `batch-review/` 已实现逐仓库两阶段流程，支持 `test/skill_summary.csv` 的正式字段和中文状态，并通过本地模拟测试。正式批量运行前仍必须取得 Gerrit 只读 SSH 参数、公司内网源中的扫描器依赖 wheel、目录权限和首批小样本仓库。SkillSpector 2.5.1 顶层 wheel 已固定放入仓库。程序支持 Python 3.11～3.14，扫描器安装支持 Python 3.12～3.14；CentOS 7.9 使用 Python 3.14 时仍须确认公司内网源具备兼容的二进制 wheel。AI 策略版本由项目审查规则自动计算，模型追溯由 Claude Code 会话提供，不要求操作人员手填。
+当前 `batch-review/` 已实现逐仓库两阶段流程，支持 `test/skill_summary.csv` 的正式字段和中文状态，并通过本地模拟测试。正式批量运行前仍必须取得 Gerrit 只读 SSH 参数、公司内网源中的扫描器依赖 wheel、目录权限和首批小样本仓库。SkillSpector 2.5.1 顶层 wheel 已固定放入仓库。主程序支持 Python 3.11～3.14；Cisco 可使用 Python 3.12～3.14，SkillSpector 因官方 `yara-python` wheel 限制使用 Python 3.12 或 3.13，安装器会自动选择。AI 策略版本由项目审查规则自动计算，模型追溯由 Claude Code 会话提供，不要求操作人员手填。

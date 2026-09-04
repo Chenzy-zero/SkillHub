@@ -65,8 +65,9 @@ CSV 可直接使用 UTF-8、UTF-8 BOM、带 BOM 的 UTF-16 或 GBK/GB18030，无
 
 ## 3. 安装
 
-批处理程序支持 Python 3.11～3.14；扫描器安装支持 Python 3.12～3.14。Windows 和 Linux
-入口会自动选择可用兼容版本。CentOS 7.9 使用 Python 3.14 前应确认内网源具备兼容 wheel。
+批处理程序支持 Python 3.11～3.14。Cisco 可使用 Python 3.12～3.14；SkillSpector 因
+`yara-python` 没有 Python 3.14 wheel，必须使用 Python 3.12 或 3.13。入口会自动为
+SkillSpector 选择兼容解释器，主程序可继续使用 3.14。
 
 先从公司的 pip 内网源安装批处理程序：
 

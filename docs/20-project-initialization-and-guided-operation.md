@@ -34,7 +34,8 @@ batch-review\init.cmd
 
 初始化程序执行以下操作：
 
-1. 自动选择 Python 3.11～3.14；安装扫描器时要求 Python 3.12～3.14；
+1. 主程序自动选择 Python 3.11～3.14；安装 SkillSpector 时自动选择具有官方
+   `yara-python` wheel 的 Python 3.12 或 3.13；
 2. 让执行人员选择公司 Gerrit 或 GitHub 验证环境；
 3. 从对应模板生成 `batch-review/config/review.local.toml`；
 4. 将临时目录和扫描器目录调整成本机路径；

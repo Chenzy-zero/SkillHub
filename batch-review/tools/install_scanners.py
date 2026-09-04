@@ -24,6 +24,7 @@ from typing import Sequence
 
 
 SUPPORTED_PYTHON = {(3, 12), (3, 13), (3, 14)}
+SKILLSPECTOR_PYTHON = {(3, 12), (3, 13)}
 UV_VERSION = "0.12.9"
 WINDOWS_SOURCE_BUILD_PACKAGE = "win-unicode-console"
 WINDOWS_SOURCE_BUILD_REQUIREMENT = "win-unicode-console==0.5"
@@ -77,6 +78,125 @@ def _run(argv: Sequence[str], *, env: dict[str, str]) -> None:
     completed = subprocess.run(tuple(argv), env=env, check=False)
     if completed.returncode != 0:
         raise InstallError(f"command failed with exit code {completed.returncode}: {argv[0]}")
+
+
+def _python_identity(command: Sequence[str]) -> tuple[Path, tuple[int, int]] | None:
+    """Return an interpreter path and minor version without importing project code."""
+
+    try:
+        completed = subprocess.run(
+            (
+                *command,
+                "-c",
+                "import sys; print(sys.executable); print(f'{sys.version_info[0]}.{sys.version_info[1]}')",
+            ),
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+    except OSError:
+        return None
+    lines = completed.stdout.splitlines()
+    if completed.returncode != 0 or len(lines) < 2:
+        return None
+    try:
+        major, minor = (int(item) for item in lines[-1].strip().split(".", 1))
+    except ValueError:
+        return None
+    return Path(lines[-2].strip()).resolve(), (major, minor)
+
+
+def _skillspector_python() -> Path:
+    """Find a wheel-compatible Python for SkillSpector and yara-python."""
+
+    override = os.environ.get("SKILL_REVIEW_SCANNER_PYTHON", "").strip()
+    if override:
+        identity = _python_identity((override,))
+        if identity is None or identity[1] not in SKILLSPECTOR_PYTHON:
+            raise InstallError(
+                "SKILL_REVIEW_SCANNER_PYTHON must point to Python 3.12 or 3.13"
+            )
+        return identity[0]
+
+    current = _python_identity((sys.executable,))
+    if current is not None and current[1] in SKILLSPECTOR_PYTHON:
+        return current[0]
+
+    candidates: tuple[tuple[str, ...], ...]
+    if os.name == "nt":
+        windows_paths: list[tuple[str, ...]] = []
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        program_files = os.environ.get("ProgramFiles", "").strip()
+        if local_app_data:
+            windows_paths.extend(
+                (
+                    (
+                        str(
+                            Path(local_app_data)
+                            / "Programs"
+                            / "Python"
+                            / "Python313"
+                            / "python.exe"
+                        ),
+                    ),
+                    (
+                        str(
+                            Path(local_app_data)
+                            / "Python"
+                            / "pythoncore-3.13-64"
+                            / "python.exe"
+                        ),
+                    ),
+                )
+            )
+        if program_files:
+            windows_paths.append(
+                (str(Path(program_files) / "Python313" / "python.exe"),)
+            )
+        candidates = (
+            ("py", "-3.13"),
+            ("py", "-V:3.13"),
+            ("py", "-3.12"),
+            ("python3.13",),
+            ("python3.12",),
+            *windows_paths,
+        )
+    else:
+        candidates = (("python3.13",), ("python3.12",))
+    for command in candidates:
+        identity = _python_identity(command)
+        if identity is not None and identity[1] in SKILLSPECTOR_PYTHON:
+            return identity[0]
+
+    raise InstallError(
+        "SkillSpector requires Python 3.12 or 3.13 because yara-python has no "
+        "Python 3.14 wheel. Install Python 3.13 alongside Python 3.14, then "
+        "run review.cmd again; the compatible interpreter will be selected automatically."
+    )
+
+
+def _ensure_scanner_environment(environment: Path, base_python: Path) -> Path:
+    """Create or safely refresh one disposable scanner virtual environment."""
+
+    expected = _python_identity((str(base_python),))
+    if expected is None:
+        raise InstallError(f"scanner Python is not executable: {base_python}")
+    environment_python = _venv_python(environment)
+    actual = (
+        _python_identity((str(environment_python),))
+        if environment_python.is_file()
+        else None
+    )
+    if actual is None or actual[1] != expected[1]:
+        environment.parent.mkdir(parents=True, exist_ok=True)
+        command = [str(base_python), "-m", "venv"]
+        if environment.exists():
+            command.append("--clear")
+        command.append(str(environment))
+        _run(command, env=os.environ.copy())
+    if not environment_python.is_file():
+        raise InstallError(f"scanner environment was not created: {environment}")
+    return environment_python
 
 
 def _pip_environment(index_url: str | None) -> dict[str, str]:
@@ -232,13 +352,10 @@ def install_scanner(
     root: Path,
     uv: Path,
     package_environment: dict[str, str],
+    base_python: Path,
 ) -> Path:
     environment = root / package.name
-    environment.parent.mkdir(parents=True, exist_ok=True)
-    if not _venv_python(environment).is_file():
-        venv.EnvBuilder(with_pip=True, clear=False, symlinks=False).create(environment)
-
-    python = _venv_python(environment)
+    python = _ensure_scanner_environment(environment, base_python)
     requirement = _install_requirement(package)
     _run(
         _uv_install_command(uv, python, package, requirement=requirement),
@@ -288,14 +405,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = args.root.expanduser().resolve()
     installed: dict[str, str] = {}
     try:
+        skillspector_python = _skillspector_python()
+        print(f"SkillSpector Python: {skillspector_python}")
         uv, package_environment = _ensure_uv(root=root, index_url=args.index_url)
         for package in SCANNERS:
+            base_python = (
+                skillspector_python
+                if package.name == "skillspector"
+                else Path(sys.executable).resolve()
+            )
             installed[package.name] = str(
                 install_scanner(
                     package,
                     root=root,
                     uv=uv,
                     package_environment=package_environment,
+                    base_python=base_python,
                 )
             )
     except (InstallError, OSError) as exc:

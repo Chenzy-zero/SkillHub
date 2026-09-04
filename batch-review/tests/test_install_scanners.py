@@ -110,6 +110,24 @@ class ScannerInstallerTests(unittest.TestCase):
 
     def test_python_314_is_supported(self):
         self.assertIn((3, 14), MODULE.SUPPORTED_PYTHON)
+        self.assertNotIn((3, 14), MODULE.SKILLSPECTOR_PYTHON)
+
+    def test_current_compatible_python_is_selected_for_skillspector(self):
+        with patch.object(
+            MODULE,
+            "_python_identity",
+            return_value=(Path("scanner-python").resolve(), (3, 13)),
+        ):
+            selected = MODULE._skillspector_python()
+        self.assertEqual(selected, Path("scanner-python").resolve())
+
+    def test_python_314_without_compatible_runtime_has_clear_error(self):
+        with (
+            patch.dict(MODULE.os.environ, {}, clear=True),
+            patch.object(MODULE, "_python_identity", return_value=None),
+        ):
+            with self.assertRaisesRegex(MODULE.InstallError, "Python 3.12 or 3.13"):
+                MODULE._skillspector_python()
 
     def test_python_311_is_rejected_before_installation(self):
         with patch.object(MODULE.sys, "version_info", (3, 11, 0)):

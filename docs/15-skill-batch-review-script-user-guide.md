@@ -184,7 +184,8 @@ UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是任何上游 Skill �
 ### 5.1 基础环境
 
 - 正式扫描节点推荐 Linux；当前确认使用 CentOS 7.9；
-- 批处理程序支持 Python 3.11～3.14，扫描器安装支持 Python 3.12～3.14；
+- 批处理程序支持 Python 3.11～3.14；Cisco 可使用 Python 3.12～3.14，SkillSpector
+  的 wheel-only 环境使用 Python 3.12 或 3.13；
 - Git 命令行；
 - 能访问公司 Gerrit 的网络环境；
 - Gerrit 专用只读 SSH 身份；
@@ -229,7 +230,7 @@ PYTHONPATH=src python3 -m skill_batch_review.cli --help
 ```text
 uv==0.12.9
 cisco-ai-skill-scanner==2.0.13
-以及两套扫描器在目标 Python 3.12～3.14 下的全部二进制依赖包
+以及两套扫描器在目标 Python 版本下的全部二进制依赖包
 ```
 
 Cisco 已公开发布 PyPI 包，可以由公司代理同步。SkillSpector 2.5.1 没有发布到 PyPI，但 NVIDIA 的
@@ -251,7 +252,10 @@ python3.12 batch-review/tools/install_scanners.py \
   --root /opt/skill-review/scanners
 ```
 
-Windows 试运行节点可以使用 Python 3.12～3.14，例如：
+Windows 上主程序可继续使用 Python 3.14，但必须同时安装 Python 3.12 或 3.13
+供 SkillSpector 使用。这是因为它依赖的 `yara-python 4.5.4` 官方只提供到 CPython 3.13
+的 Windows wheel，不是 SkillSpector 顶层 wheel 丢失。安装器会按 3.13、3.12 的顺序自动查找，
+不需要每次指定。例如主程序仍可以这样启动：
 
 ```powershell
 py -3.14 batch-review/tools/install_scanners.py `
@@ -259,6 +263,11 @@ py -3.14 batch-review/tools/install_scanners.py `
 ```
 
 Windows 输出的程序通常位于 `cisco\Scripts\skill-scanner.exe` 和 `skillspector\Scripts\skillspector.exe`。这只用于兼容性试跑；首批正式结果仍以 CentOS/Linux 节点为准。
+
+如果机器只有 Python 3.14，安装器会在处理扫描器之前立即停止并提示安装
+Python 3.13。安装完成后重新双击 `review.cmd` 即可；主程序仍可保留并使用 3.14。
+高级环境如无法自动发现已安装的 3.13，可用 `SKILL_REVIEW_SCANNER_PYTHON` 指向其
+`python.exe`；普通操作不需要设置该变量。
 
 如果公司 pip 地址没有配置在 `pip.conf`，可以临时指定不含明文密码的地址：
 
