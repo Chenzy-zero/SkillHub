@@ -310,6 +310,27 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
                 },
             ),
         )
+    stored_policy = batch_state.get("ai_policy_version")
+    if (stored_policy is None and not legacy_state_is_pristine(batch_state)) or (
+        stored_policy is not None and stored_policy != config.ai.policy_version
+    ):
+        return ProjectStatus(
+            state="BATCH_POLICY_INCOMPATIBLE",
+            summary="当前批次的 AI 审查规则与现行规则不一致，不能混用结论。",
+            next_action="PLAN",
+            next_instruction="保留旧批次证据；再次运行 review.cmd 创建新批次。",
+            config_path=str(config_path),
+            batch_id=batch_id,
+            batch_status=str(batch_state.get("status") or "UNKNOWN"),
+            inventory=inventory,
+            issues=(
+                {
+                    "code": "BATCH_POLICY_INCOMPATIBLE",
+                    "message": "批次未冻结当前 AI 策略版本，或策略内容已发生变化",
+                    "blocking": True,
+                },
+            ),
+        )
     if batch_state.get("inventory_csv_sha256") not in {None, inventory.get("csv_sha256")}:
         return ProjectStatus(
             state="BATCH_INVENTORY_CHANGED",
@@ -363,14 +384,20 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
                 state="AI_RESULT_READY",
                 summary="当前仓库已有 AI 结果，可以由脚本批量合并并进入下一仓库。",
                 next_action="ADVANCE",
-                next_instruction="运行 /auto-skill-review；它会校验并保存结果，然后自动继续。",
+                next_instruction=(
+                    "运行 Codex CLI 的 $auto-skill-review 或 Claude Code 的 "
+                    "/auto-skill-review；它会校验并保存结果，然后自动继续。"
+                ),
                 **common,
             )
         return ProjectStatus(
             state="WAITING_FOR_AI",
             summary="当前仓库的静态扫描已完成，正在等待 AI 队列审查。",
             next_action="AI_REVIEW",
-            next_instruction="在 Claude Code 输入 /auto-skill-review；它会完成当前及后续 AI 审查并自动推进批次。",
+            next_instruction=(
+                "在 Codex CLI 输入 $auto-skill-review，或在 Claude Code 输入 "
+                "/auto-skill-review；它会完成 AI 审查并自动推进批次。"
+            ),
             **common,
         )
     if batch_status == "READY_TO_ADVANCE":
@@ -378,7 +405,10 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
             state="READY_TO_ADVANCE",
             summary="当前 Skill 已复用合格结果，无需重复 AI 审查。",
             next_action="ADVANCE",
-            next_instruction="在 Claude Code 输入 /auto-skill-review；它会写入复用记录并自动继续。",
+            next_instruction=(
+                "在 Codex CLI 输入 $auto-skill-review，或在 Claude Code 输入 "
+                "/auto-skill-review；它会写入复用记录并自动继续。"
+            ),
             **common,
         )
     if batch_status == "READY":
@@ -386,7 +416,10 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
             state="READY_TO_START",
             summary="批次计划已建立，尚未按仓库下载和扫描。",
             next_action="START",
-            next_instruction="在 Claude Code 输入 /auto-skill-review；它会调用脚本按仓库下载并逐一扫描。",
+            next_instruction=(
+                "在 Codex CLI 输入 $auto-skill-review，或在 Claude Code 输入 "
+                "/auto-skill-review；它会调用脚本按仓库下载并逐一扫描。"
+            ),
             **common,
         )
     return ProjectStatus(

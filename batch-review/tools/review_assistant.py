@@ -30,6 +30,8 @@ def _status() -> dict[str, Any]:
         (sys.executable, str(STATUS_SCRIPT), "--json"),
         check=False,
         text=True,
+        encoding="utf-8",
+        errors="strict",
         capture_output=True,
     )
     if completed.returncode != 0:
@@ -180,8 +182,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return code
                 continue
             if action == "AI_REVIEW":
-                print("请在当前仓库的 Claude Code 会话输入：/auto-skill-review")
-                print("它会为当前仓库批量调度独立 Agent，并自动推进到下一仓库。")
+                print("请选择一个已批准的 AI 入口继续：")
+                print("- Codex CLI：$auto-skill-review")
+                print("- Claude Code：/auto-skill-review")
+                print("它会为当前仓库批量调度隔离审查 Agent，并自动推进到下一仓库。")
                 return 0
             if action == "ADVANCE":
                 operator = _operator()

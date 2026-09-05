@@ -11,8 +11,10 @@
 该目录只能服务本批次安全审查。仓库外层的 `docs/`、`poc/`、`release/`、`reports/` 等
 目录属于项目其他内容，不是安全扫描工作区，不应在审查过程中读取、写入或当作证据来源。
 
-唯一例外是配置中明确指定的只读输入，例如根目录 `test/skill_summary.csv` 或用于规则
-计算的项目级 AI Skill。脚本可以读取这些输入，但不得改写、覆盖或把它们当成扫描输出。
+唯一例外是配置中明确指定的只读输入，例如根目录 `test/skill_summary.csv`。Codex CLI 的
+`.agents/skills/`、`.codex/agents/` 与 Claude Code 的 `.claude/skills/`、`.claude/agents/`
+仅作为客户端发现和隔离调度适配层；正式审查规则统一位于本目录 `skills/`。脚本可以读取
+这些输入，但不得改写、覆盖或把它们当成扫描输出。
 需要改变输入时，应先生成新的批次输入并记录其 SHA-256，不得在原文件上就地修复。
 
 ## 2. 工作区边界
@@ -23,7 +25,8 @@
 | `tools/`、`src/` | 确定性程序 | 负责导入、下载、静态扫描、合并、清理和报告 |
 | `packages/` | 已批准的离线安装包 | 只使用已核验来源和 SHA-256 的包 |
 | `git_download/` | 当前仓库的临时归档和 Skill 提取区 | 一次只保留当前仓库；完成后按状态机清理 |
-| `skills/` | 永久 Skill 副本 | 只保存 `skills/<skill_id>/<skill_name>/`，不保存 `.git` |
+| `skills/skill-security-review/` | AI 审查规则 | 两种客户端共用的唯一策略与结果 Schema |
+| 运行时配置的 `skills_root` | 永久 Skill 副本 | 只保存 `<skill_id>/<skill_name>/`，不保存 `.git` |
 | `.batch-review/` | 本机状态、清单、受限证据和批次工作文件 | 不提交 Git；清理必须由受信脚本执行 |
 | `tests/` | 本地测试 | 测试不得执行被审查 Skill |
 
@@ -71,7 +74,7 @@ AI 不得代替上述脚本读取 Git、拼接命令、选择版本、运行扫�
 ### 4.2 AI 只做 Skill 内容审查
 
 AI 的唯一业务判断是阅读一个已经冻结的 Skill Package，按照
-`.claude/skills/skill-security-review/` 的规则给出安全问题和质量评分。AI：
+`batch-review/skills/skill-security-review/` 的规则给出安全问题和质量评分。AI：
 
 - 每个 Skill 使用一个独立上下文；不同 Skill 不共享对话、缓存或结论；
 - 只能读取 handoff 指定的最小元数据、结果 Schema 和当前 `skill_root` 内文件；
@@ -84,11 +87,12 @@ AI 的唯一业务判断是阅读一个已经冻结的 Skill Package，按照
 
 ## 5. 一次调用完成批次
 
-完成首次初始化、填写本机配置并通过扫描器离线健康检查后，操作人员可以直接在项目级
-Claude Code 中调用：
+完成首次初始化、填写本机配置并通过扫描器离线健康检查后，操作人员可以任选一个项目级
+AI 客户端调用：
 
 ```text
-/auto-skill-review
+Codex CLI：$auto-skill-review
+Claude Code：/auto-skill-review
 ```
 
 不需要先手工运行 `review.cmd`。`auto-skill-review` 会调用 `batch-review` 的受信启动器
@@ -102,7 +106,7 @@ Skill、下一仓库，直到批次完成或遇到真实阻塞。Windows 的 `re
 ```text
 首次：batch-review/init.cmd 或 batch-review/init.sh
 确认配置和 scanner-health.json
-以后：直接 /auto-skill-review
+以后：Codex CLI 直接 $auto-skill-review；Claude Code 直接 /auto-skill-review
 ```
 
 如果状态为 `INITIALIZE`、`EDIT_CONFIG`、`INSTALL_SCANNERS` 或真实输入错误，AI 不得猜测
@@ -111,10 +115,10 @@ Skill、下一仓库，直到批次完成或遇到真实阻塞。Windows 的 `re
 ## 6. AI 批量调度规则
 
 脚本在当前仓库完成静态阶段后生成一个 AI 队列。队列中的每个项目都包含独立的 task ID、
-handoff 路径、Skill 根目录和 expected result 路径。Claude Code 应：
+handoff 路径、Skill 根目录和 expected result 路径。Codex CLI 或 Claude Code 应：
 
 1. 只读取队列元数据，不在父会话读取 handoff 或 Skill 文件；
-2. 按 `[concurrency].ai_reviews` 作为最大并发数，为每个项目启动一个全新的 Agent；
+2. 按 `[concurrency].ai_reviews` 作为最大并发数，为每个项目启动一个全新的项目审查 Agent；
 3. 给每个 Agent 只传递它自己的 handoff；禁止把多个 Skill 拼到一个上下文；
 4. 等待本批次结果落盘后调用受信启动器一次性校验和导入；
 5. 缺少结果、Schema 失败、摘要不完整或 Agent 不可用时停止，不跳过、不降级为父会话审查；

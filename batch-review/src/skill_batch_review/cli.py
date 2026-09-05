@@ -232,6 +232,11 @@ def _cmd_prepare_repository(args: argparse.Namespace) -> int:
                 "handoff": str(task.handoff_path),
                 "expected_result_filename": f"{task.task_id}.json",
                 "invoke_skill": "/skill-security-review",
+                "skill_name": "skill-security-review",
+                "skill_invocations": {
+                    "claude_code": "/skill-security-review",
+                    "codex_cli": "$skill-security-review",
+                },
             }
             for task in prepared.tasks
         ],
@@ -364,7 +369,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.set_defaults(handler=_cmd_prepare_repository)
 
     finalize = subparsers.add_parser(
-        "finalize-repository", help="导入 Claude Code JSON、判定并导出本地私密候选"
+        "finalize-repository", help="导入 AI 审查 JSON、判定并导出本地私密候选"
     )
     finalize.add_argument("config", type=Path)
     finalize.add_argument("--batch-id", required=True)

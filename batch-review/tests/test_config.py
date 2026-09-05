@@ -142,10 +142,32 @@ class ConfigTests(unittest.TestCase):
         path = self.write_config(automatic)
         first = load_config(path)
         self.assertRegex(first.ai.policy_version, r"^skill-policy-sha256:[a-f0-9]{64}$")
-        self.assertEqual(first.ai.reviewer_model, "claude-code-session")
+        self.assertEqual(first.ai.reviewer_model, "ai-agent-session")
         (references / "rules.md").write_text("rule two\n", encoding="utf-8")
         second = load_config(path)
         self.assertNotEqual(first.ai.policy_version, second.ai.policy_version)
+
+    def test_legacy_client_paths_redirect_to_one_canonical_policy(self) -> None:
+        base = Path(self.tempdir.name)
+        legacy = base / ".claude/skills/skill-security-review"
+        (legacy / "references").mkdir(parents=True)
+        canonical = base / "batch-review/skills/skill-security-review"
+        (canonical / "references").mkdir(parents=True)
+        (canonical / "SKILL.md").write_text("---\nname: skill-security-review\n---\n", encoding="utf-8")
+        canonical_schema = canonical / "references/review-result.schema.json"
+        canonical_schema.write_text("{}\n", encoding="utf-8")
+        content = CONFIG.replace(
+            'skill_path = ".claude/skills/skill-security-review"',
+            f'skill_path = "{legacy.as_posix()}"',
+        ).replace(
+            'result_schema_path = ".claude/skills/skill-security-review/references/review-result.schema.json"',
+            f'result_schema_path = "{(legacy / "references/review-result.schema.json").as_posix()}"',
+        )
+
+        config = load_config(self.write_config(content))
+
+        self.assertEqual(config.ai.skill_path, canonical.resolve())
+        self.assertEqual(config.ai.result_schema_path, canonical_schema.resolve())
 
     def test_evidence_and_candidates_cannot_be_cleaned_with_workspace(self) -> None:
         invalid = CONFIG.replace('evidence_root = "evidence"', 'evidence_root = "work/evidence"')

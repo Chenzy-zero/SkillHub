@@ -1,7 +1,7 @@
 # AI Security Review
 
-This is the company-maintained security review policy used by the project entry
-point. It is informed by upstream review themes but is not an upstream copy.
+This is the maintained security review policy used by the canonical batch-review
+entry point. It is informed by upstream review themes but is not an upstream copy.
 
 Apply this review to the complete Skill package itself. Static scanner results are evaluated separately by trusted program code and are not model input.
 

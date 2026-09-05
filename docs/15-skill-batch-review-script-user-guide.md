@@ -53,8 +53,9 @@ Commit 当作可下载版本；`git archive --remote` 不接受 `-- <skill_path>
 Revision 无法由 Gerrit 出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`，不能静默改用其他版本。
 
 面向普通操作人员的默认入口进一步简化为：首次使用 `init.cmd`/`init.sh`，完成配置和扫描器
-健康检查后，在 Claude Code 直接输入一次 `/auto-skill-review`。该 Skill 会在内部调用
-`review.cmd`/`review.sh` 完成计划、下载和静态阶段，再批量调度 AI Agent；不要求操作人员
+健康检查后，在 Codex CLI 输入 `$auto-skill-review`，或在 Claude Code 输入
+`/auto-skill-review`。该 Skill 会在内部调用 `review.cmd`/`review.sh` 完成计划、下载和
+静态阶段，再批量调度 AI Agent；不要求操作人员
 逐阶段重新打开入口。原 `run.sh`/`run.cmd` 继续作为带参数的运维入口。
 
 ## 1. 文档目的
@@ -67,7 +68,7 @@ Revision 无法由 Gerrit 出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`
 → 每次下载一个仓库
 → 冻结并导出该仓库中的 Skill
 → 并行运行两套静态检查
-→ 生成 Claude Code AI 审查任务
+→ 生成客户端无关的 AI 审查任务
 → 导入 AI 结果
 → 形成安全结论和质量得分
 → 导出本地私密候选
@@ -85,7 +86,7 @@ Revision 无法由 Gerrit 出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`
 - 通过配置的 Gerrit SSH 地址下载或更新单个仓库 mirror；
 - 从固定 Git Revision 导出 Skill 目录；
 - 执行 Cisco AI Skill Scanner 和 NVIDIA SkillSpector；
-- 生成 Claude Code 审查交接 JSON；
+- 生成客户端无关的 AI 审查交接 JSON；
 - 校验人工保存的 AI 审查 JSON；
 - 在本地生成证据、结果、报告和私密候选目录；
 - 在明确确认后删除当前仓库的临时工作区。
@@ -119,15 +120,17 @@ Revision 无法由 Gerrit 出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`
 → 自动处理下一仓库
 ```
 
-`batch-review/run.sh` 与 `run.cmd` 负责记住仓库和 Skill 进度。Claude Code 中显式调用
-`/auto-skill-review` 后，会读取当前仓库的 AI 队列并为各 Skill 启动独立 Agent，自动完成
+`batch-review/run.sh` 与 `run.cmd` 负责记住仓库和 Skill 进度。在 Codex CLI 中调用
+`$auto-skill-review`，或在 Claude Code 中调用 `/auto-skill-review` 后，会读取当前仓库的
+AI 队列并为各 Skill 启动独立 Agent，自动完成
 结果导入和状态推进，直到完成或遇到真实阻塞。
 原来的 `skill-batch-review prepare-repository/finalize-repository` 保留为兼容入口。
 
-### 3.2 Claude Code 只需要触发一次
+### 3.2 AI 客户端只需要触发一次
 
-普通脚本不会自行启动模型。执行人员在公司内网模型环境中调用一次项目级
-`/auto-skill-review`；该 Skill 按 `/skill-security-review` 的严格规则为队列中的每项启动
+普通脚本不会自行启动模型。执行人员在公司内网模型环境中调用一次项目级自动入口；Codex CLI
+使用 `$auto-skill-review`，Claude Code 使用 `/auto-skill-review`。该 Skill 按统一的
+`skill-security-review` 规则为队列中的每项启动
 隔离 Agent 并推进批次。无需先手工执行 `review.cmd`。
 
 ### 3.3 全批次统一截止时间尚未自动冻结
@@ -139,7 +142,7 @@ Revision 无法由 Gerrit 出包，程序报告 `REPOSITORY_ARCHIVE_UNAVAILABLE`
 ### 3.4 重试和并发边界
 
 配置中的 `[retry]` 和 `[concurrency]` 用于固定批次运行策略。启动器和
-`/auto-skill-review` 会按计划逐仓库推进，但不会跳过失败任务，也不会自行扩大并发或无限重试。
+自动审查 Skill 会按计划逐仓库推进，但不会跳过失败任务，也不会自行扩大并发或无限重试。
 
 静态阶段保持逐 Skill 串行写入结果；同一个 Skill 的 Cisco 与 SkillSpector 并行执行。
 AI 阶段可在当前仓库内并行启动多个独立 Agent，最大数量由 `[concurrency].ai_reviews` 控制。
@@ -179,10 +182,10 @@ batch-review/
 └── pyproject.toml                    安装和依赖定义
 ```
 
-AI 审查 Skill 位于 Claude Code 项目级自动发现目录：
+AI 审查规则位于两种客户端共用的规范目录：
 
 ```text
-.claude/skills/skill-security-review/
+batch-review/skills/skill-security-review/
 ├── SKILL.md
 └── references/
     ├── security-review.md
@@ -192,7 +195,8 @@ AI 审查 Skill 位于 Claude Code 项目级自动发现目录：
     └── review-result.schema.json
 ```
 
-该目录中的 `skill-security-review` 是公司维护的审查入口，参考
+该目录中的 `skill-security-review` 是公司维护的唯一规则源；`.agents/` 与 `.claude/`
+只保存客户端发现适配层。规则参考
 UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是任何上游 Skill 的原样副本。
 
 ## 5. 运行环境要求
@@ -598,17 +602,17 @@ max_score = 100
 
 ```toml
 [ai]
-skill_path = "/path/to/SkillHub/.claude/skills/skill-security-review"
-result_schema_path = "/path/to/SkillHub/.claude/skills/skill-security-review/references/review-result.schema.json"
+skill_path = "/path/to/SkillHub/batch-review/skills/skill-security-review"
+result_schema_path = "/path/to/SkillHub/batch-review/skills/skill-security-review/references/review-result.schema.json"
 ```
 
 | 配置 | 说明 |
 |---|---|
-| `skill_path` | Claude Code 使用的项目 AI 审查 Skill |
+| `skill_path` | Codex CLI 与 Claude Code 共用的 AI 审查规则 |
 | `result_schema_path` | AI 最终 JSON 的严格 Schema |
 `policy_version` 由上述审查 Skill 的 `SKILL.md` 和 `references/` 内容自动计算，文件时间戳和
-`evals/` 不参与。Claude Code 能可靠取得实际模型时写入实际标识，否则使用
-`claude-code-session` 作为运行入口追溯。操作人员不填写这两个字段。
+`evals/` 不参与。AI 客户端能可靠取得实际模型时写入实际标识，否则使用配置提供的通用
+会话标识作为追溯。操作人员不填写策略版本和模型标识。
 
 ### 7.7 `[scanners.*]`
 
@@ -826,7 +830,11 @@ skill-batch-review prepare-repository \
       "task_id": "task-...",
       "handoff": "/.../ai/handoff.json",
       "expected_result_filename": "task-....json",
-      "invoke_skill": "/skill-security-review"
+      "invoke_skill": "/skill-security-review",
+      "skill_invocations": {
+        "claude_code": "/skill-security-review",
+        "codex_cli": "$skill-security-review"
+      }
     }
   ],
   "model_invoked": false,
@@ -847,12 +855,12 @@ skill-batch-review prepare-repository \
 
 这些情况会记录在仓库索引的来源记录、冲突或 `pre_ai_results` 中，不能简单当作“仓库没有问题”。
 
-### 步骤 6：执行 Claude Code AI 审查
+### 步骤 6：执行 Codex CLI 或 Claude Code AI 审查
 
 对 `ai_review_queue` 中每个任务分别处理；任务之间可以并行，但每项必须使用独立的
-Claude Code Agent 上下文，不能把多个 Skill 合并到同一会话。
+审查 Agent 上下文，不能把多个 Skill 合并到同一会话。
 
-#### 6.1 准备 Claude Code 环境
+#### 6.1 准备 AI 客户端环境
 
 要求：
 
@@ -863,20 +871,22 @@ Claude Code Agent 上下文，不能把多个 Skill 合并到同一会话。
 - 不执行目标 Skill 的任何内容；
 - 不跟随离开 Skill Root 的链接。
 
-AI Skill 自身声明：
+Claude Code 适配层声明读取能力，并仅允许把最终 JSON 写到任务的 `expected_result`。Codex CLI
+审查 Agent 使用工作区沙箱和同样的单文件写入规则。两者均不得写其他位置：
 
 ```text
-allowed-tools: Read Glob Grep
+allowed-tools: Read Glob Grep Write
 ```
 
 但这不代表运行环境已自动移除其他工具。执行人员仍需使用公司批准的 Claude Code 管理策略限制工具。
 
 #### 6.2 调用 AI Skill
 
-在 Claude Code 中由 `/auto-skill-review` 调度；需要手工排障时才直接调用：
+正常由自动入口调度；需要手工排障时才直接调用单项 Skill：
 
 ```text
-/skill-security-review
+Codex CLI：$skill-security-review
+Claude Code：/skill-security-review
 ```
 
 同时提供当前任务的 `handoff.json` 路径，并明确：
@@ -1316,14 +1326,14 @@ python3 -W error -m unittest discover -s batch-review/tests -v
 
 ```bash
 python3 /path/to/skill-creator/scripts/quick_validate.py \
-  .claude/skills/skill-security-review
+  batch-review/skills/skill-security-review
 ```
 
 验证 JSON Schema 语法：
 
 ```bash
 python3 -m json.tool \
-  .claude/skills/skill-security-review/references/review-result.schema.json \
+  batch-review/skills/skill-security-review/references/review-result.schema.json \
   >/dev/null
 ```
 
@@ -1339,7 +1349,7 @@ python3 -m json.tool \
 5. plan-repositories
 6. 人工确认仓库计划
 7. prepare-repository（一个仓库）
-8. 按 ai_review_queue 调用 /skill-security-review
+8. 按 ai_review_queue 调用 $skill-security-review（Codex CLI）或 /skill-security-review（Claude Code）
 9. 保存 <task_id>.json
 10. finalize-repository
 11. 核对证据、结论和候选

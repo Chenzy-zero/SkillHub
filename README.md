@@ -87,11 +87,14 @@ Gerrit Code Review
 ├── batch-review/                       # 存量 Skill 批量审查程序
 │   ├── config/                         # 脱敏配置样例
 │   ├── examples/                       # CSV 样例
+│   ├── skills/skill-security-review/   # 两种 AI 客户端共用的审查规则与 Schema
 │   ├── src/skill_batch_review/         # Python 实现
 │   └── tests/                          # 本地单元测试
+├── .agents/skills/                     # Codex CLI 项目级 Skill 入口
+├── .codex/agents/                     # Codex CLI 隔离审查 Agent
 ├── .claude/
-│   └── skills/
-│       └── skill-security-review/      # Claude Code 项目级只读 AI 审查入口
+│   ├── skills/                         # Claude Code 项目级 Skill 入口
+│   └── agents/                         # Claude Code 隔离审查 Agent
 ├── poc/
 │   ├── gerrit-skill-discovery/
 │   └── gerrit-change-discovery/
@@ -108,14 +111,15 @@ Gerrit Code Review
 - [Skill 批量安全审查实施任务分解](./docs/14-skill-batch-review-implementation-tasks.md)（T00–T53 实施清单）
 - [Skill 批量安全审查脚本详细使用说明](./docs/15-skill-batch-review-script-user-guide.md)（配置、执行、AI 审查、报告、清理与排障）
 - [Skill 批量安全审查快速使用说明](./docs/16-skill-batch-review-quick-start.md)（待填写配置、一键启动与 Skill 触发指令）
+- [Windows 使用 Codex CLI 或 Claude Code 执行批量审查](./docs/21-windows-ai-client-batch-review-guide.md)（双入口、隔离 Agent 与当前环境检查）
 - [Skill 安全管理策略](./docs/10-skill-security-governance-strategy.md)
 - [完整使用说明](./docs/09-complete-user-guide.md)
 - [Skill 安全管理策略](./docs/02-skill-security-management-strategy.md)
 - [Gerrit Skill 发现与审核设计](./docs/03-gerrit-skill-discovery-and-review-design.md)
 
-Claude Code 项目级安全审查入口位于
-`.claude/skills/skill-security-review/`，可在本项目上下文中调用
-`/skill-security-review`。该 Skill 是公司维护的审查流程，参考了
+统一安全审查规则位于 `batch-review/skills/skill-security-review/`。Codex CLI 通过
+`.agents/skills/` 发现 `$auto-skill-review`，Claude Code 通过 `.claude/skills/`
+发现 `/auto-skill-review`；两端使用同一策略、结果 Schema 和脚本状态机。该审查流程参考了
 UseAI-pro 的 `skill-vetter` 和 `skill-auditor`，但不是上游 Skill 的原样副本。
 
 GitHub 联调可使用 `batch-review/tools/discover_git_skills.py` 从固定 Revision 生成 CSV，

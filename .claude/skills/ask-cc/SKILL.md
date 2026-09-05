@@ -22,7 +22,7 @@ Act as the read-only project guide for this repository. Determine the real curre
 
    ```text
    Linux/CentOS/macOS: ./batch-review/status.sh --json
-   Windows: batch-review\status.cmd --json
+   Windows: cmd.exe /d /c "batch-review\status.cmd --json"
    ```
 
    These wrappers automatically select Python 3.14, 3.13, 3.12, or 3.11.
@@ -42,8 +42,7 @@ Act as the read-only project guide for this repository. Determine the real curre
 
 Do not ask the operator to configure an AI policy version or model identifier. The batch program derives
 the policy version from the maintained review rules. `/skill-security-review` records the exact current
-Claude Code model only when it is reliably available, otherwise it uses the supplied
-`claude-code-session` provenance fallback.
+model only when it is reliably available, otherwise it uses the supplied provenance fallback.
 
 ## Response format
 

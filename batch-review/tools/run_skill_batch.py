@@ -128,6 +128,7 @@ def _new_state(config: ReviewConfig, batch_id: str) -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "workflow_version": CURRENT_WORKFLOW_VERSION,
+        "ai_policy_version": config.ai.policy_version,
         "batch_id": batch_id,
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
@@ -181,6 +182,19 @@ def _load_state(config: ReviewConfig, batch_id: str) -> dict[str, Any]:
         migrated = True
     elif workflow_version != CURRENT_WORKFLOW_VERSION:
         raise LauncherError(f"批次执行模式不兼容: {workflow_version!r}；请创建新批次")
+    stored_policy = value.get("ai_policy_version")
+    if stored_policy is None:
+        if not legacy_state_is_pristine(value):
+            raise LauncherError(
+                "旧批次已经开始执行但未冻结 AI 审查策略，不能用当前规则继续；"
+                "请保留原批次证据并创建新批次"
+            )
+        value["ai_policy_version"] = config.ai.policy_version
+        migrated = True
+    elif stored_policy != config.ai.policy_version:
+        raise LauncherError(
+            "批次创建后 AI 审查策略发生变化；请保留原批次证据并创建新批次"
+        )
     row_lookup = {row.source_row_id: row for row in _rows(config, document)}
     for item in value["items"]:
         if not isinstance(item, dict):
@@ -237,6 +251,14 @@ def _activate_waiting(config: ReviewConfig, state: dict[str, Any], item: dict[st
         "handoff": item["handoff_path"],
         "expected_result": item["ai_result_path"],
         "skill_trigger": "/skill-security-review",
+        "skill_triggers": {
+            "claude_code": "/skill-security-review",
+            "codex_cli": "$skill-security-review",
+        },
+        "review_agents": {
+            "claude_code": "skill-security-reviewer",
+            "codex_cli": "skill_security_reviewer",
+        },
     }
     _atomic_json(
         config.workspace.manifest_root / str(state["batch_id"]) / "ai-review-current.json",
@@ -481,6 +503,14 @@ def _ai_queue_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "handoff": item["handoff_path"],
         "expected_result": item["ai_result_path"],
         "skill_trigger": "/skill-security-review",
+        "skill_triggers": {
+            "claude_code": "/skill-security-review",
+            "codex_cli": "$skill-security-review",
+        },
+        "review_agents": {
+            "claude_code": "skill-security-reviewer",
+            "codex_cli": "skill_security_reviewer",
+        },
     }
 
 
@@ -711,7 +741,11 @@ def _finish_current_serial(
     if item["status"] == "WAITING_FOR_AI":
         ai_path = Path(str(item["ai_result_path"]))
         if not ai_path.is_file():
-            raise LauncherError(f"缺少 AI 结果: {ai_path}\n触发指令: /skill-security-review")
+            raise LauncherError(
+                f"缺少 AI 结果: {ai_path}\n"
+                "触发指令: Claude Code /skill-security-review；"
+                "Codex CLI $skill-security-review"
+            )
         finalize_skill(config, index_path=Path(str(item["index_path"])), ai_result_path=ai_path)
     elif item["status"] != "READY_TO_ADVANCE":
         raise LauncherError(f"当前 Skill 状态不能完成: {item['status']}")

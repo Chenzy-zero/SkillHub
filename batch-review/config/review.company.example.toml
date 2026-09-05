@@ -38,9 +38,9 @@ candidate_threshold = 70
 max_score = 100
 
 [ai]
-skill_path = "../../.claude/skills/skill-security-review"
-result_schema_path = "../../.claude/skills/skill-security-review/references/review-result.schema.json"
-# 策略版本由上述 Skill 规则内容自动计算；模型由 Claude Code 会话记录，无需手填。
+skill_path = "../skills/skill-security-review"
+result_schema_path = "../skills/skill-security-review/references/review-result.schema.json"
+# 策略版本由上述 Skill 规则内容自动计算；模型由当前 AI 客户端会话记录，无需手填。
 
 [scanners.cisco]
 enabled = true

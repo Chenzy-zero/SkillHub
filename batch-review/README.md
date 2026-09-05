@@ -7,7 +7,7 @@ AI 由独立 Agent 按队列并行（受配置上限控制）完成。原仓库�
 本目录的执行边界和 AI 调度规则统一见 [`AGENTS.md`](AGENTS.md)。安全扫描时只在本目录下
 生成工作文件；仓库根目录的 CSV 等外部文件仅作为显式只读输入。
 
-首次配置和一键启动见 [`docs/16-skill-batch-review-quick-start.md`](../docs/16-skill-batch-review-quick-start.md)；完整配置字段、逐仓库操作、Claude Code 执行、输出目录和故障处理见 [`docs/15-skill-batch-review-script-user-guide.md`](../docs/15-skill-batch-review-script-user-guide.md)。
+首次配置和一键启动见 [`docs/16-skill-batch-review-quick-start.md`](../docs/16-skill-batch-review-quick-start.md)；Windows 下使用 Codex CLI 或 Claude Code 见 [`docs/21-windows-ai-client-batch-review-guide.md`](../docs/21-windows-ai-client-batch-review-guide.md)；完整配置字段、逐仓库操作、输出目录和故障处理见 [`docs/15-skill-batch-review-script-user-guide.md`](../docs/15-skill-batch-review-script-user-guide.md)。
 
 ```text
 CSV 台账
@@ -19,8 +19,8 @@ CSV 台账
   → 检查同名同内容的已通过结果能否复用
   → 同名 Skill Root 内容一致时复用已通过结果
   → Cisco + SkillSpector 并行静态检查
-  → 为该仓库生成 Claude Code 只读交接任务队列
-  → 在公司内网模型环境调用一次 /auto-skill-review
+  → 为该仓库生成客户端无关的只读 AI 任务队列
+  → 调用一次 $auto-skill-review（Codex CLI）或 /auto-skill-review（Claude Code）
   → 为每个 Skill 启动独立 Agent 并批量导入 AI JSON
   → 合并问题、安全判定、独立质量评分
   → 在 skill_id 目录写入 review-result.json
@@ -47,7 +47,7 @@ SHA 直接 fetch；也不接受 `git archive --remote` 的路径限定参数。�
 - 固定 Revision 的只读快照、完整包 SHA-256、特殊文件覆盖记录；
 - 同名 Skill Root 快速筛选、忽略时间戳的整包内容比对和已通过结果复用；
 - Cisco AI Skill Scanner 与 NVIDIA SkillSpector 的本地静态适配和并行执行；
-- Claude Code AI 审查交接、JSON Schema 和冻结版本一致性校验；
+- Codex CLI/Claude Code AI 审查交接、JSON Schema 和冻结版本一致性校验；
 - 问题归一化、去重、安全门禁和独立 0–100 质量得分；
 - 受限证据、可恢复状态、本地私密候选、批次报告和受控清理；
 - 仓库级一次归档、全部台账 Skill 提取、逐项静态扫描、`skills/<skill_id>/<skill_name>` 归档和单项 JSON；
@@ -91,12 +91,12 @@ Linux/CentOS 第一次执行：
 ```
 
 初始化会生成被 Git 忽略的 `batch-review/config/review.local.toml` 和本机操作状态，已有配置
-默认绝不覆盖。完成配置和扫描器健康检查后，在 Claude Code 直接输入
-`/auto-skill-review` 即可；它会在内部调用 `review.cmd`/`review.sh`，不要求操作人员在每个阶段
+默认绝不覆盖。完成配置和扫描器健康检查后，在 Codex CLI 输入 `$auto-skill-review`，或在
+Claude Code 输入 `/auto-skill-review` 即可；它会在内部调用 `review.cmd`/`review.sh`，不要求操作人员在每个阶段
 重新打开窗口。命令行入口仍可用于排障和人工确认。
 
-在 Claude Code 中输入 `/ask-cc` 可以只读检查状态；输入 `/auto-skill-review` 可自动完成当前及
-后续 AI 审查并推进到下一 Skill、下一仓库。
+Codex CLI 使用 `$ask-cc` 只读检查状态、`$auto-skill-review` 自动执行；Claude Code 对应使用
+`/ask-cc`、`/auto-skill-review`。
 
 Windows 测试说明：快照测试中的符号链接用例需要开发者模式或创建符号链接的提升权限。未满足
 条件时，测试只会对 `WinError 1314` 自动跳过；其他错误仍会失败。可在“设置 → 隐私和安全性
@@ -113,8 +113,8 @@ Windows 测试说明：快照测试中的符号链接用例需要开发者模式
 - `scanners.*.version`：批准并固定的工具版本；
 - `workspace.*`：临时工作区、受限证据区、私密候选区和清单区。
 
-AI 策略版本由 `.claude/skills/skill-security-review/` 中的规则内容自动计算 SHA-256；模型由
-Claude Code 会话在能可靠识别时记录实际值，否则记录 `claude-code-session`。两者都不要求
+AI 策略版本由 `skills/skill-security-review/` 中的统一规则内容自动计算 SHA-256；模型由
+当前 AI 会话在能可靠识别时记录实际值，否则记录通用会话后备值。两者都不要求
 操作人员填写。
 
 两套静态命令固定为本地静态模式：
@@ -171,7 +171,7 @@ Cisco 2.0.13 安装完成后会从其专用环境移除未启用的 `litellm`，
 ```text
 首次运行 init.cmd / init.sh
 → 填写配置并完成扫描器离线健康检查
-→ 在 Claude Code 直接输入 /auto-skill-review
+→ 输入 $auto-skill-review（Codex CLI）或 /auto-skill-review（Claude Code）
 → 脚本完成计划、仓库下载、Skill 提取和逐项静态扫描
 → 独立 Agent 按当前仓库队列并行完成 AI 审查
 → 脚本导入结果、清理并自动进入下一仓库
@@ -188,8 +188,7 @@ Cisco 2.0.13 安装完成后会从其专用环境移除未启用的 `litellm`，
 ```
 
 Windows 将 `run.sh` 替换为 `run.cmd`。启动器生成当前仓库的 `ai-review-queue.json` 后，
-由 `/auto-skill-review` 自动触发多个隔离 Agent；不再要求手动逐个调用
-`/skill-security-review`。
+由自动审查 Skill 触发多个隔离 Agent；不再要求手动逐个调用单项审查 Skill。
 
 `run.sh` / `run.cmd` 会维护仓库和 Skill 状态，并把结果写入 `skills_root` 与 `results_root`。
 
@@ -219,14 +218,14 @@ skill-batch-review prepare-repository review.toml \
 
 这是明确的网络和扫描边界。命令只处理一个仓库，输出 `repository_index` 和 `ai_review_queue`。相同仓库内的多个 Skill 共用一份 mirror，但各自使用冻结 Revision 的独立快照。
 
-### 步骤 3：运行 Claude Code AI 审查
+### 步骤 3：运行 Codex CLI 或 Claude Code AI 审查
 
 对 `ai_review_queue` 中每项依次执行：
 
-1. 在公司内网模型环境启动 Claude Code；
-2. 在包含本项目的 Claude Code 工作区中调用项目级 Skill：`/skill-security-review`；该入口文件位于 `.claude/skills/skill-security-review/SKILL.md`；
+1. 在公司内网模型环境启动 Codex CLI 或 Claude Code；
+2. 在项目根目录调用 `$skill-security-review`（Codex CLI）或 `/skill-security-review`（Claude Code）；统一规则位于 `batch-review/skills/skill-security-review/SKILL.md`；
 3. 把该任务的精简 `handoff` 元数据和 Skill Package 作为唯一任务上下文，不读取静态扫描报告、Manifest 或历史结果；
-4. 只开放读取能力，不开放 Bash、写文件、网络、MCP 或子代理；
+4. 只开放读取能力和对当前 `expected_result` 的单文件写入，不开放 Bash、网络、MCP 或子代理；
 5. 将最终纯 JSON 保存为 `<ai-results-dir>/<task_id>.json`。
 
 具体 Claude Code 启动参数由公司已批准版本决定，本程序不猜测或自动调用模型。

@@ -1,7 +1,7 @@
 # Static Quality Review
 
-This is the company-maintained quality review policy used by the project entry
-point. It is informed by upstream review themes but is not an upstream copy.
+This is the maintained quality review policy used by the canonical batch-review
+entry point. It is informed by upstream review themes but is not an upstream copy.
 
 This score measures the quality visible in the reviewed package. It does not prove that the Skill succeeds at real tasks. Functional quality requires separate test cases and sandboxed with-Skill/without-Skill evaluation.
 

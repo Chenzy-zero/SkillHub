@@ -1,7 +1,7 @@
 """Validate the JSON returned by the read-only AI review Skill.
 
-This module does not invoke a model.  The operator runs Claude Code in the
-approved intranet environment and places its JSON result in the evidence
+This module does not invoke a model. The operator runs Codex CLI or Claude Code
+in the approved intranet environment and places its JSON result in the evidence
 workspace; this module validates that result before it can influence a gate.
 """
 
@@ -68,7 +68,7 @@ def build_ai_review_handoff(
     result_schema_path: Path,
     require_complete_inputs: bool = True,
 ) -> dict[str, Any]:
-    """Build the exact read-only context handed to Claude Code.
+    """Build the exact read-only context handed to an approved AI reviewer.
 
     No process is launched and no file is written.  The caller may save this
     dictionary in the restricted evidence area. The model receives package
@@ -128,6 +128,11 @@ def build_ai_review_handoff(
             "allowed_tools": ["Read", "Glob", "Grep"],
             "network_allowed": False,
             "execute_target_content": False,
+            "skill_name": "skill-security-review",
+            "skill_invocations": {
+                "claude_code": "/skill-security-review",
+                "codex_cli": "$skill-security-review",
+            },
             "invoke_skill": "/skill-security-review",
         },
     }

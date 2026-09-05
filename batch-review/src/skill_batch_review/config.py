@@ -251,7 +251,34 @@ class AIConfig:
     skill_path: Path
     result_schema_path: Path
     policy_version: str
-    reviewer_model: str = "claude-code-session"
+    reviewer_model: str = "ai-agent-session"
+
+
+def _canonical_ai_resources(
+    skill_path: Path, result_schema_path: Path
+) -> tuple[Path, Path]:
+    """Redirect repository-owned legacy client adapters to the canonical policy.
+
+    Existing local configurations may still point at the former Claude-only
+    directory.  Keep those configurations runnable without rewriting operator
+    files, while ensuring both Claude Code and Codex CLI hash and validate the
+    same policy and result Schema.
+    """
+
+    parts = skill_path.parts
+    if len(parts) < 3 or skill_path.name != "skill-security-review":
+        return skill_path, result_schema_path
+    client_root = skill_path.parent.parent
+    if client_root.name not in {".claude", ".agents"}:
+        return skill_path, result_schema_path
+    repository_root = client_root.parent
+    canonical = repository_root / "batch-review" / "skills" / "skill-security-review"
+    if not canonical.is_dir():
+        return skill_path, result_schema_path
+    legacy_schema = skill_path / "references" / "review-result.schema.json"
+    if result_schema_path == legacy_schema:
+        result_schema_path = canonical / "references" / "review-result.schema.json"
+    return canonical.resolve(), result_schema_path.resolve()
 
 
 def derive_ai_policy_version(skill_path: Path) -> str:
@@ -633,7 +660,16 @@ def load_config(path: "str | Path") -> ReviewConfig:
         ai_data.get("skill_path"),
         "ai.skill_path",
         base_dir=base_dir,
-        default="../../.claude/skills/skill-security-review",
+        default="../skills/skill-security-review",
+    )
+    ai_result_schema_path = _path(
+        ai_data.get("result_schema_path"),
+        "ai.result_schema_path",
+        base_dir=base_dir,
+        default="../skills/skill-security-review/references/review-result.schema.json",
+    )
+    ai_skill_path, ai_result_schema_path = _canonical_ai_resources(
+        ai_skill_path, ai_result_schema_path
     )
     configured_policy = ai_data.get("policy_version")
     policy_version = (
@@ -643,15 +679,10 @@ def load_config(path: "str | Path") -> ReviewConfig:
     )
     ai = AIConfig(
         skill_path=ai_skill_path,
-        result_schema_path=_path(
-            ai_data.get("result_schema_path"),
-            "ai.result_schema_path",
-            base_dir=base_dir,
-            default="../../.claude/skills/skill-security-review/references/review-result.schema.json",
-        ),
+        result_schema_path=ai_result_schema_path,
         policy_version=policy_version,
         reviewer_model=_text(
-            ai_data.get("reviewer_model"), "ai.reviewer_model", default="claude-code-session"
+            ai_data.get("reviewer_model"), "ai.reviewer_model", default="ai-agent-session"
         ),
     )
 

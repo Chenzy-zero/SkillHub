@@ -1,6 +1,9 @@
 @echo off
 setlocal EnableDelayedExpansion
+chcp 65001 >nul
 set "SCRIPT_DIR=%~dp0"
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 if defined SKILL_REVIEW_PYTHON (
   "%SKILL_REVIEW_PYTHON%" "%SCRIPT_DIR%tools\project_status.py" %*

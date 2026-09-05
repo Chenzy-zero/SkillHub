@@ -25,6 +25,8 @@
 > 当前逐 Skill 任务：`docs/19-per-skill-review-implementation-tasks.md`
 >
 > 当前初始化与免参数操作说明：`docs/20-project-initialization-and-guided-operation.md`
+>
+> 当前 Windows AI 客户端执行说明：`docs/21-windows-ai-client-batch-review-guide.md`
 
 ## 1. 当前项目范围
 
@@ -193,7 +195,7 @@ status
 - 当前执行流程按 `repo_name + branch` 分组：冻结一次分支 HEAD、下载一次不含历史和 `.git` 的整仓归档、只提取 CSV 登记的全部 Skill，逐一完成静态扫描后生成当前仓库 AI 队列，再由独立 Agent 批量审查；同仓库全部 Skill 完成后才进入下一仓库；
 - Cisco AI Skill Scanner 与 NVIDIA SkillSpector 先对同一内容版本并行完成静态检查；SkillSpector 官方结果中的 `explanation` 是有效问题说明，`finding` 为空但 `explanation` 完整时不得误判为扫描失败；
 - 扫描器安装入口先经公司 pip 源安装固定版 `uv==0.12.9`，再用 uv 解析固定版本扫描器，避免 pip 对 Cisco 大型间接依赖树产生 `resolution-too-deep`；Cisco 2.0.13 的专用环境在安装后移除未启用且会触发 tiktoken 联网的 `litellm`，只保留静态扫描入口；SkillSpector 顶层包使用仓库内经 SHA-256 校验的 NVIDIA 2.5.1 官方 wheel；其误列为核心依赖但未被扫描代码引用的 `langgraph-cli[inmem]` 开发服务组件不安装，真实运行依赖按官方 wheel 声明的版本范围只从当前公司源解析，不使用公网解析出的传递版本锁，以 `--no-deps` 安装原始官方 wheel；安装完成必须在限制网络的环境中执行两套扫描器的真实最小 Skill 冒烟并写入健康记录；Windows 64 位如缺少 Python 3.12/3.13，在用户确认后使用仓库内经 SHA-256 校验的 Python.org 3.13.15 官方安装包部署项目专用运行环境，不更改 PATH 或默认 Python；默认只允许 wheel，Windows 仅对固定的 `win-unicode-console==0.5` 开放单包源码构建例外；不得因此改用未批准的包源；
-- AI 审查使用项目级 `.claude/skills/skill-security-review/`，由 Claude Code 调用公司内网模型执行；每个 Skill 使用独立上下文，AI 只读取 Skill Package 和最小任务元数据，不读取静态扫描报告、Manifest 或历史结果，不联网、不执行被审查内容；静态结果由程序独立合并；该入口参考 UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是上游副本；
+- AI 审查规则统一位于 `batch-review/skills/skill-security-review/`，由 Codex CLI 或 Claude Code 调用公司内网模型执行；两端的 `.agents/`、`.codex/`、`.claude/` 只负责发现和隔离调度。每个 Skill 使用独立上下文，AI 只读取 Skill Package 和最小任务元数据，不读取静态扫描报告、Manifest 或历史结果，不联网、不执行被审查内容；静态结果由程序独立合并；该入口参考 UseAI-pro 的 `skill-vetter` 与 `skill-auditor`，但不是上游副本；
 - 安全结论与质量得分分别保存。安全未通过或检查不完整时，质量高分不能放行；私密候选质量门槛当前为 70 分；
 - 通过内容只生成本地私密候选工作空间，不自动 Commit、Push 或上架；由负责人后续手动同步到私密 Git 中转仓库；
 - 原始报告进入受限证据区，不进入私密候选 Git 工作空间。
@@ -407,13 +409,17 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 - `docs/18-per-skill-review-design.md`：仓库级一次归档、逐 Skill 目录、复用和 JSON/CSV 设计
 - `docs/19-per-skill-review-implementation-tasks.md`：逐 Skill 审查实施任务与验收场景
 - `docs/20-project-initialization-and-guided-operation.md`：首次初始化、状态判断、双击入口和 ask-cc 使用说明
+- `docs/21-windows-ai-client-batch-review-guide.md`：Windows 下使用 Codex CLI 或 Claude Code 的统一批量审查入口、隔离边界和环境检查
 - `batch-review/AGENTS.md`：批量安全审查工作区边界、脚本优先原则和 AI 队列调度规则
 - `batch-review/`：存量 Skill 批量审查程序、脱敏配置样例和本地测试
-- `.claude/skills/skill-security-review/`：供 Claude Code 自动发现和调用的项目级只读 AI 安全与质量审查入口（参考 `skill-vetter`/`skill-auditor`，非上游副本）
+- `batch-review/skills/skill-security-review/`：Codex CLI 与 Claude Code 共用的只读 AI 安全与质量审查规则（参考 `skill-vetter`/`skill-auditor`，非上游副本）
+- `.agents/skills/`、`.codex/agents/`：Codex CLI 的项目级 Skill 和隔离审查 Agent 入口
+- `.claude/skills/`、`.claude/agents/`：Claude Code 的项目级 Skill 和隔离审查 Agent 入口
 - `.claude/skills/ask-cc/`：只读分析当前项目状态并给出唯一下一步的 Claude Code 项目级入口
 - `.claude/skills/auto-skill-review/`：完成当前及后续 AI 审查并自动推进 Skill、仓库和批次状态的 Claude Code 项目级入口
+- `.agents/skills/auto-skill-review/`：完成当前及后续 AI 审查并自动推进 Skill、仓库和批次状态的 Codex CLI 项目级入口
 
 安全扫描子项目的具体边界、脚本优先原则和 AI 队列规则见 `batch-review/AGENTS.md`；扫描执行
 产生的工作文件和证据均应保留在 `batch-review/` 目录树内。
 
-当前 `batch-review/` 已实现按仓库一次归档、提取该仓库全部台账 Skill、逐一静态扫描、生成 AI 队列并由独立 Agent 批量审查，再自动进入下一仓库的流程，支持 `test/skill_summary.csv` 的正式字段和中文状态，并通过本地模拟测试。正式批量运行前仍必须取得 Gerrit 只读 SSH 参数、公司内网源中的扫描器依赖 wheel、目录权限和首批小样本仓库。SkillSpector 2.5.1 顶层 wheel 已固定放入仓库。主程序支持 Python 3.11～3.14；Cisco 可使用 Python 3.12～3.14，SkillSpector 因官方 `yara-python` wheel 限制使用 Python 3.12 或 3.13，安装器会自动选择。AI 策略版本由项目审查规则自动计算，模型追溯由 Claude Code 会话提供，不要求操作人员手填。
+当前 `batch-review/` 已实现按仓库一次归档、提取该仓库全部台账 Skill、逐一静态扫描、生成 AI 队列并由独立 Agent 批量审查，再自动进入下一仓库的流程，支持 `test/skill_summary.csv` 的正式字段和中文状态，并通过本地模拟测试。正式批量运行前仍必须取得 Gerrit 只读 SSH 参数、公司内网源中的扫描器依赖 wheel、目录权限和首批小样本仓库。SkillSpector 2.5.1 顶层 wheel 已固定放入仓库。主程序支持 Python 3.11～3.14；Cisco 可使用 Python 3.12～3.14，SkillSpector 因官方 `yara-python` wheel 限制使用 Python 3.12 或 3.13，安装器会自动选择。AI 策略版本由项目审查规则自动计算，模型追溯由当前 Codex CLI 或 Claude Code 会话提供，不要求操作人员手填。

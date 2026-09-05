@@ -10,8 +10,9 @@
 Windows 首次双击 `batch-review\init.cmd`，Linux/CentOS 首次执行 `./batch-review/init.sh`。
 
 初始化入口会创建真实的本机配置 `batch-review/config/review.local.toml`；该文件被 Git 忽略，
-已有文件默认不会被覆盖。完成配置和扫描器健康检查后，在 Claude Code 中输入一次
-`/auto-skill-review` 即可；它会在内部调用受信 `review.cmd`/`review.sh`。`/ask-cc` 仍可只读查看状态。
+已有文件默认不会被覆盖。完成配置和扫描器健康检查后，任选一种入口执行一次即可：Codex CLI
+输入 `$auto-skill-review`，Claude Code 输入 `/auto-skill-review`。两者都会调用受信
+`review.cmd`/`review.sh`；只读查状态分别使用 `$ask-cc`、`/ask-cc`。
 
 下面的参数化命令主要用于理解流程和运维排障。
 
@@ -26,7 +27,7 @@ run.sh / run.cmd
   ├─ 校验全部 AI 结果，生成单项 JSON 和批次 CSV/JSON
   └─ 结果持久化后自动进入下一仓库
 
-/auto-skill-review
+$auto-skill-review（Codex CLI）或 /auto-skill-review（Claude Code）
   ├─ 为队列中的每个 Skill 启动独立 Agent（受控并发）
   └─ 自动导入结果并推进整个批次
 ```
@@ -114,7 +115,7 @@ Gerrit，也不运行扫描器。计划中的 Skill 数、排除项和状态应�
 ## 5. 启动自动静态阶段
 
 `start` 会访问 Gerrit 并实际运行两套静态扫描器，因此必须显式写 `--execute`。日常不需要
-手工执行，`/auto-skill-review` 会通过受信入口调用它：
+手工执行，自动审查 Skill 会通过受信入口调用它：
 
 ```bash
 ./batch-review/run.sh start \
@@ -137,10 +138,11 @@ Gerrit，也不运行扫描器。计划中的 Skill 数、排除项和状态应�
 
 ## 6. 自动完成 AI 审查和后续仓库
 
-在本仓库根目录启动公司批准的 Claude Code。输入触发指令：
+在本仓库根目录启动公司批准的 Codex CLI 或 Claude Code。输入对应触发指令：
 
 ```text
-/auto-skill-review
+Codex CLI：$auto-skill-review
+Claude Code：/auto-skill-review
 ```
 
 该 Skill 自动读取 `ai-review-queue.json`，按 `[concurrency].ai_reviews` 为每个 Skill 启动
@@ -186,8 +188,8 @@ Windows 将 `./batch-review/run.sh` 替换为 `batch-review\run.cmd`。入口会
 ## 9. 一键启动的边界
 
 `start` 是仓库级静态阶段入口，`advance` 是运维排障用的单步续跑入口。日常操作只需
-`/auto-skill-review` 一次调用即可。普通脚本不能自行生成 AI 结论；
-Claude Code 自动 Skill 负责这一段，并且每个结果仍须通过 Schema、Digest、批次和策略版本校验。
+自动审查 Skill 一次调用即可。普通脚本不能自行生成 AI 结论；Codex CLI 或 Claude Code 的
+隔离审查 Agent 负责这一段，并且每个结果仍须通过 Schema、Digest、批次和策略版本校验。
 
 程序不会自动 Commit、Push 或上架 SkillHub。全部纳管内容写入 `skills_root`，安全通过与否
 由各 `skill_id` 下的 JSON 及批次结果表表示；后续同步动作仍由负责人决定。
@@ -209,9 +211,9 @@ python3.12 batch-review/tools/discover_git_skills.py \
 
 - GitHub 或正式 Gerrit 的 SSH 地址、端口、只读身份和仓库白名单；
 - Cisco 与 SkillSpector 可执行文件路径；
-- AI 审查 Skill 和结果 Schema 的路径。
+- AI 审查规则和结果 Schema 的路径；默认统一位于 `batch-review/skills/skill-security-review/`。
 
-策略版本由审查规则内容自动计算；模型由 Claude Code 会话记录，无需填写。
+策略版本由审查规则内容自动计算；模型由当前 AI 会话记录，无需填写。
 
 GitHub 受限网络可使用 `ssh.github.com:443`。正式切换 Gerrit 时只需替换源站段、CSV、
 工作目录和工具路径，台账字段及后续命令不变。`*.local.toml` 已被 Git 忽略。

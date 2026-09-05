@@ -73,16 +73,15 @@ def _localize_template(text: str, *, profile: str) -> str:
     replacements = {
         "../../test/github_skill_summary.csv": str(REPOSITORY_ROOT / "test" / "github_skill_summary.csv"),
         "../../test/skill_summary.csv": str(REPOSITORY_ROOT / "test" / "skill_summary.csv"),
-        "../../.claude/skills/skill-security-review/references/review-result.schema.json": str(
-            REPOSITORY_ROOT
-            / ".claude"
+        "../skills/skill-security-review/references/review-result.schema.json": str(
+            BATCH_REVIEW_DIR
             / "skills"
             / "skill-security-review"
             / "references"
             / "review-result.schema.json"
         ),
-        "../../.claude/skills/skill-security-review": str(
-            REPOSITORY_ROOT / ".claude" / "skills" / "skill-security-review"
+        "../skills/skill-security-review": str(
+            BATCH_REVIEW_DIR / "skills" / "skill-security-review"
         ),
         "../.batch-review/github-validation/work": str(base / "work"),
         "../.batch-review/github-validation/restricted-evidence": str(base / "restricted-evidence"),
@@ -191,8 +190,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("填写 Gerrit 只读地址/账号、CSV 路径和仓库白名单。")
         else:
             print("检查 GitHub SSH 私钥路径；其余验证参数已经按本机目录生成。")
-    print("完成配置后，只需双击 batch-review/review.cmd；Linux/CentOS 执行 batch-review/review.sh。")
-    print("在 Claude Code 中输入 /ask-cc，可随时查看当前状态和唯一下一步。")
+    print("完成配置后，可双击 batch-review/review.cmd；Linux/CentOS 执行 batch-review/review.sh。")
+    print("也可直接启动 AI 自动入口：Codex CLI 输入 $auto-skill-review；Claude Code 输入 /auto-skill-review。")
+    print("只查看状态：Codex CLI 输入 $ask-cc；Claude Code 输入 /ask-cc。")
     return 0
 
 

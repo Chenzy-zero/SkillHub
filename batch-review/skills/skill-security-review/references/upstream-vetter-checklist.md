@@ -1,6 +1,6 @@
 # Upstream-inspired review checklist
 
-This reference records the limited upstream inspiration used by the project-level
+This reference records the limited upstream inspiration used by the canonical
 `skill-security-review` entry point. It is not a copy of an upstream Skill and is
 not an independent approval policy.
 
@@ -10,7 +10,7 @@ Use this checklist only to make the provenance of review dimensions explicit or
 to verify that the local review still covers the intended security and quality
 questions. The governing instructions are always:
 
-1. `.claude/skills/skill-security-review/SKILL.md`;
+1. `batch-review/skills/skill-security-review/SKILL.md`;
 2. `references/security-review.md`;
 3. `references/quality-review.md`; and
 4. `references/review-result.schema.json`.

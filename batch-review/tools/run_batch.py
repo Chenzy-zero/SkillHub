@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Operator launcher for the repository-at-a-time review workflow.
 
-The launcher advances only one operator-visible boundary at a time.  It never
-invokes Claude Code, never fabricates an AI result, and never cleans a
+The launcher advances only one operator-visible boundary at a time. It never
+invokes an AI client, never fabricates an AI result, and never cleans a
 repository workspace without ``--confirm-cleanup``.
 """
 
@@ -202,6 +202,10 @@ def _write_ai_queue(
                 "repository": repository,
                 "handoff": task["handoff_path"],
                 "skill_trigger": "/skill-security-review",
+                "skill_triggers": {
+                    "claude_code": "/skill-security-review",
+                    "codex_cli": "$skill-security-review",
+                },
                 "expected_result": str(ai_results_dir / f"{task_id}.json"),
             }
         )
@@ -222,10 +226,11 @@ def _write_ai_queue(
         f"- 仓库：`{repository}`",
         f"- AI 结果目录：`{ai_results_dir}`",
         "",
-        "在本项目根目录启动公司批准的 Claude Code，然后对每一项调用：",
+        "在本项目根目录启动公司批准的 Codex CLI 或 Claude Code，然后对每一项调用：",
         "",
         "```text",
-        "/skill-security-review",
+        "Codex CLI: $skill-security-review",
+        "Claude Code: /skill-security-review",
         "```",
         "",
         "把对应 handoff JSON 路径作为任务输入，并将返回的纯 JSON 保存到 expected_result。",
@@ -321,7 +326,7 @@ def _finish_current(
         print("当前仓库仍缺少 AI 结果：")
         for path in missing:
             print(f"- {path}")
-        print("触发指令：/skill-security-review")
+        print("触发指令：Claude Code /skill-security-review；Codex CLI $skill-security-review")
         return False
     index_path = Path(str(entry["repository_index"])).resolve()
     finalize_repository(

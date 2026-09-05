@@ -5,7 +5,7 @@ The orchestration deliberately has two operator-visible phases:
 ``prepare_repository``
     synchronizes one Gerrit mirror, freezes sources, exports immutable Skill
     snapshots, runs both approved static scanners against each selected
-    snapshot, and writes a read-only Claude Code handoff.  It never invokes a
+    snapshot, and writes a read-only AI-review handoff. It never invokes a
     model and never exports a candidate.
 
 ``finalize_repository``

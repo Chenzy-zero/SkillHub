@@ -149,6 +149,7 @@ class ProjectSetupTests(unittest.TestCase):
         state_dir.mkdir(parents=True)
         state = {
             "workflow_version": project_status.CURRENT_WORKFLOW_VERSION,
+            "ai_policy_version": project_status.load_config(config).ai.policy_version,
             "status": "WAITING_FOR_AI",
             "current_task_id": "task-1",
             "items": [
@@ -168,6 +169,7 @@ class ProjectSetupTests(unittest.TestCase):
         status = project_status.inspect_project(operator_state_path=self.operator)
         self.assertEqual(status.next_action, "AI_REVIEW")
         self.assertIn("/auto-skill-review", status.next_instruction)
+        self.assertIn("$auto-skill-review", status.next_instruction)
         self.assertEqual(status.ai_queue_path, str((state_dir / "ai-review-queue.json").resolve()))
 
     def test_started_legacy_batch_is_redirected_to_a_new_plan(self):
@@ -203,10 +205,33 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("name: auto-skill-review", content)
         self.assertIn("review.cmd --auto", content)
         self.assertIn("Do not use Git", content)
-        self.assertIn("fresh Agent", content)
+        self.assertIn("fresh project subagent", content)
+        self.assertIn("skill-security-reviewer", content)
         self.assertIn("ai-review-queue.json", content)
         self.assertIn("max_parallel", content)
         self.assertIn("Do not read `package-manifest.json`", content)
+
+        codex_skill = BATCH_REVIEW_DIR.parent / ".agents/skills/auto-skill-review/SKILL.md"
+        codex_content = codex_skill.read_text(encoding="utf-8")
+        self.assertIn("name: auto-skill-review", codex_content)
+        self.assertIn("$skill-security-review", codex_content)
+        self.assertIn("skill_security_reviewer", codex_content)
+        self.assertIn("cmd.exe /d /c", codex_content)
+
+        self.assertTrue(
+            (BATCH_REVIEW_DIR.parent / ".codex/agents/skill_security_reviewer.toml").is_file()
+        )
+        self.assertTrue(
+            (BATCH_REVIEW_DIR.parent / ".claude/agents/skill-security-reviewer.md").is_file()
+        )
+
+    def test_windows_launchers_force_utf8_for_cli_capture(self):
+        for name in ("init.cmd", "review.cmd", "run.cmd", "status.cmd"):
+            with self.subTest(name=name):
+                content = (BATCH_REVIEW_DIR / name).read_text(encoding="utf-8")
+                self.assertIn("chcp 65001", content)
+                self.assertIn('set "PYTHONUTF8=1"', content)
+                self.assertIn('set "PYTHONIOENCODING=utf-8"', content)
 
     def test_duplicate_skill_id_is_reported_before_plan(self):
         config, _ = self._ready_config()

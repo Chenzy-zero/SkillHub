@@ -1,5 +1,5 @@
 {
-  "purpose": "Record provenance for the upstream-inspired checklist used by the local project Skill.",
+  "purpose": "Record provenance for the upstream-inspired checklist used by the canonical batch-review Skill.",
   "local_skill": "skill-security-review",
   "status": "informed-by-not-copied",
   "sources": [

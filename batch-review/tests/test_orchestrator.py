@@ -24,7 +24,7 @@ from skill_batch_review.scanners import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCHEMA = REPO_ROOT / ".claude/skills/skill-security-review/references/review-result.schema.json"
+SCHEMA = REPO_ROOT / "batch-review/skills/skill-security-review/references/review-result.schema.json"
 
 
 class ScannerRunner:
@@ -140,7 +140,7 @@ inactive = "INACTIVE"
 [quality]
 candidate_threshold = 70
 [ai]
-skill_path = "{REPO_ROOT / '.claude/skills/skill-security-review'}"
+skill_path = "{REPO_ROOT / 'batch-review/skills/skill-security-review'}"
 result_schema_path = "{SCHEMA}"
 policy_version = "policy-1"
 reviewer_model = "intranet-model"

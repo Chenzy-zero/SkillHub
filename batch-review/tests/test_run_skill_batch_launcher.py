@@ -101,6 +101,7 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         )
         self.assertEqual(state["status"], "READY")
         self.assertEqual(state["workflow_version"], "repository_archive_v1")
+        self.assertEqual(state["ai_policy_version"], "policy-1")
         self.assertEqual(state["items"][0]["skill_id"], "id-one")
         self.assertEqual(state["items"][0]["status"], "PENDING")
 
@@ -143,6 +144,15 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
 
         with self.assertRaisesRegex(launcher_module.LauncherError, "CSV 内容发生变化"):
             launcher_module._load_state(config, "inventory-changed")
+
+    def test_ai_policy_change_blocks_existing_batch(self):
+        config = load_config(self.config)
+        state = launcher_module._new_state(config, "policy-changed")
+        state["ai_policy_version"] = "different-policy"
+        launcher_module._save(config, state)
+
+        with self.assertRaisesRegex(launcher_module.LauncherError, "AI 审查策略发生变化"):
+            launcher_module._load_state(config, "policy-changed")
 
     def test_start_requires_explicit_execution(self):
         result = self.run_launcher("start", "--config", str(self.config), "--batch-id", "skills-2")
@@ -218,6 +228,17 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
                 )
             )
             self.assertEqual([item["skill_id"] for item in queue["items"]], ["id-one", "id-two"])
+            self.assertEqual(
+                queue["items"][0]["skill_triggers"],
+                {
+                    "claude_code": "/skill-security-review",
+                    "codex_cli": "$skill-security-review",
+                },
+            )
+            self.assertEqual(
+                queue["items"][0]["review_agents"]["codex_cli"],
+                "skill_security_reviewer",
+            )
             first = state["items"][0]
             first["status"] = "COMPLETE"
             second = state["items"][1]

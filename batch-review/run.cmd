@@ -1,7 +1,10 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
+chcp 65001 >nul
 
 set "SCRIPT_DIR=%~dp0"
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 if defined SKILL_REVIEW_PYTHON (
   "%SKILL_REVIEW_PYTHON%" "%SCRIPT_DIR%tools\run_skill_batch.py" %*
@@ -16,7 +19,7 @@ for %%V in (3.14 3.13 3.12 3.11) do (
 )
 
 if defined SKILL_REVIEW_PYTHON_VERSION (
-  py -%SKILL_REVIEW_PYTHON_VERSION% "%SCRIPT_DIR%tools\run_skill_batch.py" %*
+  py -!SKILL_REVIEW_PYTHON_VERSION! "%SCRIPT_DIR%tools\run_skill_batch.py" %*
   exit /b %ERRORLEVEL%
 )
 
