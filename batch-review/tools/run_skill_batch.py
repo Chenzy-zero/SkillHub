@@ -37,6 +37,7 @@ from skill_batch_review.per_skill import (  # noqa: E402
     finalize_skill,
     prepare_skill,
     skill_task_id,
+    write_skill_html_report,
     write_skill_result_tables,
 )
 from skill_batch_review.preflight import review_preflight  # noqa: E402
@@ -351,12 +352,17 @@ def _prepare_next_serial(config: ReviewConfig, state: dict[str, Any]) -> None:
             csv_path, json_path = write_skill_result_tables(
                 config, document, batch_id=str(state["batch_id"])
             )
+            html_path = write_skill_html_report(
+                config, document, batch_id=str(state["batch_id"])
+            )
             state["status"] = "COMPLETE"
             state["current_task_id"] = None
             state["result_csv"] = str(csv_path)
             state["result_json"] = str(json_path)
+            state["result_html"] = str(html_path)
             _save(config, state)
             print(f"批次已完成: {state['batch_id']}")
+            print(f"HTML 报告: {html_path}")
             return
 
         active = state.get("active_repository")
@@ -675,12 +681,17 @@ def _prepare_next_batch(config: ReviewConfig, state: dict[str, Any]) -> None:
             csv_path, json_path = write_skill_result_tables(
                 config, document, batch_id=str(state["batch_id"])
             )
+            html_path = write_skill_html_report(
+                config, document, batch_id=str(state["batch_id"])
+            )
             state["status"] = "COMPLETE"
             state["current_task_id"] = None
             state["result_csv"] = str(csv_path)
             state["result_json"] = str(json_path)
+            state["result_html"] = str(html_path)
             _save(config, state)
             print(f"批次已完成: {state['batch_id']}")
+            print(f"HTML 报告: {html_path}")
             return
 
         repository = str(next_item["repo_name"])
@@ -877,6 +888,30 @@ def _cmd_advance(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_report(args: argparse.Namespace) -> int:
+    """Regenerate deterministic result tables and HTML for a completed batch."""
+
+    config = load_config(args.config)
+    state = _load_state(config, _batch_id(args.batch_id))
+    if state.get("status") != "COMPLETE":
+        raise LauncherError("只能为已经完成的批次生成最终报告")
+    document = _inventory(config)
+    csv_path, json_path = write_skill_result_tables(
+        config, document, batch_id=str(state["batch_id"])
+    )
+    html_path = write_skill_html_report(
+        config, document, batch_id=str(state["batch_id"])
+    )
+    state["result_csv"] = str(csv_path)
+    state["result_json"] = str(json_path)
+    state["result_html"] = str(html_path)
+    _save(config, state)
+    print(f"结果 CSV: {csv_path}")
+    print(f"结果 JSON: {json_path}")
+    print(f"HTML 报告: {html_path}")
+    return 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     state = _load_state(config, _batch_id(args.batch_id))
@@ -898,6 +933,11 @@ def _cmd_status(args: argparse.Namespace) -> int:
             else None
         ),
         "skill_status_counts": counts,
+        "result_paths": {
+            "csv": state.get("result_csv"),
+            "json": state.get("result_json"),
+            "html": state.get("result_html"),
+        },
     }, ensure_ascii=False, indent=2))
     return 0
 
@@ -905,10 +945,10 @@ def _cmd_status(args: argparse.Namespace) -> int:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="逐 Skill 下载、归档和安全审查。")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("plan", "start", "advance", "status"):
+    for name in ("plan", "start", "advance", "report", "status"):
         item = commands.add_parser(name)
         item.add_argument("--config", required=True, type=Path)
-        item.add_argument("--batch-id", required=name in {"advance", "status"})
+        item.add_argument("--batch-id", required=name in {"advance", "report", "status"})
         if name in {"start", "advance"}:
             item.add_argument("--execute", action="store_true")
         if name == "advance":
@@ -916,6 +956,7 @@ def _parser() -> argparse.ArgumentParser:
     commands.choices["plan"].set_defaults(handler=_cmd_plan)
     commands.choices["start"].set_defaults(handler=_cmd_start)
     commands.choices["advance"].set_defaults(handler=_cmd_advance)
+    commands.choices["report"].set_defaults(handler=_cmd_report)
     commands.choices["status"].set_defaults(handler=_cmd_status)
     return parser
 

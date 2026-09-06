@@ -239,9 +239,18 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
             issues=inventory_issues,
         )
 
+    batch_id = str(operator.get("batch_id") or "").strip() or None
+    completed_batch_hint = False
+    if batch_id:
+        hinted_state = config.workspace.manifest_root / batch_id / LAUNCHER_STATE_NAME
+        try:
+            completed_batch_hint = _read_json(hinted_state).get("status") == "COMPLETE"
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+
     missing_scanners = tuple(issue for issue in issues if issue.code == "SCANNER_NOT_FOUND")
     health_issues = () if missing_scanners else _managed_scanner_health_issues(config)
-    if missing_scanners or health_issues:
+    if not completed_batch_hint and (missing_scanners or health_issues):
         return ProjectStatus(
             state="SCANNERS_REQUIRED",
             summary="基础配置已就绪，但静态扫描器尚未安装或未通过离线健康检查。",
@@ -252,7 +261,6 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
             issues=tuple(issue.to_dict() for issue in (*missing_scanners, *health_issues)),
         )
 
-    batch_id = str(operator.get("batch_id") or "").strip() or None
     if not batch_id:
         return ProjectStatus(
             state="READY_TO_PLAN",
@@ -366,14 +374,33 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
         ),
     }
     if batch_status == "COMPLETE":
+        result_html = str(batch_state.get("result_html") or "")
+        if not result_html or not Path(result_html).is_file():
+            return ProjectStatus(
+                state="REPORT_REQUIRED",
+                summary="当前批次审查已经完成，但单文件 HTML 报告尚未生成。",
+                next_action="REPORT",
+                next_instruction="再次运行 review.cmd；脚本会从已落盘结果生成 HTML，不会重新下载或扫描。",
+                result_paths={
+                    "csv": str(batch_state.get("result_csv") or ""),
+                    "json": str(batch_state.get("result_json") or ""),
+                    "html": str(
+                        config.workspace.results_root
+                        / batch_id
+                        / "skill-security-review-report.html"
+                    ),
+                },
+                **common,
+            )
         return ProjectStatus(
             state="COMPLETE",
-            summary="当前批次已完成，结果表已经生成。",
+            summary="当前批次已完成，结果表和 HTML 报告已经生成。",
             next_action="VIEW_RESULTS",
-            next_instruction="查看批次 CSV/JSON；需要新一轮审查时重新运行 init.cmd 选择新配置或创建新批次。",
+            next_instruction="优先打开 HTML 报告查看、筛选和导出；CSV/JSON 用于后续自动汇总。",
             result_paths={
                 "csv": str(batch_state.get("result_csv") or ""),
                 "json": str(batch_state.get("result_json") or ""),
+                "html": str(batch_state.get("result_html") or ""),
             },
             **common,
         )

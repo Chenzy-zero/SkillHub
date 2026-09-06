@@ -61,11 +61,13 @@ read-only `status` wrappers described below.
 
 4. After all expected results for the current queue are present, call the
    automatic wrapper once more. It validates and imports every ready result in
-   the current repository, writes the per-Skill and batch results, cleans the
+   the current repository, writes the per-Skill, batch and single-file HTML results, cleans the
    temporary repository area only after the cleanup gate passes, and prepares
    the next repository. Check status again and repeat from step 2 or 3.
 
-5. For `VIEW_RESULTS` or `COMPLETE`, report only the batch ID, result CSV/JSON
+5. If status requests `REPORT`, call the same automatic wrapper once; it regenerates
+   CSV/JSON/HTML from durable results without downloading or scanning again. For
+   `VIEW_RESULTS` or `COMPLETE`, report only the batch ID, result CSV/JSON/HTML
    paths, completed count, and non-passing or incomplete count. Do not open
    reports in the parent context.
 

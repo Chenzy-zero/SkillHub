@@ -172,6 +172,38 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("$auto-skill-review", status.next_instruction)
         self.assertEqual(status.ai_queue_path, str((state_dir / "ai-review-queue.json").resolve()))
 
+    def test_completed_batch_requests_report_then_returns_html_path(self):
+        config, manifests = self._ready_config()
+        loaded = project_status.load_config(config)
+        batch_id = "test-complete"
+        state_dir = manifests / batch_id
+        state_dir.mkdir(parents=True)
+        state = {
+            "workflow_version": project_status.CURRENT_WORKFLOW_VERSION,
+            "ai_policy_version": loaded.ai.policy_version,
+            "status": "COMPLETE",
+            "current_task_id": None,
+            "items": [],
+            "result_csv": str(self.root / "results.csv"),
+            "result_json": str(self.root / "results.json"),
+        }
+        state_path = state_dir / "per-skill-launcher-state.json"
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        self._write_operator(config, batch_id)
+
+        pending = project_status.inspect_project(operator_state_path=self.operator)
+        self.assertEqual(pending.next_action, "REPORT")
+        self.assertEqual(pending.state, "REPORT_REQUIRED")
+
+        html = loaded.workspace.results_root / batch_id / "skill-security-review-report.html"
+        html.parent.mkdir(parents=True)
+        html.write_text("<!doctype html>", encoding="utf-8")
+        state["result_html"] = str(html)
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        complete = project_status.inspect_project(operator_state_path=self.operator)
+        self.assertEqual(complete.next_action, "VIEW_RESULTS")
+        self.assertEqual(complete.result_paths["html"], str(html))
+
     def test_started_legacy_batch_is_redirected_to_a_new_plan(self):
         config, manifests = self._ready_config()
         batch_id = "legacy-started"

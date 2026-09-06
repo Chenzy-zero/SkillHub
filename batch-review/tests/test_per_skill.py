@@ -21,6 +21,7 @@ from skill_batch_review.per_skill import (
     finalize_skill,
     partial_fetch_skill_repository,
     prepare_skill,
+    write_skill_html_report,
     write_skill_result_tables,
 )
 from skill_batch_review.scanners import (
@@ -188,6 +189,11 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
         aggregate = json.loads(json_path.read_text(encoding="utf-8"))
         self.assertEqual(aggregate["result_count"], 2)
         self.assertEqual({item["content_id"] for item in aggregate["skills"]}, {first_result["content_id"]})
+        html_path = write_skill_html_report(config, inventory, batch_id="batch-1")
+        page = html_path.read_text(encoding="utf-8")
+        self.assertIn("Skill 安全审查报告", page)
+        self.assertIn("product-a", page)
+        self.assertIn("alice@example.com", page)
 
     def test_partial_fetch_refuses_server_that_ignores_blob_filter(self):
         class UnsupportedRunner:

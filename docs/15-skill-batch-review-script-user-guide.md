@@ -1019,7 +1019,14 @@ Git 远端内容
 
 ### 步骤 11：生成批次报告
 
-全部仓库完成后执行：
+逐 Skill 默认入口在全部仓库完成后自动生成报告，不需要额外命令。`status.cmd --json` 或
+`status.sh --json` 的 `result_paths.html` 会返回报告路径：
+
+```text
+<results_root>/<batch_id>/skill-security-review-report.html
+```
+
+以下命令只用于原仓库级兼容入口或需要从既有 `*.results.json` 重新生成报告的场景：
 
 ```bash
 skill-batch-review report-batch \
@@ -1045,13 +1052,19 @@ candidates.json
 skill-security-review-report.html
 ```
 
-`skill-security-review-report.html` 是可离线打开的管理报告，包含 Skill 清单、两套静态
-检查与 AI 审查状态、安全结论、质量得分、风险分布、结果复用数量和脱敏问题明细。
-被复用的 Skill 会显示 `RESULT_REUSED`、复用原因、原批次、原任务、内容比较方式和
-“忽略时间戳”说明。原始报告和完整证据
-不会嵌入 HTML，仍保留在受限证据区。
+`skill-security-review-report.html` 是面向 1920×1080 的单文件离线审查工作台，包含总览、
+单 Skill、问题清单、仓库和提交人五个层级。仓库、产品线、`user_name + user_email`、安全
+结论、问题等级和全文关键词使用同一筛选范围；当前视图可以导出 CSV，完整筛选结果可以
+导出 JSON。问题详情可追溯到仓库、分支、Skill 路径、问题文件和行号、Revision、内容
+SHA-256、扫描来源与规则。被复用的 Skill 会显示 `RESULT_REUSED`、复用原因、来源记录、
+内容比较方式和“忽略时间戳”说明。
 
-报告是脱敏汇总，不替代受限证据。
+报告只嵌入清洗、归一化并脱敏后的数据。原始扫描器输出、AI 原始结果和包清单不会嵌入
+HTML，仍保留在受限证据区；界面通过相对路径、文件类型、大小和 SHA-256 提供完整性索引。
+因此报告可以单独分发查看，但需要核验原始证据时仍应在受限环境中按索引定位。
+
+浏览器端导出的 CSV 使用 UTF-8 BOM，并对以 `= + - @` 开头的字段做公式注入保护。导出
+只生成浏览器下载文件，不修改源 CSV、批次 JSON 或证据。
 
 ## 9. 输出目录详解
 

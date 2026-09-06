@@ -26,6 +26,7 @@ CSV 台账
   → 在 skill_id 目录写入 review-result.json
   → 原子更新批次结果 CSV/JSON
   → 清理当前仓库临时目录并自动进入下一仓库
+  → 批次完成后自动生成单文件 HTML 审查报告
 ```
 
 程序不会执行被审查 Skill 的脚本、安装依赖或调用其中的工具；不会自动调用模型；不会 Commit、Push 或上架候选内容。原始扫描报告保存在受限证据区，不进入私密候选目录。
@@ -53,6 +54,7 @@ SHA 直接 fetch；也不接受 `git archive --remote` 的路径限定参数。�
 - 仓库级一次归档、全部台账 Skill 提取、逐项静态扫描、`skills/<skill_id>/<skill_name>` 归档和单项 JSON；
 - 当前仓库 AI 队列、受控并发和一次性结果导入；
 - 同名同内容的 `content_id` 关联、已通过结果复用和批次 CSV/JSON；
+- 1920 宽屏审查工作台，支持单 Skill、问题、仓库、提交人多层视图、联动筛选和筛选导出；
 - 本地集成测试覆盖完整的两阶段单仓库流程。
 
 ## 2. 安装
@@ -274,7 +276,7 @@ workspace.candidate_root/       仅安全与质量均符合要求的本地私密
 workspace.manifest_root/        仓库计划、仓库索引和结果索引
 workspace.git_download_root/    当前仓库的无历史 tar 与白名单 Skill 临时目录
 workspace.skills_root/          skills/<skill_id>/<skill_name> 与单项 JSON
-workspace.results_root/         每个批次的结果 CSV 和 JSON
+workspace.results_root/         每个批次的结果 CSV、JSON 和单文件 HTML
 ```
 
 逐 Skill 默认入口固定产生：
@@ -285,10 +287,15 @@ skills/<skill_id>/source-metadata.json
 skills/<skill_id>/review-result.json
 results/<batch_id>/skill-review-results.csv
 results/<batch_id>/skill-review-results.json
+results/<batch_id>/skill-security-review-report.html
 ```
 
-全局 HTML 的数据基础已经由 JSON 提供，视觉和筛选导出界面后续单独调整；原始证据仍只
-保存在 `workspace.evidence_root`。仓库级兼容入口继续产生原来的五类报告。
+HTML 可离线打开，提供总览、单 Skill、问题、仓库和提交人视图；仓库、产品线、提交人、
+安全结论、问题等级和全文关键词使用同一筛选范围。当前视图可以导出 CSV，筛选范围可以
+导出结构化 JSON。报告只内嵌脱敏派生数据以及原始证据的相对路径、大小和 SHA-256 索引；
+原始证据仍只保存在 `workspace.evidence_root`。仓库级兼容入口继续产生原来的五类报告。
+如果批次在升级前已经完成但状态中没有 `result_html`，再次运行 `review.cmd` 或
+`review.sh` 会从现有持久化结果补生成报告，不重新连接 Gerrit，也不重新执行扫描。
 
 ## 7. 当前真实运行前置
 

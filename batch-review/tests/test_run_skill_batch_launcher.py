@@ -105,6 +105,31 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         self.assertEqual(state["items"][0]["skill_id"], "id-one")
         self.assertEqual(state["items"][0]["status"], "PENDING")
 
+    def test_report_command_backfills_html_for_completed_batch(self):
+        config = load_config(self.config)
+        state = launcher_module._new_state(config, "completed-without-report")
+        state["status"] = "COMPLETE"
+        state["items"][0]["status"] = "COMPLETE"
+        launcher_module._save(config, state)
+        table_paths = (self.root / "result.csv", self.root / "result.json")
+        html_path = self.root / "report.html"
+        with (
+            mock.patch.object(
+                launcher_module, "write_skill_result_tables", return_value=table_paths
+            ),
+            mock.patch.object(
+                launcher_module, "write_skill_html_report", return_value=html_path
+            ),
+        ):
+            code = launcher_module._cmd_report(
+                SimpleNamespace(config=self.config, batch_id="completed-without-report")
+            )
+        self.assertEqual(code, 0)
+        stored = launcher_module._load_state(config, "completed-without-report")
+        self.assertEqual(stored["result_html"], str(html_path))
+        self.assertEqual(stored["result_csv"], str(table_paths[0]))
+        self.assertEqual(stored["result_json"], str(table_paths[1]))
+
     def test_started_legacy_batch_cannot_resume_under_repository_workflow(self):
         config = load_config(self.config)
         state = launcher_module._new_state(config, "legacy-started")

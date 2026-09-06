@@ -17,6 +17,7 @@ _EXECUTION_FIELDS = (
     "ai_result_path",
     "result_csv",
     "result_json",
+    "result_html",
 )
 
 
@@ -30,6 +31,7 @@ def legacy_state_is_pristine(state: Mapping[str, Any]) -> bool:
         "completed_repositories",
         "result_csv",
         "result_json",
+        "result_html",
     ):
         if state.get(field):
             return False

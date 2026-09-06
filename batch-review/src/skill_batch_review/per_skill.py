@@ -39,6 +39,7 @@ from .result_reuse import (
     skill_root_name,
 )
 from .review_policy import evaluate_policy
+from .reporting import write_batch_reports
 from .scanners import ScannerAdapter
 from .snapshot import SnapshotResult, export_skill_archive_snapshot, export_skill_snapshot
 
@@ -985,6 +986,58 @@ def write_skill_result_tables(
     return csv_path, json_path
 
 
+def write_skill_html_report(
+    config: ReviewConfig,
+    inventory: InventoryDocument,
+    *,
+    batch_id: str,
+) -> Path:
+    """Build the self-contained HTML report from durable per-Skill results.
+
+    The report is generated at batch completion instead of after every Skill,
+    avoiding repeated hashing of all prior evidence for large inventories.
+    Rows without a durable result are retained so the report never presents a
+    partial run as a complete inventory.
+    """
+
+    records: list[dict[str, Any]] = []
+    for row in inventory.rows:
+        identifier = row.trace_values.get("skill_id", "")
+        result_path = config.workspace.skills_root / identifier / "review-result.json"
+        result: Mapping[str, Any] = {}
+        if identifier and result_path.is_file():
+            value = json.loads(result_path.read_text(encoding="utf-8"))
+            if isinstance(value, Mapping) and value.get("source_row_id") == row.source_row_id:
+                result = value
+        record = {
+            **dict(row.raw),
+            "source_row_id": row.source_row_id,
+            "skill_id": identifier,
+            "skill_name": row.skill_name,
+            "repo_name": row.repo_name,
+            "branch": row.branch,
+            "skill_path": row.skill_path,
+            "inventory_revision": row.inventory_revision,
+            "source_selection_status": (
+                "SELECTED"
+                if row.status in config.batch.included_statuses
+                else "SKIPPED_STATUS"
+            ),
+            **dict(result),
+        }
+        records.append(record)
+    paths = write_batch_reports(
+        records,
+        config.workspace.results_root / batch_id,
+        batch_id=batch_id,
+        input_csv_sha256=inventory.raw_csv_sha256,
+        policy_version=config.ai.policy_version,
+        candidate_threshold=config.quality.candidate_threshold,
+        evidence_root=config.workspace.evidence_root,
+    )
+    return paths.html
+
+
 def cleanup_skill_download(config: ReviewConfig, *, batch_id: str, task_id: str) -> bool:
     target = (config.workspace.git_download_root / batch_id / task_id).resolve()
     root = config.workspace.git_download_root.resolve()
@@ -1011,4 +1064,5 @@ __all__ = [
     "prepare_skill",
     "skill_task_id",
     "write_skill_result_tables",
+    "write_skill_html_report",
 ]

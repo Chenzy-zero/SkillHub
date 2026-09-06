@@ -52,10 +52,12 @@ this workflow. Do not execute reviewed content. The operator does not need to ru
    or substitute a generic subagent that has not loaded the canonical review Skill.
 
 4. When the queue's expected result files exist, run the automatic launcher again.
-   It validates and imports results, creates reports, applies the cleanup gate, and
+   It validates and imports results, creates the final single-file HTML report, applies the cleanup gate, and
    prepares the next repository. Repeat until status is `COMPLETE`.
 
-5. For `VIEW_RESULTS` or `COMPLETE`, report only the batch ID, result CSV/JSON
+5. If status requests `REPORT`, run the same automatic launcher once; it regenerates
+   CSV/JSON/HTML from durable results without downloading or scanning again. For
+   `VIEW_RESULTS` or `COMPLETE`, report only the batch ID, result CSV/JSON/HTML
    paths, completed count, and non-passing or incomplete count. Do not open report
    contents in the coordinator context.
 

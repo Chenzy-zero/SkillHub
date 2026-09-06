@@ -208,6 +208,22 @@ def _skill_name(record: Mapping[str, Any]) -> str:
     return _text(_first(record, ("skill_name",), ("subject", "skill_name")))
 
 
+def _business_field(record: Mapping[str, Any], name: str, *aliases: str) -> str:
+    """Read a normalized inventory/business field without trusting its spelling.
+
+    The per-Skill workflow writes these fields at the result root.  Older
+    result producers may nest them under ``source`` or ``subject``; accepting
+    those shapes keeps report generation useful without changing the security
+    identity of a Skill.
+    """
+
+    names = (name, *aliases)
+    paths: list[tuple[str, ...]] = []
+    for item in names:
+        paths.extend(((item,), ("source", item), ("subject", item)))
+    return _text(_first(record, *paths, default=""))
+
+
 def _branch(record: Mapping[str, Any]) -> str:
     return _text(_first(record, ("source_branch",), ("branch",), ("subject", "branch")))
 
@@ -534,8 +550,24 @@ def _normalized_record(record: Mapping[str, Any], *, batch_id: str) -> dict[str,
     return dict(redact({
         "source_row_id": _record_id(record),
         "source_row_count": _source_row_count(record),
+        "skill_id": _business_field(record, "skill_id"),
         "skill_name": _skill_name(record),
         "repo_name": _repo(record),
+        "product_line": _business_field(record, "product_line", "product"),
+        "user_name": _business_field(
+            record,
+            "user_name",
+            "submitter_name",
+            "committer_name",
+            "owner_name",
+        ),
+        "user_email": _business_field(
+            record,
+            "user_email",
+            "submitter_email",
+            "committer_email",
+            "owner_email",
+        ),
         "source_branch": _branch(record),
         "normalized_skill_path": _skill_path(record),
         "inventory_revision": _inventory_revision(record),
@@ -576,8 +608,12 @@ DETAIL_FIELDS = (
     "batch_id",
     "source_row_id",
     "source_row_count",
+    "skill_id",
     "skill_name",
     "repo_name",
+    "product_line",
+    "user_name",
+    "user_email",
     "source_branch",
     "normalized_skill_path",
     "inventory_revision",
@@ -650,6 +686,12 @@ def build_batch_summary(
     source_records = list(records)
     rows = _materialize(source_records, batch_id=batch_id)
     repositories = {row["repo_name"] for row in rows if row["repo_name"]}
+    product_lines = {row["product_line"] for row in rows if row["product_line"]}
+    submitters = {
+        (row["user_name"], row["user_email"])
+        for row in rows
+        if row["user_name"] or row["user_email"]
+    }
     digests = {row["skill_digest"] for row in rows if row["skill_digest"] and row["source_selection_status"] in {"", "SELECTED", "RECEIVED", "VALIDATING"}}
     security_counts = {status: 0 for status in SECURITY_DECISIONS}
     quality_counts = {level: 0 for level in QUALITY_LEVELS}
@@ -673,6 +715,8 @@ def build_batch_summary(
         "review_policy_version": policy_version or "",
         "candidate_threshold": candidate_threshold,
         "repository_count": len(repositories),
+        "product_line_count": len(product_lines),
+        "submitter_count": len(submitters),
         "source_row_count": sum(row["source_row_count"] for row in rows),
         "result_record_count": len(rows),
         "selected_content_version_count": len(digests),
@@ -735,8 +779,12 @@ def _independent_result(row: Mapping[str, Any]) -> dict[str, Any]:
     return dict(redact({
         "review_batch_id": row["batch_id"],
         "source_row_id": row["source_row_id"],
+        "skill_id": row["skill_id"],
         "skill_name": row["skill_name"],
         "repo_name": row["repo_name"],
+        "product_line": row["product_line"],
+        "user_name": row["user_name"],
+        "user_email": row["user_email"],
         "source_branch": row["source_branch"],
         "normalized_skill_path": row["normalized_skill_path"],
         "reviewed_source_revision": row["source_revision"],

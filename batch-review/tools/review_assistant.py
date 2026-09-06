@@ -205,10 +205,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if code != 0:
                     return code
                 continue
+            if action == "REPORT":
+                operator = _operator()
+                code = _run(
+                    (
+                        sys.executable,
+                        str(LAUNCHER),
+                        "report",
+                        "--config",
+                        str(operator["config_path"]),
+                        "--batch-id",
+                        str(operator["batch_id"]),
+                    )
+                )
+                if code != 0:
+                    return code
+                continue
             if action == "VIEW_RESULTS":
                 results = status.get("result_paths") or {}
                 print(f"结果 CSV：{results.get('csv', '')}")
                 print(f"结果 JSON：{results.get('json', '')}")
+                print(f"HTML 报告：{results.get('html', '')}")
                 return 0
             print("当前状态需要人工检查，程序没有执行修改操作。")
             return 2

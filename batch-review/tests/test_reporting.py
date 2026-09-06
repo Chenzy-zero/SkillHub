@@ -11,6 +11,7 @@ from skill_batch_review.reporting import (
     redact,
     write_batch_reports,
 )
+from skill_batch_review.html_reporting import build_html_report_payload
 
 
 DIGEST = "a" * 64
@@ -21,8 +22,12 @@ def complete_record(source_row_id: str = "row-1") -> dict:
     return {
         "source_row_id": source_row_id,
         "source_row_numbers": [2],
+        "skill_id": f"skill-{source_row_id}",
         "skill_name": "sample",
         "repo_name": "team/repo",
+        "product_line": "product-a",
+        "user_name": "Alice",
+        "user_email": "alice@example.com",
         "branch": "main",
         "skill_path": "skills/sample",
         "inventory_revision": REVISION,
@@ -81,6 +86,8 @@ class ReportingTests(unittest.TestCase):
             policy_version="policy-1",
         )
         self.assertEqual(summary["repository_count"], 1)
+        self.assertEqual(summary["product_line_count"], 1)
+        self.assertEqual(summary["submitter_count"], 1)
         self.assertEqual(summary["source_row_count"], 2)
         self.assertEqual(summary["result_record_count"], 2)
         self.assertEqual(summary["selected_content_version_count"], 1)
@@ -104,6 +111,13 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(first.candidates.read_bytes(), second.candidates.read_bytes())
             self.assertEqual(first.html.read_bytes(), second.html.read_bytes())
             self.assertIn("Skill 安全审查报告", first.html.read_text(encoding="utf-8"))
+            page = first.html.read_text(encoding="utf-8")
+            self.assertIn('id="filter-repo"', page)
+            self.assertIn('id="filter-product"', page)
+            self.assertIn('id="filter-person"', page)
+            self.assertIn("导出当前视图 CSV", page)
+            self.assertIn("仓库视图", page)
+            self.assertIn("提交人视图", page)
 
             summary = json.loads(first.summary.read_text(encoding="utf-8"))
             self.assertEqual(summary["result_record_count"], 2)
@@ -111,6 +125,9 @@ class ReportingTests(unittest.TestCase):
                 details = list(csv.DictReader(handle))
             self.assertEqual([row["source_row_id"] for row in details], ["row-a", "row-b"])
             self.assertEqual(details[0]["skill_digest"], DIGEST)
+            self.assertEqual(details[0]["skill_id"], "skill-row-a")
+            self.assertEqual(details[0]["product_line"], "product-a")
+            self.assertEqual(details[0]["user_email"], "alice@example.com")
 
             candidates = json.loads(first.candidates.read_text(encoding="utf-8"))
             self.assertEqual(len(candidates["candidates"]), 2)
@@ -200,6 +217,90 @@ class ReportingTests(unittest.TestCase):
             self.assertIn("Credential pattern", page)
             self.assertIn("[REDACTED]", page)
             self.assertNotIn("do-not-render", page)
+
+    def test_html_payload_preserves_traceable_finding_and_indexes_raw_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            evidence = root / "evidence" / "batch" / "task"
+            scanner = evidence / "scanners" / "cisco"
+            scanner.mkdir(parents=True)
+            final_result = {
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "source_scanner": "CISCO_AI_SKILL_SCANNER",
+                        "source_rule_id": "RULE-7",
+                        "severity": "HIGH",
+                        "domain": "SECURITY",
+                        "title": "Dynamic execution",
+                        "description": "Untrusted command may execute.",
+                        "evidence_summary": "scripts/run.py invokes a command.",
+                        "recommendation": "Remove dynamic execution.",
+                        "file_path": "scripts/run.py",
+                        "start_line": 7,
+                        "end_line": 9,
+                        "fingerprint": "f" * 64,
+                        "source_references": [
+                            {"scanner": "cisco", "rule_id": "RULE-7"}
+                        ],
+                    }
+                ]
+            }
+            (evidence / "final-result.json").write_text(
+                json.dumps(final_result), encoding="utf-8"
+            )
+            (scanner / "raw-report.json").write_text(
+                json.dumps({"raw": "scanner output"}), encoding="utf-8"
+            )
+            record = complete_record()
+            record["evidence_ref"] = str(evidence)
+            payload = build_html_report_payload(
+                [record], batch_id="batch-1", evidence_root=root / "evidence"
+            )
+            skill = payload["skills"][0]
+            finding = skill["findings"][0]
+            self.assertEqual(skill["evidence_ref"], "batch/task")
+            self.assertNotIn(str(root), json.dumps(payload, ensure_ascii=False))
+            self.assertEqual(finding["finding_id"], "finding-1")
+            self.assertEqual(finding["path"], "scripts/run.py")
+            self.assertEqual(finding["start_line"], "7")
+            self.assertEqual(finding["evidence_summary"], "scripts/run.py invokes a command.")
+            artifacts = {item["task_path"]: item for item in skill["evidence_artifacts"]}
+            self.assertIn("scanners/cisco/raw-report.json", artifacts)
+            self.assertEqual(artifacts["scanners/cisco/raw-report.json"]["type"], "RAW")
+            self.assertEqual(len(artifacts["scanners/cisco/raw-report.json"]["sha256"]), 64)
+
+    def test_untrusted_report_text_cannot_break_out_of_embedded_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            evidence = root / "evidence" / "batch" / "task"
+            evidence.mkdir(parents=True)
+            injection = "</script><script>alert('x')</script>"
+            (evidence / "final-result.json").write_text(
+                json.dumps(
+                    {
+                        "findings": [
+                            {
+                                "severity": "HIGH",
+                                "title": injection,
+                                "description": "safe evidence",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            record = complete_record()
+            record["evidence_ref"] = str(evidence)
+            paths = write_batch_reports(
+                [record],
+                root / "reports",
+                batch_id="batch-xss",
+                evidence_root=root / "evidence",
+            )
+            page = paths.html.read_text(encoding="utf-8")
+            self.assertNotIn(injection, page)
+            self.assertIn("\\u003c/script\\u003e", page)
 
 
 if __name__ == "__main__":
