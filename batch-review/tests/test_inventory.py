@@ -249,7 +249,7 @@ class InventoryParsingTests(unittest.TestCase):
             parse_inventory_csv(csv_text(values, header=header), status_mapping=STATUS_MAP)
 
     def test_release_inventory_csv_is_readable_without_network(self):
-        path = Path(__file__).resolve().parents[2] / "test" / "skill_summary.csv"
+        path = Path(__file__).resolve().parents[1] / "test" / "skill_summary.csv"
         document = load_inventory_csv(
             path,
             status_mapping={"新增": "ACTIVE", "修改": "ACTIVE", "删除": "DELETED"},

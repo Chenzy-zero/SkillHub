@@ -87,7 +87,7 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
     def run_launcher(self, *args):
         return subprocess.run(
             [sys.executable, str(LAUNCHER), *args],
-            cwd=BATCH_REVIEW_DIR.parent,
+            cwd=BATCH_REVIEW_DIR,
             text=True,
             capture_output=True,
             check=False,

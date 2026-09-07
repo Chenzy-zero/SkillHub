@@ -10,7 +10,7 @@ Use this checklist only to make the provenance of review dimensions explicit or
 to verify that the local review still covers the intended security and quality
 questions. The governing instructions are always:
 
-1. `batch-review/skills/skill-security-review/SKILL.md`;
+1. `skills/skill-security-review/SKILL.md`;
 2. `references/security-review.md`;
 3. `references/quality-review.md`; and
 4. `references/review-result.schema.json`.

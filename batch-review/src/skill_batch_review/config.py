@@ -82,6 +82,30 @@ def _path(value: Any, name: str, *, base_dir: Path, default: str) -> Path:
     return result.resolve()
 
 
+def _relocate_legacy_inventory_path(path: Path, *, base_dir: Path) -> Path:
+    """Keep pre-standalone local configs usable after the inventory move.
+
+    Older generated configs lived under ``batch-review/config`` but pointed to
+    the parent repository's ``test`` directory. Only redirect the two known
+    inventory filenames, only when that legacy path no longer exists, and only
+    when the replacement is present inside this project. Explicit custom
+    inventory locations remain untouched.
+    """
+
+    project_root = base_dir.resolve().parent
+    known_names = {"skill_summary.csv", "github_skill_summary.csv"}
+    legacy_test_root = (project_root.parent / "test").resolve()
+    local_candidate = (project_root / "test" / path.name).resolve()
+    if (
+        path.name in known_names
+        and not path.exists()
+        and path.parent == legacy_test_root
+        and local_candidate.is_file()
+    ):
+        return local_candidate
+    return path
+
+
 def _string_tuple(value: Any, name: str, *, allow_string: bool = False) -> tuple[str, ...]:
     if isinstance(value, str) and allow_string:
         try:
@@ -271,9 +295,13 @@ def _canonical_ai_resources(
     client_root = skill_path.parent.parent
     if client_root.name not in {".claude", ".agents"}:
         return skill_path, result_schema_path
-    repository_root = client_root.parent
-    canonical = repository_root / "batch-review" / "skills" / "skill-security-review"
-    if not canonical.is_dir():
+    project_root = client_root.parent
+    candidates = (
+        project_root / "skills" / "skill-security-review",
+        project_root / "batch-review" / "skills" / "skill-security-review",
+    )
+    canonical = next((path for path in candidates if path.is_dir()), None)
+    if canonical is None:
         return skill_path, result_schema_path
     legacy_schema = skill_path / "references" / "review-result.schema.json"
     if result_schema_path == legacy_schema:
@@ -505,13 +533,18 @@ def load_config(path: "str | Path") -> ReviewConfig:
         included_statuses_value, (str, bytes, bytearray)
     ):
         raise ConfigError("batch.included_statuses must be a non-empty string array")
+    inventory_csv = _path(
+        batch_data.get("inventory_csv"),
+        "batch.inventory_csv",
+        base_dir=base_dir,
+        default="inventory.csv",
+    )
+    inventory_csv = _relocate_legacy_inventory_path(
+        inventory_csv,
+        base_dir=base_dir,
+    )
     batch = BatchConfig(
-        inventory_csv=_path(
-            batch_data.get("inventory_csv"),
-            "batch.inventory_csv",
-            base_dir=base_dir,
-            default="inventory.csv",
-        ),
+        inventory_csv=inventory_csv,
         batch_id_prefix=_text(
             batch_data.get("batch_id_prefix"), "batch.batch_id_prefix", default="skill-review"
         ),

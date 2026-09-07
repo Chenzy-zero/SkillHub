@@ -92,7 +92,7 @@ class RunBatchLauncherTests(unittest.TestCase):
     def run_launcher(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(LAUNCHER), *arguments],
-            cwd=BATCH_REVIEW_DIR.parent,
+            cwd=BATCH_REVIEW_DIR,
             text=True,
             capture_output=True,
             check=False,

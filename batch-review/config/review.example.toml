@@ -2,7 +2,7 @@
 # scanner versions and model identifier before any execution command uses it.
 
 [batch]
-inventory_csv = "../../test/skill_summary.csv"
+inventory_csv = "../test/skill_summary.csv"
 batch_id_prefix = "skill-review"
 # Only these mapped lifecycle statuses enter the review queue. This list is
 # intentionally explicit because real status values must be confirmed first.

@@ -13,7 +13,6 @@ from typing import Any, Mapping, Sequence
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BATCH_REVIEW_DIR = SCRIPT_DIR.parent
-REPOSITORY_ROOT = BATCH_REVIEW_DIR.parent
 SRC_DIR = BATCH_REVIEW_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -189,7 +188,7 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
             state="NOT_INITIALIZED",
             summary="项目尚未执行首次初始化。",
             next_action="INITIALIZE",
-            next_instruction="双击 batch-review/init.cmd，Linux/CentOS 执行 batch-review/init.sh。",
+            next_instruction="双击 init.cmd，Linux/CentOS/macOS 执行 ./init.sh。",
         )
 
     raw_config = operator.get("config_path")

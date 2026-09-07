@@ -1,20 +1,20 @@
-# batch-review 安全审查工作区规范
+# Skill 批量安全审查项目规范
 
 ## 1. 适用范围
 
-本文件只约束 `batch-review/` 下的批量 Skill 安全审查工作。进入该目录执行任务时，
-本文件与仓库根目录的 `AGENTS.md` 一起生效；本文件对审查执行范围作更具体的限定。
+本目录是批量 Skill 安全审查的独立项目根目录。本文件包含完整执行约束；复制或单独打开
+本目录后，不依赖父目录的 `AGENTS.md` 或其他项目文件。
 
-后续安全审查的脚本、规则和执行入口都必须位于 `batch-review/` 目录树内；运行时临时区、
+后续安全审查的脚本、规则和执行入口都必须位于本目录树内；运行时临时区、
 下载区、Skill 副本、扫描证据、AI 结果、状态和批次报告默认也应放在这里。生产环境如果
 因权限或容量需要把 `[workspace]` 指向独立的受限挂载目录，必须在配置中明确指定，并且
-该目录只能服务本批次安全审查。仓库外层的 `docs/`、`poc/`、`release/`、`reports/` 等
-目录属于项目其他内容，不是安全扫描工作区，不应在审查过程中读取、写入或当作证据来源。
+该目录只能服务本批次安全审查。父目录及相邻项目不属于安全扫描工作区，不应在审查过程
+中读取、写入或当作证据来源。
 
-唯一例外是配置中明确指定的只读输入，例如根目录 `test/skill_summary.csv`。Codex CLI 的
-`.agents/skills/`、`.codex/agents/` 与 Claude Code 的 `.claude/skills/`、`.claude/agents/`
-仅作为客户端发现和隔离调度适配层；正式审查规则统一位于本目录 `skills/`。脚本可以读取
-这些输入，但不得改写、覆盖或把它们当成扫描输出。
+CSV 输入统一放在本项目 `test/` 或配置明确指定的受控路径。Codex CLI 的 `.agents/skills/`、
+`.codex/agents/` 与 Claude Code 的 `.claude/skills/`、`.claude/agents/` 仅作为客户端发现和
+隔离调度适配层；正式审查规则统一位于 `skills/`。脚本可以读取这些输入，但不得改写、
+覆盖或把它们当成扫描输出。
 需要改变输入时，应先生成新的批次输入并记录其 SHA-256，不得在原文件上就地修复。
 
 ## 2. 工作区边界
@@ -30,8 +30,8 @@
 | `.batch-review/` | 本机状态、清单、受限证据和批次工作文件 | 不提交 Git；清理必须由受信脚本执行 |
 | `tests/` | 本地测试 | 测试不得执行被审查 Skill |
 
-`test/`（仓库根目录）里的 CSV 是输入，不是 `batch-review/` 的生成目录。正式执行时，
-应通过 `batch-review/config/*.toml` 显式指定输入路径，并在批次状态中保存原文件哈希、
+`test/` 里的 CSV 是输入，不是生成目录。正式执行时，应通过 `config/*.toml` 显式指定输入
+路径，并在批次状态中保存原文件哈希、
 编码和行号。除配置中明确列出的 CSV 和规则 Skill 外，不要把外层目录内容带入审查。
 
 ## 3. 标准执行链
@@ -75,7 +75,7 @@ AI 不得代替上述脚本读取 Git、拼接命令、选择版本、运行扫�
 ### 4.2 AI 只做 Skill 内容审查
 
 AI 的唯一业务判断是阅读一个已经冻结的 Skill Package，按照
-`batch-review/skills/skill-security-review/` 的规则给出安全问题和质量评分。AI：
+`skills/skill-security-review/` 的规则给出安全问题和质量评分。AI：
 
 - 每个 Skill 使用一个独立上下文；不同 Skill 不共享对话、缓存或结论；
 - 只能读取 handoff 指定的最小元数据、结果 Schema 和当前 `skill_root` 内文件；
@@ -96,7 +96,7 @@ Codex CLI：$auto-skill-review
 Claude Code：/auto-skill-review
 ```
 
-不需要先手工运行 `review.cmd`。`auto-skill-review` 会调用 `batch-review` 的受信启动器
+不需要先手工运行 `review.cmd`。`auto-skill-review` 会调用本项目的受信启动器
 完成计划、仓库下载和静态扫描；到达 AI 阶段后自动创建独立 Agent，导入结果并继续下一
 Skill、下一仓库，直到批次完成或遇到真实阻塞。Windows 的 `review.cmd`、Linux/macOS
 的 `review.sh` 只是同一脚本入口的兼容包装，Skill 可以调用它们，但不要求操作人员在
@@ -105,7 +105,7 @@ Skill、下一仓库，直到批次完成或遇到真实阻塞。Windows 的 `re
 首次初始化和扫描器安装仍保留人工确认，因为它们会创建本机环境、连接网络或安装包：
 
 ```text
-首次：batch-review/init.cmd 或 batch-review/init.sh
+首次：init.cmd 或 ./init.sh
 确认配置和 scanner-health.json
 以后：Codex CLI 直接 $auto-skill-review；Claude Code 直接 /auto-skill-review
 ```
@@ -157,7 +157,7 @@ Skill 必须能落到 `PENDING`、`WAITING_FOR_AI`、`READY_TO_ADVANCE`、`COMPL
 
 ## 9. 开发和验证
 
-修改 `batch-review` 程序后，至少执行：
+修改本项目程序后，至少在本目录执行：
 
 ```bash
 PYTHONPATH=src python -m pytest tests -q
@@ -169,8 +169,8 @@ PYTHONPATH=src python -m pytest tests -q
 夹具。
 
 新增或修改安全审查规则时，应同步更新对应的项目级 Skill、Schema、测试和本文件；不要
-把一次性运行记录写入规则文件。完成验证后按仓库根目录约定提交并通过 SSH 推送，生成的
-本机配置、扫描器虚拟环境、下载区和证据区保持未跟踪状态。
+把一次性运行记录写入规则文件。如果本项目位于 Git 仓库中，完成验证后应按当前仓库约定
+提交并通过 SSH 推送；生成的本机配置、扫描器虚拟环境、下载区和证据区保持未跟踪状态。
 
 ## 10. 快速判断
 

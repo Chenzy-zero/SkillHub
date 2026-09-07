@@ -151,7 +151,7 @@ class ConfigTests(unittest.TestCase):
         base = Path(self.tempdir.name)
         legacy = base / ".claude/skills/skill-security-review"
         (legacy / "references").mkdir(parents=True)
-        canonical = base / "batch-review/skills/skill-security-review"
+        canonical = base / "skills/skill-security-review"
         (canonical / "references").mkdir(parents=True)
         (canonical / "SKILL.md").write_text("---\nname: skill-security-review\n---\n", encoding="utf-8")
         canonical_schema = canonical / "references/review-result.schema.json"
@@ -168,6 +168,51 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config.ai.skill_path, canonical.resolve())
         self.assertEqual(config.ai.result_schema_path, canonical_schema.resolve())
+
+    def test_legacy_parent_inventory_path_redirects_inside_standalone_project(self) -> None:
+        base = Path(self.tempdir.name)
+        project = base / "batch-review"
+        config_dir = project / "config"
+        config_dir.mkdir(parents=True)
+        inventory = project / "test/skill_summary.csv"
+        inventory.parent.mkdir(parents=True)
+        inventory.write_text("skill_name\nexample\n", encoding="utf-8")
+        config_path = config_dir / "review.local.toml"
+        config_path.write_text(
+            CONFIG.replace(
+                'inventory_csv = "input/skills.csv"',
+                'inventory_csv = "../../test/skill_summary.csv"',
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config(config_path)
+
+        self.assertEqual(config.batch.inventory_csv, inventory.resolve())
+
+    def test_existing_legacy_parent_inventory_path_is_not_redirected(self) -> None:
+        base = Path(self.tempdir.name)
+        project = base / "batch-review"
+        config_dir = project / "config"
+        config_dir.mkdir(parents=True)
+        legacy_inventory = base / "test/skill_summary.csv"
+        legacy_inventory.parent.mkdir(parents=True)
+        legacy_inventory.write_text("skill_name\nlegacy\n", encoding="utf-8")
+        local_inventory = project / "test/skill_summary.csv"
+        local_inventory.parent.mkdir(parents=True)
+        local_inventory.write_text("skill_name\nlocal\n", encoding="utf-8")
+        config_path = config_dir / "review.local.toml"
+        config_path.write_text(
+            CONFIG.replace(
+                'inventory_csv = "input/skills.csv"',
+                'inventory_csv = "../../test/skill_summary.csv"',
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config(config_path)
+
+        self.assertEqual(config.batch.inventory_csv, legacy_inventory.resolve())
 
     def test_evidence_and_candidates_cannot_be_cleaned_with_workspace(self) -> None:
         invalid = CONFIG.replace('evidence_root = "evidence"', 'evidence_root = "work/evidence"')

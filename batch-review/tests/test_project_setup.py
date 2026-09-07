@@ -117,7 +117,13 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertTrue(created)
         self.assertEqual(created_path, config.resolve())
         original = config.read_text(encoding="utf-8")
-        self.assertIn("github_skill_summary.csv", original)
+        inventory = (BATCH_REVIEW_DIR / "test" / "github_skill_summary.csv").resolve()
+        self.assertIn(inventory.as_posix(), original)
+        self.assertNotIn((BATCH_REVIEW_DIR.parent / "test").resolve().as_posix(), original)
+        self.assertIn(
+            (BATCH_REVIEW_DIR / "skills" / "skill-security-review").resolve().as_posix(),
+            original,
+        )
         config.write_text("user-owned\n", encoding="utf-8")
         _, created_again = init_project.initialize(
             profile="github", config_path=config, operator_state_path=self.operator
@@ -232,7 +238,7 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertEqual(status.next_action, "PLAN")
 
     def test_auto_review_skill_is_discoverable_and_bounded(self):
-        skill = BATCH_REVIEW_DIR.parent / ".claude" / "skills" / "auto-skill-review" / "SKILL.md"
+        skill = BATCH_REVIEW_DIR / ".claude" / "skills" / "auto-skill-review" / "SKILL.md"
         content = skill.read_text(encoding="utf-8")
         self.assertIn("name: auto-skill-review", content)
         self.assertIn("review.cmd --auto", content)
@@ -243,7 +249,7 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("max_parallel", content)
         self.assertIn("Do not read `package-manifest.json`", content)
 
-        codex_skill = BATCH_REVIEW_DIR.parent / ".agents/skills/auto-skill-review/SKILL.md"
+        codex_skill = BATCH_REVIEW_DIR / ".agents/skills/auto-skill-review/SKILL.md"
         codex_content = codex_skill.read_text(encoding="utf-8")
         self.assertIn("name: auto-skill-review", codex_content)
         self.assertIn("$skill-security-review", codex_content)
@@ -251,11 +257,37 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("cmd.exe /d /c", codex_content)
 
         self.assertTrue(
-            (BATCH_REVIEW_DIR.parent / ".codex/agents/skill_security_reviewer.toml").is_file()
+            (BATCH_REVIEW_DIR / ".codex/agents/skill_security_reviewer.toml").is_file()
         )
         self.assertTrue(
-            (BATCH_REVIEW_DIR.parent / ".claude/agents/skill-security-reviewer.md").is_file()
+            (BATCH_REVIEW_DIR / ".claude/agents/skill-security-reviewer.md").is_file()
         )
+
+    def test_distribution_assets_are_inside_the_standalone_project_root(self):
+        required = (
+            "AGENTS.md",
+            "README.md",
+            ".agents/skills/ask-cc/SKILL.md",
+            ".agents/skills/auto-skill-review/SKILL.md",
+            ".agents/skills/skill-security-review/SKILL.md",
+            ".codex/agents/skill_security_reviewer.toml",
+            ".claude/skills/ask-cc/SKILL.md",
+            ".claude/skills/auto-skill-review/SKILL.md",
+            ".claude/skills/skill-security-review/SKILL.md",
+            ".claude/agents/skill-security-reviewer.md",
+            "skills/skill-security-review/SKILL.md",
+            "test/skill_summary.csv",
+            "docs/15-skill-batch-review-script-user-guide.md",
+            "init.cmd",
+            "init.sh",
+            "review.cmd",
+            "review.sh",
+        )
+        for relative in required:
+            with self.subTest(relative=relative):
+                path = (BATCH_REVIEW_DIR / relative).resolve()
+                self.assertTrue(path.is_file(), relative)
+                self.assertTrue(path.is_relative_to(BATCH_REVIEW_DIR.resolve()), relative)
 
     def test_windows_launchers_force_utf8_for_cli_capture(self):
         for name in ("init.cmd", "review.cmd", "run.cmd", "status.cmd"):
@@ -311,7 +343,7 @@ class ProjectSetupTests(unittest.TestCase):
             self.assertEqual(healthy.next_action, "PLAN")
 
     def test_ask_cc_skill_is_discoverable_and_uses_read_only_status(self):
-        skill_root = BATCH_REVIEW_DIR.parent / ".claude" / "skills" / "ask-cc"
+        skill_root = BATCH_REVIEW_DIR / ".claude" / "skills" / "ask-cc"
         content = (skill_root / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("name: ask-cc", content)
         self.assertIn("status.sh --json", content)

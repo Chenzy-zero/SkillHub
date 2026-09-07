@@ -16,7 +16,6 @@ from typing import Any, Sequence
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BATCH_REVIEW_DIR = SCRIPT_DIR.parent
-REPOSITORY_ROOT = BATCH_REVIEW_DIR.parent
 CONFIG_DIR = BATCH_REVIEW_DIR / "config"
 DEFAULT_CONFIG = CONFIG_DIR / "review.local.toml"
 OPERATOR_STATE = BATCH_REVIEW_DIR / ".batch-review" / "operator-state.json"
@@ -71,8 +70,8 @@ def _find_ssh_key() -> Path | None:
 def _localize_template(text: str, *, profile: str) -> str:
     base = (BATCH_REVIEW_DIR / ".batch-review" / profile).resolve()
     replacements = {
-        "../../test/github_skill_summary.csv": str(REPOSITORY_ROOT / "test" / "github_skill_summary.csv"),
-        "../../test/skill_summary.csv": str(REPOSITORY_ROOT / "test" / "skill_summary.csv"),
+        "../test/github_skill_summary.csv": str(BATCH_REVIEW_DIR / "test" / "github_skill_summary.csv"),
+        "../test/skill_summary.csv": str(BATCH_REVIEW_DIR / "test" / "skill_summary.csv"),
         "../skills/skill-security-review/references/review-result.schema.json": str(
             BATCH_REVIEW_DIR
             / "skills"
@@ -190,7 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("填写 Gerrit 只读地址/账号、CSV 路径和仓库白名单。")
         else:
             print("检查 GitHub SSH 私钥路径；其余验证参数已经按本机目录生成。")
-    print("完成配置后，可双击 batch-review/review.cmd；Linux/CentOS 执行 batch-review/review.sh。")
+    print("完成配置后，可双击 review.cmd；Linux/CentOS/macOS 执行 ./review.sh。")
     print("也可直接启动 AI 自动入口：Codex CLI 输入 $auto-skill-review；Claude Code 输入 /auto-skill-review。")
     print("只查看状态：Codex CLI 输入 $ask-cc；Claude Code 输入 /ask-cc。")
     return 0

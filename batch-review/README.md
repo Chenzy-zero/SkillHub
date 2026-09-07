@@ -1,13 +1,34 @@
 # Skill 批量安全审查执行程序
 
-本目录实现 `docs/13-skill-batch-security-review-and-scoring-design.md` 的本地执行部分。
+本目录是可独立复制、打开和执行的 Skill 批量安全审查项目。它包含运行脚本、配置模板、
+输入清单、离线安装包、Codex CLI/Claude Code 的项目 Skill 与隔离 Agent、审查规则、测试和文档；
+运行时不依赖父目录中的任何文件。
 默认启动器现在按仓库一次下载、提取全部台账 Skill，逐一扫描并一次性生成该仓库的 AI 队列；
 AI 由独立 Agent 按队列并行（受配置上限控制）完成。原仓库级命令仍保留为兼容入口。
 
-本目录的执行边界和 AI 调度规则统一见 [`AGENTS.md`](AGENTS.md)。安全扫描时只在本目录下
-生成工作文件；仓库根目录的 CSV 等外部文件仅作为显式只读输入。
+执行边界和 AI 调度规则统一见 [`AGENTS.md`](AGENTS.md)。把本目录交付到其他机器后，应直接
+把它作为 Codex CLI 或 Claude Code 的项目根目录打开；安全扫描的输入、状态和输出都在本目录内。
 
-首次配置和一键启动见 [`docs/16-skill-batch-review-quick-start.md`](../docs/16-skill-batch-review-quick-start.md)；Windows 下使用 Codex CLI 或 Claude Code 见 [`docs/21-windows-ai-client-batch-review-guide.md`](../docs/21-windows-ai-client-batch-review-guide.md)；完整配置字段、逐仓库操作、输出目录和故障处理见 [`docs/15-skill-batch-review-script-user-guide.md`](../docs/15-skill-batch-review-script-user-guide.md)。
+从旧版仓库原地升级时，程序会兼容仍指向父目录 `test/` 的已生成本机配置：旧路径不存在
+且本项目 `test/` 中存在同名标准清单时，会在内存中使用新位置，不改写本机配置文件。
+
+首次配置和一键启动见 [`docs/16-skill-batch-review-quick-start.md`](docs/16-skill-batch-review-quick-start.md)；Windows 下使用 Codex CLI 或 Claude Code 见 [`docs/21-windows-ai-client-batch-review-guide.md`](docs/21-windows-ai-client-batch-review-guide.md)；完整配置字段、逐仓库操作、输出目录和故障处理见 [`docs/15-skill-batch-review-script-user-guide.md`](docs/15-skill-batch-review-script-user-guide.md)。
+
+关键目录：
+
+```text
+batch-review/
+├── .agents/、.codex/          Codex CLI Skill 与隔离 Agent
+├── .claude/                  Claude Code Skill 与隔离 Agent
+├── skills/                   两端共用的安全与质量审查规则
+├── config/、test/            配置模板和 CSV 输入
+├── tools/、src/              确定性执行程序
+├── packages/                 经校验的离线安装材料
+├── docs/                     本项目全部设计和使用文档
+├── reports/                  历史脱敏验证报告样例
+├── tests/                    自动化测试
+└── init.*、review.*、status.*、run.*
+```
 
 ```text
 CSV 台账
@@ -65,8 +86,9 @@ SHA 直接 fetch；也不接受 `git archive --remote` 的路径限定参数。�
 仓库内经 SHA-256 校验的 Python 3.13.15 官方安装包，安装到 `.scanner-tools/_python313`。
 入口会自动优先选择已安装的较新兼容版本：
 
+在终端进入本目录后执行：
+
 ```bash
-cd batch-review
 python -m pip install -e '.[dev]'
 ```
 
@@ -83,16 +105,16 @@ PYTHONPATH=src python -m skill_batch_review.cli --help
 Windows 第一次双击：
 
 ```text
-batch-review\init.cmd
+init.cmd
 ```
 
 Linux/CentOS 第一次执行：
 
 ```bash
-./batch-review/init.sh
+./init.sh
 ```
 
-初始化会生成被 Git 忽略的 `batch-review/config/review.local.toml` 和本机操作状态，已有配置
+初始化会生成被 Git 忽略的 `config/review.local.toml` 和本机操作状态，已有配置
 默认绝不覆盖。完成配置和扫描器健康检查后，在 Codex CLI 输入 `$auto-skill-review`，或在
 Claude Code 输入 `/auto-skill-review` 即可；它会在内部调用 `review.cmd`/`review.sh`，不要求操作人员在每个阶段
 重新打开窗口。命令行入口仍可用于排障和人工确认。
@@ -147,7 +169,7 @@ Windows Excel 常见的 GBK/GB18030；原文件不会被改写，识别出的编
 `packages/` 中的 NVIDIA 官方 wheel，无需公司源另行发布顶层包。随后使用 Python 3.12、3.13 或 3.14 执行：
 
 ```bash
-python batch-review/tools/install_scanners.py --root /opt/skill-review/scanners
+python tools/install_scanners.py --root /opt/skill-review/scanners
 ```
 
 脚本先通过当前 pip 源安装固定版 `uv==0.12.9`，再由 uv 为两套工具分别建立和解析隔离环境，
@@ -184,9 +206,9 @@ Cisco 2.0.13 安装完成后会从其专用环境移除未启用的 `litellm`，
 日常操作可直接使用跨平台启动器：
 
 ```bash
-./batch-review/run.sh plan --config batch-review/config/review.company.toml --batch-id baseline-20260901
-./batch-review/run.sh start --config batch-review/config/review.company.toml --batch-id baseline-20260901 --execute
-./batch-review/run.sh advance --config batch-review/config/review.company.toml --batch-id baseline-20260901 --execute --confirm-cleanup
+./run.sh plan --config config/review.company.toml --batch-id baseline-20260901
+./run.sh start --config config/review.company.toml --batch-id baseline-20260901 --execute
+./run.sh advance --config config/review.company.toml --batch-id baseline-20260901 --execute --confirm-cleanup
 ```
 
 Windows 将 `run.sh` 替换为 `run.cmd`。启动器生成当前仓库的 `ai-review-queue.json` 后，
@@ -225,7 +247,7 @@ skill-batch-review prepare-repository review.toml \
 对 `ai_review_queue` 中每项依次执行：
 
 1. 在公司内网模型环境启动 Codex CLI 或 Claude Code；
-2. 在项目根目录调用 `$skill-security-review`（Codex CLI）或 `/skill-security-review`（Claude Code）；统一规则位于 `batch-review/skills/skill-security-review/SKILL.md`；
+2. 在本目录调用 `$skill-security-review`（Codex CLI）或 `/skill-security-review`（Claude Code）；统一规则位于 `skills/skill-security-review/SKILL.md`；
 3. 把该任务的精简 `handoff` 元数据和 Skill Package 作为唯一任务上下文，不读取静态扫描报告、Manifest 或历史结果；
 4. 只开放读取能力和对当前 `expected_result` 的单文件写入，不开放 Bash、网络、MCP 或子代理；
 5. 将最终纯 JSON 保存为 `<ai-results-dir>/<task_id>.json`。

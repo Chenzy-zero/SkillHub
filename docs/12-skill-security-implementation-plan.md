@@ -130,7 +130,7 @@
 
 ## 5. 第三项：建设安全检查和统一评分
 
-存量 Skill 的 CSV 输入、多分支选择、双重审查、质量评分和私密候选归档规则，统一见 `docs/13-skill-batch-security-review-and-scoring-design.md`。
+存量 Skill 的 CSV 输入、多分支选择、双重审查、质量评分和私密候选归档规则，统一见 `batch-review/docs/13-skill-batch-security-review-and-scoring-design.md`。
 
 ### 5.1 目标
 

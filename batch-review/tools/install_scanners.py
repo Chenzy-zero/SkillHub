@@ -795,7 +795,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             f"请确认公司 pip 源已同步 uv=={UV_VERSION}、"
             "cisco-ai-skill-scanner==2.0.13，以及 SkillSpector 运行依赖的可用 wheel；"
-            "官方 SkillSpector wheel 和运行依赖清单应存在于 batch-review/packages。",
+            "官方 SkillSpector wheel 和运行依赖清单应存在于当前项目的 packages/。",
             file=sys.stderr,
         )
         return 1
