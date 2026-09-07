@@ -27,6 +27,7 @@ batch-review/
 ├── tools/、src/              确定性执行程序
 ├── packages/                 经校验的离线安装材料
 ├── docs/                     本项目全部设计和使用文档
+├── rules/                    工作区、流程、AI 调度和恢复细则
 ├── reports/                  历史脱敏验证报告样例
 ├── tests/                    自动化测试
 └── init.*、review.*、status.*、run.*

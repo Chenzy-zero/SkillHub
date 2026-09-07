@@ -80,11 +80,13 @@ Gerrit Code Review
 │   ├── 10-skill-security-governance-strategy.md
 │   ├── 11-final-skill-security-management-framework.md
 │   └── 12-skill-security-implementation-plan.md
+├── rules/                              # 当前治理、工程与审计细则
 ├── batch-review/                       # 可独立交付的存量 Skill 批量审查项目
 │   ├── .agents/、.codex/               # Codex CLI Skill 和隔离 Agent
 │   ├── .claude/                        # Claude Code Skill 和隔离 Agent
 │   ├── config/、inventory/             # 脱敏配置和 Skill 台账 CSV 输入
 │   ├── docs/                           # 批量审查设计、任务和使用说明
+│   ├── rules/                          # 工作区、流程、AI 调度和恢复细则
 │   ├── reports/                        # 历史脱敏验证报告样例
 │   ├── skills/skill-security-review/   # 两种 AI 客户端共用的审查规则与 Schema
 │   ├── src/skill_batch_review/         # Python 实现
@@ -101,6 +103,8 @@ Gerrit Code Review
 
 - [Skill 安全管理方案](./docs/11-final-skill-security-management-framework.md)（当前正式方案）
 - [Skill 安全管理建设规划](./docs/12-skill-security-implementation-plan.md)（当前实施规划）
+- [Skill 治理规则](./rules/01-skill-governance-rules.md)（对象、版本、发现、审核与发布）
+- [工程与审计规则](./rules/02-engineering-and-audit-rules.md)（Digest、幂等、安全边界与证据）
 - [Skill 批量安全审查与质量评分设计](./batch-review/docs/13-skill-batch-security-review-and-scoring-design.md)（存量 Skill 批量审查设计）
 - [Skill 批量安全审查实施任务分解](./batch-review/docs/14-skill-batch-review-implementation-tasks.md)（T00–T53 实施清单）
 - [Skill 批量安全审查脚本详细使用说明](./batch-review/docs/15-skill-batch-review-script-user-guide.md)（配置、执行、AI 审查、报告、清理与排障）
@@ -125,4 +129,5 @@ GitHub 联调可使用 `batch-review/tools/discover_git_skills.py` 从固定 Rev
 
 当前处于 **基于 `ref-update` 的 Skill 资产台账落地 + 存量 Skill 批量安全审查程序实现与内网联调准备** 阶段。批量程序已完成本地模拟验收，尚未对公司真实 Skill 执行审查。
 
-详细项目上下文、设计决策、需求与任务拆分见 [AGENTS.md](./AGENTS.md)。
+当前核心约束和文件路由见 [AGENTS.md](./AGENTS.md)；细则位于 `rules/`，正式方案和计划位于
+`docs/11`、`docs/12`。
