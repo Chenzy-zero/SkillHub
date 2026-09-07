@@ -11,7 +11,7 @@
 该目录只能服务本批次安全审查。父目录及相邻项目不属于安全扫描工作区，不应在审查过程
 中读取、写入或当作证据来源。
 
-CSV 输入统一放在本项目 `test/` 或配置明确指定的受控路径。Codex CLI 的 `.agents/skills/`、
+CSV 输入统一放在本项目 `inventory/` 或配置明确指定的受控路径。Codex CLI 的 `.agents/skills/`、
 `.codex/agents/` 与 Claude Code 的 `.claude/skills/`、`.claude/agents/` 仅作为客户端发现和
 隔离调度适配层；正式审查规则统一位于 `skills/`。脚本可以读取这些输入，但不得改写、
 覆盖或把它们当成扫描输出。
@@ -24,13 +24,14 @@ CSV 输入统一放在本项目 `test/` 或配置明确指定的受控路径。C
 | `config/` | 示例配置和本机配置 | 真实凭据不得提交；本机配置使用 `.local.toml` |
 | `tools/`、`src/` | 确定性程序 | 负责导入、下载、静态扫描、合并、清理和报告 |
 | `packages/` | 已批准的离线安装包 | 只使用已核验来源和 SHA-256 的包 |
+| `inventory/` | Skill 台账 CSV 输入 | 原文件只读；批次记录编码和 SHA-256 |
 | `git_download/` | 当前仓库的临时归档和 Skill 提取区 | 一次只保留当前仓库；完成后按状态机清理 |
 | `skills/skill-security-review/` | AI 审查规则 | 两种客户端共用的唯一策略与结果 Schema |
 | 运行时配置的 `skills_root` | 永久 Skill 副本 | 只保存 `<skill_id>/<skill_name>/`，不保存 `.git` |
 | `.batch-review/` | 本机状态、清单、受限证据和批次工作文件 | 不提交 Git；清理必须由受信脚本执行 |
 | `tests/` | 本地测试 | 测试不得执行被审查 Skill |
 
-`test/` 里的 CSV 是输入，不是生成目录。正式执行时，应通过 `config/*.toml` 显式指定输入
+`inventory/` 里的 CSV 是输入，不是生成目录。正式执行时，应通过 `config/*.toml` 显式指定输入
 路径，并在批次状态中保存原文件哈希、
 编码和行号。除配置中明确列出的 CSV 和规则 Skill 外，不要把外层目录内容带入审查。
 

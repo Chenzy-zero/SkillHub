@@ -424,4 +424,4 @@ UI 可以继续显示简化的“是否安全审查”，但底层必须保留�
 安全扫描子项目的具体边界、脚本优先原则和 AI 队列规则见 `batch-review/AGENTS.md`；扫描执行
 产生的工作文件和证据均应保留在 `batch-review/` 目录树内。
 
-当前 `batch-review/` 已实现按仓库一次归档、提取该仓库全部台账 Skill、逐一静态扫描、生成 AI 队列并由独立 Agent 批量审查，再自动进入下一仓库的流程，支持 `batch-review/test/skill_summary.csv` 的正式字段和中文状态，并通过本地模拟测试。该目录已经包含自身所需的文档、输入样例、客户端 Skill 与 Agent，可作为独立项目根目录交付使用。正式批量运行前仍必须取得 Gerrit 只读 SSH 参数、公司内网源中的扫描器依赖 wheel、目录权限和首批小样本仓库。SkillSpector 2.5.1 顶层 wheel已固定放入仓库。主程序支持 Python 3.11～3.14；Cisco 可使用 Python 3.12～3.14，SkillSpector 因官方 `yara-python` wheel 限制使用 Python 3.12 或 3.13，安装器会自动选择。AI 策略版本由项目审查规则自动计算，模型追溯由当前 Codex CLI 或 Claude Code 会话提供，不要求操作人员手填。
+当前 `batch-review/` 已实现按仓库一次归档、提取该仓库全部台账 Skill、逐一静态扫描、生成 AI 队列并由独立 Agent 批量审查，再自动进入下一仓库的流程，支持 `batch-review/inventory/skill_summary.csv` 的正式字段和中文状态，并通过本地模拟测试。该目录已经包含自身所需的文档、输入样例、客户端 Skill 与 Agent，可作为独立项目根目录交付使用。正式批量运行前仍必须取得 Gerrit 只读 SSH 参数、公司内网源中的扫描器依赖 wheel、目录权限和首批小样本仓库。SkillSpector 2.5.1 顶层 wheel已固定放入仓库。主程序支持 Python 3.11～3.14；Cisco 可使用 Python 3.12～3.14，SkillSpector 因官方 `yara-python` wheel 限制使用 Python 3.12 或 3.13，安装器会自动选择。AI 策略版本由项目审查规则自动计算，模型追溯由当前 Codex CLI 或 Claude Code 会话提供，不要求操作人员手填。

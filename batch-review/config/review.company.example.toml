@@ -2,8 +2,8 @@
 # 使用前复制为 review.company.toml；不要把真实内网地址、账号或路径提交到 Git。
 
 [batch]
-# 当前仓库中的正式测试清单。更换正式清单时填写绝对路径。
-inventory_csv = "../test/skill_summary.csv"
+# 当前项目中的正式台账清单。更换正式清单时填写绝对路径。
+inventory_csv = "../inventory/skill_summary.csv"
 batch_id_prefix = "skill-review"
 included_statuses = ["ACTIVE"]
 

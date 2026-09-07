@@ -174,7 +174,7 @@ class ConfigTests(unittest.TestCase):
         project = base / "batch-review"
         config_dir = project / "config"
         config_dir.mkdir(parents=True)
-        inventory = project / "test/skill_summary.csv"
+        inventory = project / "inventory/skill_summary.csv"
         inventory.parent.mkdir(parents=True)
         inventory.write_text("skill_name\nexample\n", encoding="utf-8")
         config_path = config_dir / "review.local.toml"
@@ -182,6 +182,27 @@ class ConfigTests(unittest.TestCase):
             CONFIG.replace(
                 'inventory_csv = "input/skills.csv"',
                 'inventory_csv = "../../test/skill_summary.csv"',
+            ),
+            encoding="utf-8",
+        )
+
+        config = load_config(config_path)
+
+        self.assertEqual(config.batch.inventory_csv, inventory.resolve())
+
+    def test_legacy_project_test_inventory_path_redirects_to_inventory(self) -> None:
+        base = Path(self.tempdir.name)
+        project = base / "batch-review"
+        config_dir = project / "config"
+        config_dir.mkdir(parents=True)
+        inventory = project / "inventory/skill_summary.csv"
+        inventory.parent.mkdir(parents=True)
+        inventory.write_text("skill_name\nexample\n", encoding="utf-8")
+        config_path = config_dir / "review.local.toml"
+        config_path.write_text(
+            CONFIG.replace(
+                'inventory_csv = "input/skills.csv"',
+                'inventory_csv = "../test/skill_summary.csv"',
             ),
             encoding="utf-8",
         )
@@ -198,7 +219,7 @@ class ConfigTests(unittest.TestCase):
         legacy_inventory = base / "test/skill_summary.csv"
         legacy_inventory.parent.mkdir(parents=True)
         legacy_inventory.write_text("skill_name\nlegacy\n", encoding="utf-8")
-        local_inventory = project / "test/skill_summary.csv"
+        local_inventory = project / "inventory/skill_summary.csv"
         local_inventory.parent.mkdir(parents=True)
         local_inventory.write_text("skill_name\nlocal\n", encoding="utf-8")
         config_path = config_dir / "review.local.toml"

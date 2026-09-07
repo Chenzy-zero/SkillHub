@@ -83,7 +83,7 @@ Gerrit Code Review
 ├── batch-review/                       # 可独立交付的存量 Skill 批量审查项目
 │   ├── .agents/、.codex/               # Codex CLI Skill 和隔离 Agent
 │   ├── .claude/                        # Claude Code Skill 和隔离 Agent
-│   ├── config/、test/                  # 脱敏配置和 CSV 输入
+│   ├── config/、inventory/             # 脱敏配置和 Skill 台账 CSV 输入
 │   ├── docs/                           # 批量审查设计、任务和使用说明
 │   ├── reports/                        # 历史脱敏验证报告样例
 │   ├── skills/skill-security-review/   # 两种 AI 客户端共用的审查规则与 Schema

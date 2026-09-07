@@ -51,7 +51,7 @@ cp config/review.company.example.toml \
 
 | 配置项 | 填写内容 |
 |---|---|
-| `batch.inventory_csv` | Skill 清单路径；仓库内测试清单默认是 `test/skill_summary.csv` |
+| `batch.inventory_csv` | Skill 清单路径；仓库内正式清单默认是 `inventory/skill_summary.csv` |
 | `workspace.*` | 临时区、受限证据区、清单区、`git_download_root`、`skills_root` 和 `results_root` 的绝对路径 |
 | `gerrit.user/host/port` | Gerrit 只读 SSH 参数 |
 | `gerrit.allowed_repositories` | 首批联调的 1～3 个仓库；正式批次确认后再放开 |
@@ -206,7 +206,7 @@ python3.12 tools/discover_git_skills.py \
   --repo-name Chenzy-zero/SkillHub \
   --branch main \
   --revision origin/main \
-  --output test/github_skill_summary.csv
+  --output inventory/github_skill_summary.csv
 ```
 
 复制 `config/review.github.example.toml` 为一个 `*.local.toml` 文件，然后填写：

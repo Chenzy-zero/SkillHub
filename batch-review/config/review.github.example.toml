@@ -2,7 +2,7 @@
 # 源站配置沿用程序当前的 [gerrit] 兼容字段名，但 URL 模板已指向 GitHub SSH 443。
 
 [batch]
-inventory_csv = "../test/github_skill_summary.csv"
+inventory_csv = "../inventory/github_skill_summary.csv"
 batch_id_prefix = "github-validation"
 included_statuses = ["ACTIVE"]
 

@@ -117,9 +117,12 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertTrue(created)
         self.assertEqual(created_path, config.resolve())
         original = config.read_text(encoding="utf-8")
-        inventory = (BATCH_REVIEW_DIR / "test" / "github_skill_summary.csv").resolve()
+        inventory = (
+            BATCH_REVIEW_DIR / "inventory" / "github_skill_summary.csv"
+        ).resolve()
         self.assertIn(inventory.as_posix(), original)
         self.assertNotIn((BATCH_REVIEW_DIR.parent / "test").resolve().as_posix(), original)
+        self.assertNotIn((BATCH_REVIEW_DIR / "test").resolve().as_posix(), original)
         self.assertIn(
             (BATCH_REVIEW_DIR / "skills" / "skill-security-review").resolve().as_posix(),
             original,
@@ -276,7 +279,7 @@ class ProjectSetupTests(unittest.TestCase):
             ".claude/skills/skill-security-review/SKILL.md",
             ".claude/agents/skill-security-reviewer.md",
             "skills/skill-security-review/SKILL.md",
-            "test/skill_summary.csv",
+            "inventory/skill_summary.csv",
             "docs/15-skill-batch-review-script-user-guide.md",
             "init.cmd",
             "init.sh",

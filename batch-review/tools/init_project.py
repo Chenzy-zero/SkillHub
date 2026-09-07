@@ -70,8 +70,18 @@ def _find_ssh_key() -> Path | None:
 def _localize_template(text: str, *, profile: str) -> str:
     base = (BATCH_REVIEW_DIR / ".batch-review" / profile).resolve()
     replacements = {
-        "../test/github_skill_summary.csv": str(BATCH_REVIEW_DIR / "test" / "github_skill_summary.csv"),
-        "../test/skill_summary.csv": str(BATCH_REVIEW_DIR / "test" / "skill_summary.csv"),
+        "../inventory/github_skill_summary.csv": str(
+            BATCH_REVIEW_DIR / "inventory" / "github_skill_summary.csv"
+        ),
+        "../inventory/skill_summary.csv": str(
+            BATCH_REVIEW_DIR / "inventory" / "skill_summary.csv"
+        ),
+        "../test/github_skill_summary.csv": str(
+            BATCH_REVIEW_DIR / "inventory" / "github_skill_summary.csv"
+        ),
+        "../test/skill_summary.csv": str(
+            BATCH_REVIEW_DIR / "inventory" / "skill_summary.csv"
+        ),
         "../skills/skill-security-review/references/review-result.schema.json": str(
             BATCH_REVIEW_DIR
             / "skills"

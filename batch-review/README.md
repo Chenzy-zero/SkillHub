@@ -9,8 +9,9 @@ AI 由独立 Agent 按队列并行（受配置上限控制）完成。原仓库�
 执行边界和 AI 调度规则统一见 [`AGENTS.md`](AGENTS.md)。把本目录交付到其他机器后，应直接
 把它作为 Codex CLI 或 Claude Code 的项目根目录打开；安全扫描的输入、状态和输出都在本目录内。
 
-从旧版仓库原地升级时，程序会兼容仍指向父目录 `test/` 的已生成本机配置：旧路径不存在
-且本项目 `test/` 中存在同名标准清单时，会在内存中使用新位置，不改写本机配置文件。
+从旧版仓库原地升级时，程序会兼容仍指向父目录或本项目旧 `test/` 目录的已生成本机配置：
+旧路径不存在且本项目 `inventory/` 中存在同名标准清单时，会在内存中使用新位置，不改写
+本机配置文件。
 
 首次配置和一键启动见 [`docs/16-skill-batch-review-quick-start.md`](docs/16-skill-batch-review-quick-start.md)；Windows 下使用 Codex CLI 或 Claude Code 见 [`docs/21-windows-ai-client-batch-review-guide.md`](docs/21-windows-ai-client-batch-review-guide.md)；完整配置字段、逐仓库操作、输出目录和故障处理见 [`docs/15-skill-batch-review-script-user-guide.md`](docs/15-skill-batch-review-script-user-guide.md)。
 
@@ -21,7 +22,8 @@ batch-review/
 ├── .agents/、.codex/          Codex CLI Skill 与隔离 Agent
 ├── .claude/                  Claude Code Skill 与隔离 Agent
 ├── skills/                   两端共用的安全与质量审查规则
-├── config/、test/            配置模板和 CSV 输入
+├── config/                  配置模板和本机配置
+├── inventory/               Skill 台账 CSV 输入
 ├── tools/、src/              确定性执行程序
 ├── packages/                 经校验的离线安装材料
 ├── docs/                     本项目全部设计和使用文档

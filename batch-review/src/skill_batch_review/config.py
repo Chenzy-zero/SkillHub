@@ -85,21 +85,25 @@ def _path(value: Any, name: str, *, base_dir: Path, default: str) -> Path:
 def _relocate_legacy_inventory_path(path: Path, *, base_dir: Path) -> Path:
     """Keep pre-standalone local configs usable after the inventory move.
 
-    Older generated configs lived under ``batch-review/config`` but pointed to
-    the parent repository's ``test`` directory. Only redirect the two known
-    inventory filenames, only when that legacy path no longer exists, and only
-    when the replacement is present inside this project. Explicit custom
-    inventory locations remain untouched.
+    Older generated configs pointed either to the parent repository's ``test``
+    directory or to this project's former ``test`` directory. Only redirect
+    the two known inventory filenames, only when that legacy path no longer
+    exists, and only when the replacement is present inside this project's
+    ``inventory`` directory. Explicit custom inventory locations remain
+    untouched.
     """
 
     project_root = base_dir.resolve().parent
     known_names = {"skill_summary.csv", "github_skill_summary.csv"}
-    legacy_test_root = (project_root.parent / "test").resolve()
-    local_candidate = (project_root / "test" / path.name).resolve()
+    legacy_test_roots = {
+        (project_root.parent / "test").resolve(),
+        (project_root / "test").resolve(),
+    }
+    local_candidate = (project_root / "inventory" / path.name).resolve()
     if (
         path.name in known_names
         and not path.exists()
-        and path.parent == legacy_test_root
+        and path.parent in legacy_test_roots
         and local_candidate.is_file()
     ):
         return local_candidate
