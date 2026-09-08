@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import unittest
+from dataclasses import replace
 
 from skill_batch_review.live_report import write_live_batch_report
 from skill_batch_review.per_skill import finalize_skill, prepare_skill
@@ -160,6 +161,60 @@ class LiveReportTests(unittest.TestCase):
         self.assertIn('data-report-status="FINAL"', html)
         summary = json.loads(report.paths.summary.read_text(encoding="utf-8"))
         self.assertEqual(summary["report_status"], "FINAL")
+
+    def test_public_exports_do_not_leak_internal_absolute_result_paths(self) -> None:
+        self._prepare_first()
+        report = write_live_batch_report(
+            self.config,
+            self.inventory,
+            batch_id="live-batch",
+        )
+
+        exported = report.current_json.read_text(encoding="utf-8")
+        html = report.paths.html.read_text(encoding="utf-8")
+        internal_root = str(self.config.workspace.skills_root.resolve())
+        self.assertNotIn("current_result_path", exported)
+        self.assertNotIn("review_result_path", exported)
+        self.assertNotIn(internal_root, exported)
+        self.assertNotIn(internal_root, html)
+
+    def test_invalid_skill_id_cannot_escape_skills_root_when_reading_projection(self) -> None:
+        source = self.inventory.rows[0]
+        malicious_row = replace(
+            source,
+            trace_values={**source.trace_values, "skill_id": "../outside"},
+        )
+        malicious_inventory = replace(self.inventory, rows=(malicious_row,))
+
+        outside = self.config.workspace.skills_root.parent / "outside"
+        outside.mkdir(parents=True, exist_ok=True)
+        (outside / "current-result.json").write_text(
+            json.dumps(
+                {
+                    "source_row_id": malicious_row.source_row_id,
+                    "skill_id": "../outside",
+                    "static_status": "COMPLETED",
+                    "ai_status": "COMPLETED",
+                    "final_status": "COMPLETED",
+                    "review_status": "COMPLETED",
+                    "security_decision": "PASS",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = write_live_batch_report(
+            self.config,
+            malicious_inventory,
+            batch_id="malicious-batch",
+        )
+        exported = json.loads(report.current_json.read_text(encoding="utf-8"))
+        skill = exported["skills"][0]
+        self.assertEqual(skill["static_status"], "PENDING")
+        self.assertEqual(skill["ai_status"], "PENDING")
+        self.assertEqual(skill["final_status"], "PENDING")
+        self.assertEqual(skill["security_decision"], "")
+        self.assertEqual(report.report_status, "INTERIM")
 
 
 if __name__ == "__main__":  # pragma: no cover
