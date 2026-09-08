@@ -52,10 +52,10 @@ def _minimal_config(
             result_schema_path = "{schema_path}"
             [scanners.cisco]
             version = "1"
-            command = ["cisco", "scan", "{{skill_root}}", "--output", "{{output_file}}"]
+            command = ["cisco", "scan", "{{skill_root}}", "--format", "json", "--compact", "--output", "{{output_file}}"]
             [scanners.skillspector]
             version = "1"
-            command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--output", "{{output_file}}"]
+            command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "json", "--output", "{{output_file}}"]
             """
         ),
         encoding="utf-8",
