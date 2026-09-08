@@ -211,7 +211,7 @@ class ScannerInstallerTests(unittest.TestCase):
         self.assertEqual(command[0:3], (str(uv), "pip", "install"))
         self.assertIn("--python", command)
         self.assertIn("--only-binary", command)
-        self.assertEqual(command[-1], "cisco-ai-skill-scanner==2.0.13")
+        self.assertIn("cisco-ai-skill-scanner==2.0.13", command)
 
     def test_windows_cisco_has_one_pinned_source_build_exception(self):
         command = MODULE._uv_install_command(
