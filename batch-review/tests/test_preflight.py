@@ -10,13 +10,13 @@ from skill_batch_review.preflight import review_preflight
 def config_text(root: Path) -> str:
     return f'''
 [batch]
-inventory_csv = "{root / 'inventory.csv'}"
+inventory_csv = "{(root / 'inventory.csv').as_posix()}"
 included_statuses = ["ACTIVE"]
 [workspace]
-root = "{root / 'work'}"
-evidence_root = "{root / 'evidence'}"
-candidate_root = "{root / 'candidates'}"
-manifest_root = "{root / 'manifests'}"
+root = "{(root / 'work').as_posix()}"
+evidence_root = "{(root / 'evidence').as_posix()}"
+candidate_root = "{(root / 'candidates').as_posix()}"
+manifest_root = "{(root / 'manifests').as_posix()}"
 [gerrit]
 host = "gerrit.intra"
 ssh_url_template = "ssh://{{user}}@{{host}}:{{port}}/{{repo_name}}.git"
@@ -25,8 +25,8 @@ active = "ACTIVE"
 [quality]
 candidate_threshold = 70
 [ai]
-skill_path = "{root / 'ai-skill'}"
-result_schema_path = "{root / 'ai-skill/schema.json'}"
+skill_path = "{(root / 'ai-skill').as_posix()}"
+result_schema_path = "{(root / 'ai-skill/schema.json').as_posix()}"
 [scanners.cisco]
 version = "1.0"
 command = ["skill-scanner", "scan", "{{skill_root}}", "--format", "json", "--compact", "--output", "{{output_file}}"]
