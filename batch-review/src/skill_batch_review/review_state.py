@@ -1,12 +1,4 @@
-"""Phase-aware state helpers for one Skill review.
-
-The batch launcher historically used one coarse ``status`` value for download,
-static scanning, AI review, and trusted finalization.  This module introduces
-orthogonal phase state without changing the legacy launcher protocol yet.
-
-It is deliberately small and deterministic so both the per-Skill pipeline and
-reporting layer can consume the same transition rules.
-"""
+"""Phase-aware state helpers for one Skill review."""
 
 from __future__ import annotations
 
@@ -15,8 +7,10 @@ from typing import Any, Mapping, Sequence
 
 from .models import AIReviewStatus, FinalReviewStatus, StaticReviewStatus
 
-
 _SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+_BLOCK_DECISIONS = {"BLOCK", "BLOCKED", "DO_NOT_INSTALL", "FAIL", "FAILED"}
+_REVIEW_DECISIONS = {"REVIEW", "REVIEW_REQUIRED", "MANUAL_REVIEW"}
+_UNCERTAIN_DECISIONS = {"UNKNOWN", "INCOMPLETE", "ERROR", "TIMEOUT", "MISSING", "INVALID"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,41 +40,27 @@ def _validate_transition(
             raise ValueError("AI review cannot start before static preparation completes")
         if final_status is not FinalReviewStatus.PENDING:
             raise ValueError("final result cannot be formed before static preparation completes")
-
     if static_status is StaticReviewStatus.INCOMPLETE:
         if ai_status is not AIReviewStatus.NOT_REQUIRED:
             raise ValueError("incomplete static preparation must not dispatch AI review")
         if final_status is not FinalReviewStatus.INCOMPLETE:
             raise ValueError("incomplete static preparation must yield an incomplete final state")
-
-    if ai_status in {
-        AIReviewStatus.DISPATCHED,
-        AIReviewStatus.COMPLETED,
-        AIReviewStatus.FAILED,
-    } and static_status is not StaticReviewStatus.COMPLETED:
+    if ai_status in {AIReviewStatus.DISPATCHED, AIReviewStatus.COMPLETED, AIReviewStatus.FAILED} and static_status is not StaticReviewStatus.COMPLETED:
         raise ValueError("AI phase requires completed static preparation")
-
     if final_status is FinalReviewStatus.COMPLETED:
         if static_status is not StaticReviewStatus.COMPLETED:
             raise ValueError("completed final state requires completed static preparation")
         if ai_status not in {AIReviewStatus.COMPLETED, AIReviewStatus.NOT_REQUIRED}:
             raise ValueError("completed final state requires completed or unnecessary AI review")
-
     if final_status is FinalReviewStatus.INCOMPLETE:
-        allowed = (
-            static_status is StaticReviewStatus.INCOMPLETE
-            or (
-                static_status is StaticReviewStatus.COMPLETED
-                and ai_status is AIReviewStatus.FAILED
-            )
+        allowed = static_status is StaticReviewStatus.INCOMPLETE or (
+            static_status is StaticReviewStatus.COMPLETED and ai_status is AIReviewStatus.FAILED
         )
         if not allowed:
             raise ValueError("incomplete final state requires an incomplete static or failed AI phase")
 
 
 def finding_summary(findings: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Return a normalized count/max-severity summary for report projection."""
-
     counts = {severity: 0 for severity in _SEVERITIES}
     normalized: list[dict[str, Any]] = []
     for finding in findings:
@@ -103,16 +83,26 @@ def finding_summary(findings: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 def static_security_decision(
     findings: Sequence[Mapping[str, Any]],
     *,
+    static_reports: Sequence[Mapping[str, Any]] = (),
     medium_requires_review: bool = True,
 ) -> str:
-    """Return a scanner-only security projection without pretending AI is done.
+    """Return a scanner-only projection without pretending the AI stage is done.
 
-    This deliberately does not call the final policy gate.  ``evaluate_policy``
-    correctly treats a missing AI result as incomplete; an interim report needs
-    a separate answer to the narrower question "what do the completed static
-    scanners say?".  The final ``security_decision`` remains empty until trusted
-    finalization.
+    Scanner-level decisions are preserved because a tool can require review even
+    when its normalized findings are LOW/INFO.  An uncertain scanner decision is
+    conservatively projected as REVIEW_REQUIRED here; true scanner incompleteness
+    is handled by the static phase before this helper is called.
     """
+
+    decisions = {
+        str(report.get("decision") or "").strip().upper()
+        for report in static_reports
+        if isinstance(report, Mapping)
+    }
+    if decisions & _BLOCK_DECISIONS:
+        return "BLOCK"
+    if decisions & (_REVIEW_DECISIONS | _UNCERTAIN_DECISIONS):
+        return "REVIEW_REQUIRED"
 
     severities = {
         str(finding.get("severity") or "UNKNOWN").strip().upper()
@@ -143,20 +133,13 @@ def build_current_result(
     reviewed_at: str | None = None,
     failure_reason: str = "",
 ) -> dict[str, Any]:
-    """Build the durable current-result projection for one Skill.
-
-    A pending final phase is intentionally prohibited from carrying a final
-    security or quality decision.  Static-only findings live beside the
-    explicit ``static_security_decision`` until trusted finalization occurs.
-    """
-
     if phase.final_status is FinalReviewStatus.PENDING:
         if security_decision or quality_decision or quality_score is not None:
             raise ValueError("pending final state must not expose a final decision or quality score")
     elif phase.final_status is FinalReviewStatus.COMPLETED and not security_decision:
         raise ValueError("completed final state requires a security decision")
 
-    payload = {
+    return {
         **dict(source),
         "schema_version": "1.0",
         "result_kind": "CURRENT",
@@ -180,7 +163,6 @@ def build_current_result(
         "reviewed_at": reviewed_at,
         "failure_reason": failure_reason,
     }
-    return payload
 
 
 def static_waiting_for_ai(
@@ -194,6 +176,15 @@ def static_waiting_for_ai(
 ) -> dict[str, Any]:
     """Build the common post-static/pre-AI projection."""
 
+    effective_decision = static_security_decision
+    report_decision = globals()["static_security_decision"](
+        findings,
+        static_reports=static_reports,
+    )
+    order = {"PASS": 0, "REVIEW_REQUIRED": 1, "BLOCK": 2}
+    if order.get(report_decision, 1) > order.get(effective_decision, 1):
+        effective_decision = report_decision
+
     return build_current_result(
         source,
         phase=ReviewPhaseState(
@@ -203,7 +194,7 @@ def static_waiting_for_ai(
         ),
         static_reports=static_reports,
         findings=findings,
-        static_security_decision=static_security_decision,
+        static_security_decision=effective_decision,
         evidence_ref=evidence_ref,
         review_policy_version=review_policy_version,
         ai_review_summary={"status": AIReviewStatus.PENDING.value},
