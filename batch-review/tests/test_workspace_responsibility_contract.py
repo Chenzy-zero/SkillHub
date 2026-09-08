@@ -30,16 +30,16 @@ def _minimal_config(
         textwrap.dedent(
             f"""
             [batch]
-            inventory_csv = "{inventory}"
+            inventory_csv = "{inventory.as_posix()}"
             included_statuses = ["ACTIVE"]
             [workspace]
-            root = "{root / 'work'}"
-            git_download_root = "{root / 'downloads'}"
-            manifest_root = "{root / 'manifests'}"
-            skills_root = "{root / 'skills'}"
-            evidence_root = "{root / 'evidence'}"
-            candidate_root = "{root / 'candidates'}"
-            results_root = "{root / 'results'}"
+            root = "{(root / 'work').as_posix()}"
+            git_download_root = "{(root / 'downloads').as_posix()}"
+            manifest_root = "{(root / 'manifests').as_posix()}"
+            skills_root = "{(root / 'skills').as_posix()}"
+            evidence_root = "{(root / 'evidence').as_posix()}"
+            candidate_root = "{(root / 'candidates').as_posix()}"
+            results_root = "{(root / 'results').as_posix()}"
             [gerrit]
             ssh_url_template = "ssh://{{user}}@{{host}}:{{port}}/{{repo_name}}.git"
             [status_mapping]
@@ -48,8 +48,8 @@ def _minimal_config(
             candidate_threshold = 70
             max_score = 100
             [ai]
-            skill_path = "{skill_path}"
-            result_schema_path = "{schema_path}"
+            skill_path = "{skill_path.as_posix()}"
+            result_schema_path = "{schema_path.as_posix()}"
             [scanners.cisco]
             version = "1"
             command = ["cisco", "scan", "{{skill_root}}", "--format", "json", "--compact", "--output", "{{output_file}}"]
