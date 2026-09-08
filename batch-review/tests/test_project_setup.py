@@ -256,11 +256,13 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("Do not use Git", content)
         self.assertIn("fresh project Agent", content)
         self.assertIn("skill-security-reviewer", content)
-        self.assertIn("ai-review-queue.json", content)
         self.assertIn("max_parallel", content)
         self.assertIn("Never read target packages", content)
         self.assertIn("--auto --json --ai-parallel 5", content)
+        self.assertIn("dispatch_session", content)
+        self.assertIn("--completed-task-id", content)
         self.assertIn("completion", content.lower())
+        self.assertIn("Do not inspect queue/state files yourself", content)
 
         codex_skill = BATCH_REVIEW_DIR / ".agents/skills/auto-skill-review/SKILL.md"
         codex_content = codex_skill.read_text(encoding="utf-8")
@@ -269,6 +271,7 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("skill_security_reviewer", codex_content)
         self.assertIn("cmd.exe /d /c", codex_content)
         self.assertIn("dispatch_session", codex_content)
+        self.assertIn("--completed-task-id", codex_content)
 
         self.assertTrue(
             (BATCH_REVIEW_DIR / ".codex/agents/skill_security_reviewer.toml").is_file()
