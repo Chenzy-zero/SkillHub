@@ -1,51 +1,68 @@
-# 下载、扫描与结果规则
+# 下载、Static 与报告规则
 
-## 1. 标准流程
+## 1. 新批次标准流程
 
 ```text
-冻结 CSV 和配置
+冻结 CSV + Config
 → 按 repo_name + branch 分组
-→ 冻结仓库来源版本并下载一次无历史归档
-→ 只提取该组登记的全部 Skill
-→ 迁移到 skills_root/<skill_id>/<skill_name>
-→ 计算完整包 SHA-256 并判断是否复用
-→ 逐 Skill 运行 Cisco 与 SkillSpector 静态扫描
-→ 生成当前仓库 AI 队列
-→ 校验并导入 AI JSON
-→ 合并安全结论和质量得分
-→ 写入单 Skill、批次 CSV/JSON 和单文件 HTML
-→ 确认结果持久化后清理临时区
-→ 进入下一仓库
+→ 冻结该组 branch HEAD，下载一次无历史整仓归档
+→ 只提取清单登记的 Skill Root
+→ 归档冻结 Skill Package，计算完整包 SHA-256
+→ 判断满足 fingerprint 的结果复用
+→ Cisco + SkillSpector Static Preparation
+→ 当前仓库 Static 完成后立即清理 Runtime
+→ 自动进入下一仓库，不等待该仓库 AI
+→ 全 Batch Static 完成
+→ 生成 INTERIM HTML/CSV/JSON
+→ 生成一个 batch-wide AI Queue
+→ completion-driven AI import / incremental report refresh
+→ 全部 selected Skill resolved
+→ 同一路径报告切换为 FINAL
 ```
 
-Git 下载、状态写入、结果合并和清理串行执行。只有同一仓库内彼此独立的静态扫描或 AI 内容
-审查可以在配置上限内并行。
+新批次使用 `batch_wide_v2`。已经启动的 `repository_batch_v1` 批次按旧协议兼容续跑，不能静默换状态机。
 
-## 2. 脚本职责
+## 2. 可信脚本职责
 
-以下工作必须由受信脚本完成，不能交给 AI 临时推断：
+以下工作必须由确定性可信程序完成，不交给父 AI 临时判断：
 
-- CSV 编码、字段、状态和扩展列处理；
-- 仓库 URL、SSH、版本冻结、归档下载、路径提取和安全清理；
-- 文件清单、完整包 Digest、内容比较和结果复用；
-- Cisco、SkillSpector 的执行、超时、重试、健康检查、证据保存和结果规范化；
-- 状态推进、待审任务筛选与排序、固定评分满分补齐、Schema 校验、结果合并、质量分、CSV/JSON/HTML 生成；
-- 中断恢复、幂等检查和清理门禁。
+- CSV 编码/字段/状态、配置冻结和 SHA-256；
+- Git URL、SSH、Revision 冻结、无历史归档下载、路径提取和安全清理；
+- 完整包 manifest/digest、content reuse fingerprint；
+- Cisco/SkillSpector 执行、超时、健康检查、raw preservation、normalized result；
+- `current-result.json` / `review-result.json`、Batch State、queue、dispatch lease；
+- AI result Schema/expectation/digest/policy 校验与 `finalize_skill`；
+- ledger、report exports、INTERIM/FINAL HTML；
+- evidence index、恢复、幂等和清理门禁。
 
-程序必须使用参数数组调用 Git 和扫描器，不拼接 Shell 命令，不执行 Skill 中的任何代码。
+Git/scanner 必须以 argv 调用，不拼 Shell，不执行 Skill 内容。
 
-## 3. 静态扫描与复用
+## 3. Static、复用和仓库清理
 
-- Cisco 与 SkillSpector 针对同一完整内容版本执行，记录各自版本和原始证据。
-- 扫描器健康检查失败、报告缺失或输出无法规范化时，Skill 状态为检查不完整，不能进入通过状态。
-- SkillSpector 的 `explanation` 是有效问题说明；其他说明字段为空时不能据此丢弃完整结果。
-- 同名且完整包 Digest 一致时，可以复用满足版本和策略要求的完整结果。
-- 复用仍须创建当前 `skill_id` 的 Skill 副本、结果记录和复用说明，并保留来源 Revision。
-- 安全结论和质量得分分别保存；私密候选质量门槛由配置确定，安全门禁优先于质量分。
+- 两套 scanner 必须针对相同冻结 Skill digest。
+- scanner 失败、报告缺失、coverage 不完整或规范化失败 => INCOMPLETE，不得进入 PASS。
+- 每个仓库 Static 结果已经迁入 durable Skill/evidence 后，即可清理 `work/git_download` 的该仓 Runtime；不需要等待 AI。
+- 同名同内容结果复用必须同时满足 package digest、scanner config/version、policy/review fingerprint 等要求。
+- 复用仍为当前 `skill_id` 保存来源 Revision、durable result 和复用记录。
+- 安全与质量分离；security gate 优先于质量分。
 
-## 4. 报告
+## 4. Report projection
 
-- 每个 Skill 保留结构化 JSON，批次保留结果 CSV 和 JSON，便于按仓库、产品线和人员聚合。
-- 批次结束由脚本生成单文件 HTML 工作台，支持总览、Skill、问题、仓库和提交人视图。
-- 筛选和导出基于脱敏派生数据；原始证据通过完整性索引追溯，不直接嵌入 HTML。
-- 候选工作区不包含原始扫描报告，也不自动提交、推送或发布。
+Static 结束即可生成当前审计投影：
+
+- `INTERIM`：展示 Static findings、AI=PENDING、Final=PENDING；不得把未完成 AI 显示为最终 PASS。
+- completion-driven import 每成功一项立即刷新当前 HTML/CSV/JSON 投影。
+- `FINAL`：只有全部 selected Skill 已 COMPLETED 或明确 INCOMPLETE 后形成。
+
+唯一人工入口始终是：
+
+```text
+results/<batch-id>/skill-security-review-report.html
+```
+
+机器可读输出分两类：
+
+- `skill-review-results.csv/json`：inventory ledger/reconciliation projection；
+- `details.csv`、`batch-summary.json`、`failures.json`、`candidates.json`、`current-review-results.*`：标准化 report exports。
+
+普通 HTML 不嵌入 raw scanner/AI evidence。Evidence Detail 使用 `evidence-index.json` 展示 type、relative path、size、SHA-256；RAW/SOURCE path-only，DERIVED/NORMALIZED 才允许受控相对导航。
