@@ -180,9 +180,11 @@ class LiveReportTests(unittest.TestCase):
 
     def test_invalid_skill_id_cannot_escape_skills_root_when_reading_projection(self) -> None:
         source = self.inventory.rows[0]
+        raw_values = dict(source.raw_values)
+        raw_values["skill_id"] = "../outside"
         malicious_row = replace(
             source,
-            trace_values={**source.trace_values, "skill_id": "../outside"},
+            raw_values=tuple(raw_values.items()),
         )
         malicious_inventory = replace(self.inventory, rows=(malicious_row,))
 
