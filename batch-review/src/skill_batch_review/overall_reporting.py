@@ -32,6 +32,12 @@ _READY_CANDIDATE_STATUSES = {
     "MANUALLY_SYNCED",
 }
 
+_LEGACY_BANNER_FONT = "font:600 13px/1.5 Segoe UI,Microsoft YaHei UI,sans-serif"
+_CJK_BANNER_FONT = (
+    'font:600 13px/1.5 "Microsoft YaHei UI","Microsoft YaHei",'
+    '"PingFang SC","Noto Sans CJK SC","Source Han Sans SC","Segoe UI",sans-serif'
+)
+
 
 def _candidate_eligible(record: Mapping[str, Any]) -> bool | None:
     value = record.get("candidate_eligible")
@@ -75,6 +81,7 @@ def install_reporting_compat(reporting_module: Any, live_report_module: Any) -> 
     if getattr(reporting_module, "_overall_decision_compat_installed", False):
         return
     original_normalized = reporting_module._normalized_record
+    original_annotate_html = live_report_module._annotate_html
 
     def normalized_record(record: Mapping[str, Any], *, batch_id: str) -> dict[str, Any]:
         row = dict(original_normalized(record, batch_id=batch_id))
@@ -104,6 +111,17 @@ def install_reporting_compat(reporting_module: Any, live_report_module: Any) -> 
         row.update(computed)
         return row
 
+    def annotate_html(*args: Any, **kwargs: Any) -> None:
+        original_annotate_html(*args, **kwargs)
+        html_path = args[0] if args else kwargs.get("html_path")
+        if html_path is None:
+            return
+        path = live_report_module.Path(html_path)
+        html = path.read_text(encoding="utf-8")
+        if _LEGACY_BANNER_FONT in html:
+            html = html.replace(_LEGACY_BANNER_FONT, _CJK_BANNER_FONT, 1)
+            live_report_module._atomic_text(path, html)
+
     reporting_module._normalized_record = normalized_record
     reporting_module.DETAIL_FIELDS = tuple(
         dict.fromkeys((*reporting_module.DETAIL_FIELDS, *_OVERALL_EXPORT_FIELDS))
@@ -118,6 +136,7 @@ def install_reporting_compat(reporting_module: Any, live_report_module: Any) -> 
     live_report_module._JSON_EXPORT_FIELDS = tuple(
         dict.fromkeys((*live_report_module._JSON_EXPORT_FIELDS, *_OVERALL_EXPORT_FIELDS))
     )
+    live_report_module._annotate_html = annotate_html
     reporting_module._overall_decision_compat_installed = True
 
 
