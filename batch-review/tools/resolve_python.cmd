@@ -31,12 +31,12 @@ if exist "%LOCAL_PYTHON%" (
 rem Fall back to an already installed compatible system Python.
 for %%V in (3.14 3.13 3.12 3.11) do (
   if not defined RESOLVED_PYTHON (
-    for /f "usebackq delims=" %%P in (`py -%%V -c "import sys; raise SystemExit(1) if sys.version_info[:2] not in ((3,11),(3,12),(3,13),(3,14)) else print(sys.executable)" 2^>nul`) do set "RESOLVED_PYTHON=%%P"
+    for /f "usebackq delims=" %%P in (`py -%%V -c "import sys; ok=sys.version_info[:2] in ((3,11),(3,12),(3,13),(3,14)); print(sys.executable) if ok else None; raise SystemExit(0 if ok else 1)" 2^>nul`) do set "RESOLVED_PYTHON=%%P"
   )
 )
 if defined RESOLVED_PYTHON goto :resolved
 
-for /f "usebackq delims=" %%P in (`python -c "import sys; raise SystemExit(1) if sys.version_info[:2] not in ((3,11),(3,12),(3,13),(3,14)) else print(sys.executable)" 2^>nul`) do set "RESOLVED_PYTHON=%%P"
+for /f "usebackq delims=" %%P in (`python -c "import sys; ok=sys.version_info[:2] in ((3,11),(3,12),(3,13),(3,14)); print(sys.executable) if ok else None; raise SystemExit(0 if ok else 1)" 2^>nul`) do set "RESOLVED_PYTHON=%%P"
 if defined RESOLVED_PYTHON goto :resolved
 
 rem No system Python exists. Bootstrap the repository-bundled Python 3.13
