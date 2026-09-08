@@ -28,6 +28,14 @@ from .path_compat import install_config_path_compat
 
 install_config_path_compat(_config_module)
 
+# Public/durable security decisions use one machine code. The pure policy module
+# historically emitted BLOCK while models/reporting already used BLOCKED. Its
+# functions resolve this module global at call time, so setting the canonical
+# value here keeps old BLOCK inputs readable while all new outputs become BLOCKED.
+from . import review_policy as _review_policy_module
+
+_review_policy_module.SECURITY_BLOCK = "BLOCKED"
+
 from . import live_report as _live_report_module
 from . import reporting as _reporting_module
 from .overall_reporting import install_reporting_compat
