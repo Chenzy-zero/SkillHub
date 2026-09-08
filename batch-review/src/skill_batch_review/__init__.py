@@ -28,6 +28,12 @@ from .path_compat import install_config_path_compat
 
 install_config_path_compat(_config_module)
 
+from . import live_report as _live_report_module
+from . import reporting as _reporting_module
+from .overall_reporting import install_reporting_compat
+
+install_reporting_compat(_reporting_module, _live_report_module)
+
 from .config import (
     BatchConfig,
     ConcurrencyConfig,
