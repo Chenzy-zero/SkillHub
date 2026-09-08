@@ -47,16 +47,16 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
             textwrap.dedent(
                 f"""
                 [batch]
-                inventory_csv = "{self.inventory}"
+                inventory_csv = "{self.inventory.as_posix()}"
                 included_statuses = ["ACTIVE"]
                 [workspace]
-                root = "{self.root / 'work'}"
-                evidence_root = "{self.root / 'evidence'}"
-                candidate_root = "{self.root / 'candidates'}"
-                manifest_root = "{self.manifests}"
-                git_download_root = "{self.root / 'git_download'}"
-                skills_root = "{self.root / 'skills'}"
-                results_root = "{self.root / 'results'}"
+                root = "{(self.root / 'work').as_posix()}"
+                evidence_root = "{(self.root / 'evidence').as_posix()}"
+                candidate_root = "{(self.root / 'candidates').as_posix()}"
+                manifest_root = "{self.manifests.as_posix()}"
+                git_download_root = "{(self.root / 'git_download').as_posix()}"
+                skills_root = "{(self.root / 'skills').as_posix()}"
+                results_root = "{(self.root / 'results').as_posix()}"
                 [gerrit]
                 ssh_url_template = "ssh://{{user}}@{{host}}:{{port}}/{{repo_name}}.git"
                 [status_mapping]
@@ -64,8 +64,8 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
                 [quality]
                 candidate_threshold = 70
                 [ai]
-                skill_path = "{self.root / 'ai-skill'}"
-                result_schema_path = "{self.root / 'schema.json'}"
+                skill_path = "{(self.root / 'ai-skill').as_posix()}"
+                result_schema_path = "{(self.root / 'schema.json').as_posix()}"
                 policy_version = "policy-1"
                 reviewer_model = "intranet-model"
                 [scanners.cisco]
