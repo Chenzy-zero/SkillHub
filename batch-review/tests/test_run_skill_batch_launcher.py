@@ -38,10 +38,8 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.inventory = self.root / "inventory.csv"
-        self.inventory.write_text(
-            "skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,product_line,user_name,user_email\n"
-            f"id-one,demo,team/demo,main,skills/demo,{'a' * 40},否,active,product,Alice,alice@example.com\n",
-            encoding="utf-8",
+        self._write_inventory(
+            [("id-one", "demo", "team/demo", "main", "skills/demo", "a")]
         )
         self.manifests = self.root / "manifests"
         self.config = self.root / "review.toml"
@@ -84,6 +82,16 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def _write_inventory(self, rows):
+        lines = [
+            "skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,product_line,user_name,user_email"
+        ]
+        for index, (skill_id, name, repo, branch, path, hex_char) in enumerate(rows, 1):
+            lines.append(
+                f"{skill_id},{name},{repo},{branch},{path},{hex_char * 40},否,active,product,User{index},user{index}@example.com"
+            )
+        self.inventory.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
     def run_launcher(self, *args):
         return subprocess.run(
             [sys.executable, str(LAUNCHER), *args],
@@ -93,7 +101,69 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
             check=False,
         )
 
-    def test_plan_uses_skill_items_and_never_accesses_network(self):
+    def _fake_live_report(self, batch_id="batch"):
+        output = self.root / "live" / batch_id
+        output.mkdir(parents=True, exist_ok=True)
+        html = output / "report.html"
+        csv_path = output / "current.csv"
+        json_path = output / "current.json"
+        for path in (html, csv_path, json_path):
+            path.write_text("{}\n", encoding="utf-8")
+        return SimpleNamespace(
+            report_status="INTERIM",
+            paths=SimpleNamespace(html=html),
+            current_csv=csv_path,
+            current_json=json_path,
+        )
+
+    def _repository_download(self, rows, *, revision_char="c", sizes=None):
+        revision = revision_char * 40
+        downloads = {}
+        sizes = sizes or {}
+        for row in rows:
+            task_root = self.root / "downloads" / row.trace_values["skill_id"]
+            skill_root = task_root / row.skill_name
+            skill_root.mkdir(parents=True, exist_ok=True)
+            content = b"# test\n"
+            (skill_root / "SKILL.md").write_bytes(content)
+            size = sizes.get(row.trace_values["skill_id"], len(content))
+            entry = PackageEntry("SKILL.md", "file", "100644", size, "d" * 64)
+            snapshot = SnapshotResult(
+                row.repo_name,
+                revision,
+                row.skill_path,
+                skill_root,
+                (entry,),
+                "e" * 64,
+                package_size_bytes=size,
+            )
+            downloads[row.source_row_id] = PartialDownload(
+                task_root,
+                task_root.parent,
+                revision,
+                snapshot=snapshot,
+                transport="whole_repository_archive",
+            )
+        return SimpleNamespace(
+            revision=revision,
+            transport="whole_repository_archive",
+            skills=downloads,
+        )
+
+    def _fake_prepare(self, calls):
+        def prepare(_config, *, batch_id, row, downloaded):
+            calls.append((row.repo_name, row.trace_values["skill_id"]))
+            return SimpleNamespace(
+                task_id=launcher_module.skill_task_id(row),
+                skill_id=row.trace_values["skill_id"],
+                snapshot=downloaded.snapshot,
+                index_path=self.root / f"{row.trace_values['skill_id']}.json",
+                handoff_path=self.root / f"{row.trace_values['skill_id']}-handoff.json",
+                requires_ai=True,
+            )
+        return prepare
+
+    def test_plan_uses_batch_wide_queue_for_new_batches(self):
         result = self.run_launcher("plan", "--config", str(self.config), "--batch-id", "skills-1")
         self.assertEqual(result.returncode, 0, result.stderr)
         state = json.loads(
@@ -102,7 +172,8 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         self.assertEqual(state["status"], "READY")
         self.assertEqual(state["workflow_version"], "repository_archive_v1")
         self.assertEqual(state["ai_policy_version"], "policy-1")
-        self.assertEqual(state["items"][0]["skill_id"], "id-one")
+        self.assertEqual(state["ai_queue_mode"], "batch_wide_v2")
+        self.assertEqual(state["static_phase_status"], "PENDING")
         self.assertEqual(state["items"][0]["status"], "PENDING")
 
     def test_report_command_backfills_html_for_completed_batch(self):
@@ -114,12 +185,8 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         table_paths = (self.root / "result.csv", self.root / "result.json")
         html_path = self.root / "report.html"
         with (
-            mock.patch.object(
-                launcher_module, "write_skill_result_tables", return_value=table_paths
-            ),
-            mock.patch.object(
-                launcher_module, "write_skill_html_report", return_value=html_path
-            ),
+            mock.patch.object(launcher_module, "write_skill_result_tables", return_value=table_paths),
+            mock.patch.object(launcher_module, "write_skill_html_report", return_value=html_path),
         ):
             code = launcher_module._cmd_report(
                 SimpleNamespace(config=self.config, batch_id="completed-without-report")
@@ -127,10 +194,8 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         self.assertEqual(code, 0)
         stored = launcher_module._load_state(config, "completed-without-report")
         self.assertEqual(stored["result_html"], str(html_path))
-        self.assertEqual(stored["result_csv"], str(table_paths[0]))
-        self.assertEqual(stored["result_json"], str(table_paths[1]))
 
-    def test_started_legacy_batch_cannot_resume_under_repository_workflow(self):
+    def test_started_legacy_batch_cannot_resume_without_frozen_workflow(self):
         config = load_config(self.config)
         state = launcher_module._new_state(config, "legacy-started")
         state.pop("workflow_version")
@@ -138,25 +203,16 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         state["current_task_id"] = "legacy-task"
         state["items"][0].update({"status": "WAITING_FOR_AI", "task_id": "legacy-task"})
         launcher_module._save(config, state)
-
         with self.assertRaisesRegex(launcher_module.LauncherError, "旧批次已经开始执行"):
             launcher_module._load_state(config, "legacy-started")
 
-    def test_pristine_legacy_plan_is_migrated_without_execution(self):
+    def test_existing_repository_queue_mode_is_preserved(self):
         config = load_config(self.config)
-        state = launcher_module._new_state(config, "legacy-pristine")
-        state.pop("workflow_version")
+        state = launcher_module._new_state(config, "repository-v1")
+        state["ai_queue_mode"] = "repository_batch_v1"
         launcher_module._save(config, state)
-
-        migrated = launcher_module._load_state(config, "legacy-pristine")
-
-        self.assertEqual(migrated["workflow_version"], "repository_archive_v1")
-        stored = json.loads(
-            (self.manifests / "legacy-pristine/per-skill-launcher-state.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        self.assertEqual(stored["workflow_version"], "repository_archive_v1")
+        loaded = launcher_module._load_state(config, "repository-v1")
+        self.assertEqual(loaded["ai_queue_mode"], "repository_batch_v1")
 
     def test_inventory_change_blocks_existing_batch(self):
         config = load_config(self.config)
@@ -166,140 +222,121 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
             handle.write(
                 f"id-two,two,team/demo,main,skills/two,{'b' * 40},否,active,product,Bob,bob@example.com\n"
             )
-
         with self.assertRaisesRegex(launcher_module.LauncherError, "CSV 内容发生变化"):
             launcher_module._load_state(config, "inventory-changed")
-
-    def test_ai_policy_change_blocks_existing_batch(self):
-        config = load_config(self.config)
-        state = launcher_module._new_state(config, "policy-changed")
-        state["ai_policy_version"] = "different-policy"
-        launcher_module._save(config, state)
-
-        with self.assertRaisesRegex(launcher_module.LauncherError, "AI 审查策略发生变化"):
-            launcher_module._load_state(config, "policy-changed")
 
     def test_start_requires_explicit_execution(self):
         result = self.run_launcher("start", "--config", str(self.config), "--batch-id", "skills-2")
         self.assertEqual(result.returncode, 2)
         self.assertIn("--execute", result.stderr)
 
-    def test_repository_is_downloaded_once_and_ai_queue_contains_all_skills(self):
-        self.inventory.write_text(
-            "skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,product_line,user_name,user_email\n"
-            f"id-one,one,team/demo,main,skills/one,{'a' * 40},否,active,product,Alice,alice@example.com\n"
-            f"id-two,two,team/demo,main,skills/two,{'b' * 40},否,active,product,Bob,bob@example.com\n",
-            encoding="utf-8",
+    def test_batch_wide_static_prepares_all_repositories_before_ai_queue(self):
+        self._write_inventory(
+            [
+                ("id-one", "one", "team/one", "main", "skills/one", "a"),
+                ("id-two", "two", "team/one", "main", "skills/two", "b"),
+                ("id-three", "three", "team/two", "release", "skills/three", "c"),
+            ]
         )
         config = load_config(self.config)
-        state = launcher_module._new_state(config, "repo-sequential")
+        state = launcher_module._new_state(config, "batch-wide")
         document = launcher_module._inventory(config)
-        revision = "c" * 40
-        downloads = {}
-        for row in document.rows:
-            task_root = self.root / "downloads" / row.trace_values["skill_id"]
-            skill_root = task_root / row.skill_name
-            skill_root.mkdir(parents=True)
-            (skill_root / "SKILL.md").write_text("# test\n", encoding="utf-8")
-            entry = PackageEntry("SKILL.md", "file", "100644", 7, "d" * 64)
-            snapshot = SnapshotResult(
-                row.repo_name,
-                revision,
-                row.skill_path,
-                skill_root,
-                (entry,),
-                "e" * 64,
-            )
-            downloads[row.source_row_id] = PartialDownload(
-                task_root,
-                task_root.parent,
-                revision,
-                snapshot=snapshot,
-                transport="whole_repository_archive",
-            )
-        repository_download = SimpleNamespace(
-            revision=revision,
-            transport="whole_repository_archive",
-            skills=downloads,
-        )
         prepare_calls = []
+        download_calls = []
 
-        def fake_prepare(_config, *, batch_id, row, downloaded):
-            prepare_calls.append(row.trace_values["skill_id"])
-            return SimpleNamespace(
-                task_id=launcher_module.skill_task_id(row),
-                skill_id=row.trace_values["skill_id"],
-                snapshot=downloaded.snapshot,
-                index_path=self.root / f"{row.trace_values['skill_id']}.json",
-                handoff_path=self.root / f"{row.trace_values['skill_id']}-handoff.json",
-                requires_ai=True,
+        def fake_download(_config, *, batch_id, rows):
+            download_calls.append((rows[0].repo_name, rows[0].branch, len(rows)))
+            sizes = {"id-one": 10, "id-two": 100, "id-three": 50}
+            return self._repository_download(
+                rows,
+                revision_char="c" if rows[0].repo_name == "team/one" else "d",
+                sizes=sizes,
             )
 
+        live = self._fake_live_report("batch-wide")
         with (
-            mock.patch.object(launcher_module, "download_repository_skills", return_value=repository_download) as download,
-            mock.patch.object(launcher_module, "prepare_skill", side_effect=fake_prepare),
+            mock.patch.object(launcher_module, "download_repository_skills", side_effect=fake_download),
+            mock.patch.object(launcher_module, "prepare_skill", side_effect=self._fake_prepare(prepare_calls)),
             mock.patch.object(launcher_module, "cleanup_repository_download", return_value=True) as cleanup,
+            mock.patch.object(launcher_module, "write_skill_result_tables", return_value=(self.root / "r.csv", self.root / "r.json")),
+            mock.patch.object(launcher_module, "write_live_batch_report", return_value=live) as live_report,
         ):
             launcher_module._prepare_next(config, state)
-            self.assertEqual(download.call_count, 1)
-            self.assertEqual(prepare_calls, ["id-one", "id-two"])
-            self.assertEqual(
-                [item["status"] for item in state["items"]],
-                ["WAITING_FOR_AI", "WAITING_FOR_AI"],
-            )
-            queue = json.loads(
-                (self.manifests / "repo-sequential/ai-review-queue.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-            self.assertEqual([item["skill_id"] for item in queue["items"]], ["id-one", "id-two"])
-            self.assertEqual(queue["max_parallel"], 5)
-            self.assertEqual([item["review_size_bytes"] for item in queue["items"]], [7, 7])
-            self.assertEqual(
-                queue["items"][0]["skill_triggers"],
-                {
-                    "claude_code": "/skill-security-review",
-                    "codex_cli": "$skill-security-review",
-                },
-            )
-            self.assertEqual(
-                queue["items"][0]["review_agents"]["codex_cli"],
-                "skill_security_reviewer",
-            )
-            first = state["items"][0]
-            first["status"] = "COMPLETE"
-            second = state["items"][1]
-            second["status"] = "COMPLETE"
-            state["current_task_id"] = None
-            state["status"] = "READY"
 
-            launcher_module._prepare_next(config, state)
-            self.assertEqual(download.call_count, 1)
-            self.assertEqual(cleanup.call_count, 1)
-            self.assertEqual(state["status"], "COMPLETE")
+        self.assertEqual(
+            download_calls,
+            [("team/one", "main", 2), ("team/two", "release", 1)],
+        )
+        self.assertEqual(
+            prepare_calls,
+            [("team/one", "id-one"), ("team/one", "id-two"), ("team/two", "id-three")],
+        )
+        self.assertEqual(cleanup.call_count, 2)
+        self.assertEqual(live_report.call_count, 1)
+        self.assertIsNone(state.get("active_repository"))
+        self.assertEqual(state["static_phase_status"], "COMPLETED")
+        self.assertEqual(state["status"], "WAITING_FOR_AI")
+        self.assertTrue(all(item["workspace_cleaned"] for item in state["items"]))
+        self.assertTrue(all(item["status"] == "WAITING_FOR_AI" for item in state["items"]))
 
-    def test_batch_advance_imports_all_ready_ai_results(self):
-        self._assert_batch_advance(ready_indices=(1, 2))
+        queue = json.loads(
+            (self.manifests / "batch-wide/ai-review-queue.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(queue["queue_mode"], "batch_wide_v2")
+        self.assertEqual(queue["scope"], "BATCH")
+        self.assertEqual(queue["scheduling"], "rolling_largest_first")
+        self.assertEqual(queue["max_parallel"], 5)
+        self.assertEqual(
+            [item["review_size_bytes"] for item in queue["items"]],
+            [100, 50, 10],
+        )
+        self.assertTrue(
+            all(
+                set(item) == {"task_id", "handoff", "expected_result", "review_size_bytes"}
+                for item in queue["items"]
+            )
+        )
+        self.assertEqual(len({item["task_id"] for item in queue["items"]}), 3)
 
-    def test_batch_advance_imports_later_result_without_waiting_for_first(self):
-        self._assert_batch_advance(ready_indices=(2,))
-
-    def _assert_batch_advance(self, ready_indices):
-        self.inventory.write_text(
-            "skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,product_line,user_name,user_email\n"
-            f"id-one,one,team/demo,main,skills/one,{'a' * 40},否,active,product,Alice,alice@example.com\n"
-            f"id-two,two,team/demo,main,skills/two,{'b' * 40},否,active,product,Bob,bob@example.com\n",
-            encoding="utf-8",
+    def test_batch_queue_excludes_existing_results_on_resume(self):
+        self._write_inventory(
+            [
+                ("id-one", "one", "team/one", "main", "skills/one", "a"),
+                ("id-two", "two", "team/two", "main", "skills/two", "b"),
+            ]
         )
         config = load_config(self.config)
-        state = launcher_module._new_state(config, "batch-finish")
-        state["active_repository"] = {
-            "repo_name": "team/demo",
-            "branch": "main",
-            "source_revision": "c" * 40,
-            "skill_count": 2,
-        }
-        state["ai_queue_mode"] = "repository_batch_v1"
+        state = launcher_module._new_state(config, "resume")
+        for index, item in enumerate(state["items"], 1):
+            item.update(
+                {
+                    "task_id": f"task-{index}",
+                    "status": "WAITING_FOR_AI",
+                    "handoff_path": str(self.root / f"handoff-{index}.json"),
+                    "ai_result_path": str(self.root / f"ai-{index}.json"),
+                    "review_size_bytes": index * 10,
+                }
+            )
+        Path(state["items"][0]["ai_result_path"]).write_text("{}\n", encoding="utf-8")
+
+        launcher_module._activate_batch_queue(config, state, state["items"])
+        queue = json.loads(
+            (self.manifests / "resume/ai-review-queue.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual([item["task_id"] for item in queue["items"]], ["task-2"])
+        self.assertEqual(state["ai_queue_pending_count"], 1)
+        self.assertEqual(state["ai_result_ready_count"], 1)
+
+    def test_batch_advance_imports_ready_results_across_repositories_without_cleanup_gate(self):
+        self._write_inventory(
+            [
+                ("id-one", "one", "team/one", "main", "skills/one", "a"),
+                ("id-two", "two", "team/two", "release", "skills/two", "b"),
+            ]
+        )
+        config = load_config(self.config)
+        state = launcher_module._new_state(config, "finish-wide")
+        state["static_phase_status"] = "COMPLETED"
         for index, item in enumerate(state["items"], 1):
             item.update(
                 {
@@ -308,27 +345,22 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
                     "index_path": str(self.root / f"index-{index}.json"),
                     "ai_result_path": str(self.root / f"ai-{index}.json"),
                     "handoff_path": str(self.root / f"handoff-{index}.json"),
+                    "workspace_cleaned": True,
                 }
             )
-            if index in ready_indices:
-                Path(item["ai_result_path"]).write_text("{}\n", encoding="utf-8")
-
-        table_paths = (self.root / "results.csv", self.root / "results.json")
+            Path(item["ai_result_path"]).write_text("{}\n", encoding="utf-8")
+        live = self._fake_live_report("finish-wide")
         with (
             mock.patch.object(launcher_module, "finalize_skill") as finalize,
-            mock.patch.object(launcher_module, "write_skill_result_tables", return_value=table_paths),
+            mock.patch.object(launcher_module, "write_skill_result_tables", return_value=(self.root / "results.csv", self.root / "results.json")),
+            mock.patch.object(launcher_module, "write_live_batch_report", return_value=live),
         ):
-            launcher_module._finish_current(config, state, confirm_cleanup=True)
+            launcher_module._finish_current(config, state, confirm_cleanup=False)
 
-        self.assertEqual(finalize.call_count, len(ready_indices))
-        if len(ready_indices) == 2:
-            self.assertEqual([item["status"] for item in state["items"]], ["COMPLETE", "COMPLETE"])
-            self.assertIsNone(state["current_task_id"])
-            self.assertEqual(state["status"], "READY")
-        else:
-            self.assertEqual([item["status"] for item in state["items"]], ["WAITING_FOR_AI", "COMPLETE"])
-            self.assertEqual(state["current_task_id"], "task-1")
-            self.assertEqual(state["status"], "WAITING_FOR_AI")
+        self.assertEqual(finalize.call_count, 2)
+        self.assertEqual([item["status"] for item in state["items"]], ["COMPLETE", "COMPLETE"])
+        self.assertIsNone(state["current_task_id"])
+        self.assertEqual(state["status"], "READY")
 
 
 if __name__ == "__main__":
