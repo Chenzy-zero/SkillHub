@@ -1,5 +1,4 @@
-# GitHub 验证配置模板。正式切换 Gerrit 时，以 review.company.example.toml 为基础替换本文件。
-# 源站配置沿用程序当前的 [gerrit] 兼容字段名，但 URL 模板已指向 GitHub SSH 443。
+# GitHub 验证配置模板。正式切换 Gerrit 时以 review.company.example.toml 为基础。
 
 [batch]
 inventory_csv = "../inventory/github_skill_summary.csv"
@@ -7,12 +6,17 @@ batch_id_prefix = "github-validation"
 included_statuses = ["ACTIVE"]
 
 [workspace]
+# Runtime
 root = "../.batch-review/github-validation/work"
-evidence_root = "../.batch-review/github-validation/restricted-evidence"
-candidate_root = "../.batch-review/github-validation/private-candidates"
-manifest_root = "../.batch-review/github-validation/manifests"
 git_download_root = "../.batch-review/github-validation/git_download"
+# State/control plane（兼容键名 manifest_root）
+manifest_root = "../.batch-review/github-validation/manifests"
+# Archive + restricted evidence
 skills_root = "../.batch-review/github-validation/skills"
+evidence_root = "../.batch-review/github-validation/restricted-evidence"
+# Candidate staging
+candidate_root = "../.batch-review/github-validation/private-candidates"
+# Reports；唯一人工入口为 <batch-id>/skill-security-review-report.html
 results_root = "../.batch-review/github-validation/results"
 clean_after_repository = true
 keep_failed_workspace = true
@@ -23,7 +27,6 @@ user = "git"
 host = "ssh.github.com"
 port = 443
 allowed_repositories = ["Chenzy-zero/SkillHub"]
-# 可选：填写执行节点上的只读 SSH 私钥路径；也可以省略并使用 ssh-agent。
 ssh_identity_file = "FILL_GITHUB_READONLY_SSH_KEY_PATH"
 
 [status_mapping]
@@ -36,19 +39,16 @@ candidate_threshold = 70
 max_score = 100
 
 [ai]
-skill_path = "../skills/skill-security-review"
-result_schema_path = "../skills/skill-security-review/references/review-result.schema.json"
-# 策略版本由上述 Skill 规则内容自动计算；模型由当前 AI 客户端会话记录，无需手填。
+skill_path = "../.agents/skills/skill-security-review"
+result_schema_path = "../.agents/skills/skill-security-review/references/review-result.schema.json"
 
 [scanners.cisco]
 enabled = true
 version = "2.0.13"
 timeout_seconds = 600
 command = [
-  "FILL_CISCO_EXECUTABLE",
-  "scan", "{skill_root}",
-  "--format", "json", "--compact",
-  "--output", "{output_file}",
+  "FILL_CISCO_EXECUTABLE", "scan", "{skill_root}",
+  "--format", "json", "--compact", "--output", "{output_file}",
 ]
 
 [scanners.skillspector]
@@ -56,10 +56,8 @@ enabled = true
 version = "2.5.1"
 timeout_seconds = 600
 command = [
-  "FILL_SKILLSPECTOR_EXECUTABLE",
-  "scan", "{skill_root}",
-  "--no-llm", "--format", "json",
-  "--output", "{output_file}",
+  "FILL_SKILLSPECTOR_EXECUTABLE", "scan", "{skill_root}",
+  "--no-llm", "--format", "json", "--output", "{output_file}",
 ]
 
 [retry]
