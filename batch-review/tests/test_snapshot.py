@@ -30,6 +30,10 @@ class SnapshotTests(unittest.TestCase):
         self.git("init", "-q")
         self.git("config", "user.email", "snapshot-tests@example.invalid")
         self.git("config", "user.name", "snapshot-tests")
+        # Freeze repository conversion semantics so Git-object and archive
+        # snapshots represent identical bytes on Windows and POSIX runners.
+        self.git("config", "core.autocrlf", "false")
+        self.git("config", "core.eol", "lf")
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
