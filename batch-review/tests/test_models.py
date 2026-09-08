@@ -1,6 +1,14 @@
 import unittest
 
-from skill_batch_review.models import ReviewTargetKey, SourceKey, normalize_branch, normalize_skill_path
+from skill_batch_review.models import (
+    AIReviewStatus,
+    FinalReviewStatus,
+    ReviewTargetKey,
+    SourceKey,
+    StaticReviewStatus,
+    normalize_branch,
+    normalize_skill_path,
+)
 
 
 class SourceModelTests(unittest.TestCase):
@@ -27,6 +35,11 @@ class SourceModelTests(unittest.TestCase):
             normalize_skill_path("skills\\demo")
         with self.assertRaises(ValueError):
             normalize_skill_path("skills//demo")
+
+    def test_phase_status_enums_are_stable_strings(self) -> None:
+        self.assertEqual(str(StaticReviewStatus.COMPLETED), "COMPLETED")
+        self.assertEqual(str(AIReviewStatus.PENDING), "PENDING")
+        self.assertEqual(str(FinalReviewStatus.INCOMPLETE), "INCOMPLETE")
 
 
 if __name__ == "__main__":  # pragma: no cover

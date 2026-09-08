@@ -29,6 +29,7 @@ from .config import ReviewConfig
 from .filesystem import remove_tree
 from .git_source import GitCommandError, GitRunner
 from .inventory import InventoryDocument, InventoryRow
+from .models import AIReviewStatus, FinalReviewStatus, StaticReviewStatus
 from .orchestrator import _default_adapters, _run_static_scans, _scan_summary
 from .result_reuse import (
     COMPARE_METHOD,
@@ -39,6 +40,12 @@ from .result_reuse import (
     skill_root_name,
 )
 from .review_policy import evaluate_policy
+from .review_state import (
+    ReviewPhaseState,
+    build_current_result,
+    static_security_decision,
+    static_waiting_for_ai,
+)
 from .reporting import write_batch_reports
 from .scanners import ScannerAdapter
 from .snapshot import SnapshotResult, export_skill_archive_snapshot, export_skill_snapshot
@@ -326,9 +333,6 @@ def partial_fetch_skill_repository(
             and not task_root.is_symlink()
             and not config.workspace.keep_failed_workspace
         ):
-            # A prior attempt of this exact deterministic task may have been
-            # interrupted while Windows still marked Git pack files read-only.
-            # This is the only stale directory that can be removed implicitly.
             remove_tree(task_root)
             leftovers = []
         if leftovers:
@@ -382,9 +386,6 @@ def partial_fetch_skill_repository(
                 f"{pinned}; reviewing the pinned revision as recorded in the inventory"
             )
 
-        # Gerrit upload-archive cannot restrict paths (it rejects "-- <path>"), so a
-        # whole-repository tar at the pinned revision is requested and
-        # export_skill_archive_snapshot materializes only the Skill Root subtree.
         archive_path = task_root / ".skill-archive.tar"
         archive_command = [
             "archive",
@@ -549,7 +550,9 @@ def _verify_archived_snapshot(snapshot: Any) -> None:
 
 
 def _source_mapping(config: ReviewConfig, row: InventoryRow, snapshot: SnapshotResult) -> dict[str, Any]:
-    result_path = config.workspace.skills_root / _skill_id(row) / "review-result.json"
+    skill_root = config.workspace.skills_root / _skill_id(row)
+    result_path = skill_root / "review-result.json"
+    current_result_path = skill_root / "current-result.json"
     return {
         "source_row_id": row.source_row_id,
         "source_row_numbers": list(row.source_row_numbers),
@@ -562,6 +565,7 @@ def _source_mapping(config: ReviewConfig, row: InventoryRow, snapshot: SnapshotR
         "source_revision": snapshot.source_revision,
         "skill_digest": snapshot.skill_digest,
         "content_id": f"sha256:{snapshot.skill_digest}",
+        "current_result_path": str(current_result_path),
         "review_result_path": str(result_path),
         **{name: row.trace_values.get(name, "") for name in ("product_line", "user_name", "user_email")},
     }
@@ -597,6 +601,19 @@ def _durable_result(
 ) -> Path:
     root = config.workspace.skills_root / str(source["skill_id"])
     return _atomic_json(root / "review-result.json", payload)
+
+
+def _durable_current_result(
+    config: ReviewConfig,
+    source: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> Path:
+    root = config.workspace.skills_root / str(source["skill_id"])
+    return _atomic_json(root / "current-result.json", payload)
+
+
+def _final_result(current: Mapping[str, Any]) -> dict[str, Any]:
+    return {**dict(current), "result_kind": "FINAL"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -657,6 +674,7 @@ def prepare_skill(
     index_path = config.workspace.manifest_root / batch_id / "skills" / f"{task_id}.json"
     base_index = {
         "schema_version": "1.0",
+        "phase_schema_version": "1.0",
         "batch_id": batch_id,
         "task_id": task_id,
         "source": source,
@@ -667,21 +685,38 @@ def prepare_skill(
         "review_fingerprint": fingerprint,
     }
     if not snapshot.coverage_complete:
-        result = {
-            **source,
-            "schema_version": "1.0",
-            "review_status": "INCOMPLETE",
-            "security_decision": "INCOMPLETE",
-            "quality_decision": "INCOMPLETE",
-            "quality_score": None,
-            **_finding_summary([]),
-            "failure_reason": "; ".join(item.code for item in snapshot.blocking_issues),
-            "evidence_ref": str(evidence.task_root),
-        }
-        evidence.write_json("final-result.json", result)
-        _durable_result(config, source, result)
-        _atomic_json(index_path, {**base_index, "status": "INCOMPLETE", "result": result})
-        return SkillPreparation(task_id, _skill_id(row), snapshot, index_path, None, result, downloaded.task_root)
+        phase = ReviewPhaseState(
+            StaticReviewStatus.INCOMPLETE,
+            AIReviewStatus.NOT_REQUIRED,
+            FinalReviewStatus.INCOMPLETE,
+        )
+        current = build_current_result(
+            source,
+            phase=phase,
+            static_security_decision="INCOMPLETE",
+            security_decision="INCOMPLETE",
+            quality_decision="INCOMPLETE",
+            findings=[],
+            evidence_ref=str(evidence.task_root),
+            review_policy_version=config.ai.policy_version,
+            failure_reason="; ".join(item.code for item in snapshot.blocking_issues),
+        )
+        final = _final_result(current)
+        current_path = _durable_current_result(config, source, current)
+        evidence.write_json("final-result.json", final)
+        result_path = _durable_result(config, source, final)
+        _atomic_json(
+            index_path,
+            {
+                **base_index,
+                **phase.to_dict(),
+                "status": "INCOMPLETE",
+                "current_result_path": str(current_path),
+                "result_path": str(result_path),
+                "result": final,
+            },
+        )
+        return SkillPreparation(task_id, _skill_id(row), snapshot, index_path, None, final, downloaded.task_root)
     reusable = find_reusable_result(
         config,
         root_name=root_name,
@@ -694,64 +729,120 @@ def prepare_skill(
         approved_scans = approved.get("static_reports") if isinstance(approved.get("static_reports"), list) else []
         approved_ai = approved.get("ai_review") if isinstance(approved.get("ai_review"), Mapping) else {}
         approved_security = approved_ai.get("security_review") if isinstance(approved_ai.get("security_review"), Mapping) else {}
-        result = {
-            **source,
-            "schema_version": "1.0",
-            "review_status": "COMPLETED",
-            "security_decision": "PASS",
-            "quality_decision": "PASS",
-            "quality_score": approved.get("quality_score"),
-            "quality_dimensions": (approved_ai.get("quality_review") or {}).get("dimensions", []),
-            "static_reports": [_scan_summary(item) for item in approved_scans if isinstance(item, Mapping)],
-            "ai_review_summary": {
+        static_reports = [_scan_summary(item) for item in approved_scans if isinstance(item, Mapping)]
+        phase = ReviewPhaseState(
+            StaticReviewStatus.COMPLETED,
+            AIReviewStatus.NOT_REQUIRED,
+            FinalReviewStatus.COMPLETED,
+        )
+        current = build_current_result(
+            source,
+            phase=phase,
+            static_reports=static_reports,
+            findings=findings,
+            static_security_decision="PASS",
+            security_decision="PASS",
+            quality_decision="PASS",
+            quality_score=approved.get("quality_score"),
+            ai_review_summary={
                 "status": "RESULT_REUSED",
                 "security_verdict": approved_security.get("verdict"),
                 "max_severity": approved_security.get("max_severity"),
             },
-            **_finding_summary(findings),
-            "reuse_status": REUSE_STATUS,
-            "reused_from_skill_id": (record.get("source") or {}).get("skill_id") if isinstance(record.get("source"), Mapping) else None,
-            "reused_from_task_id": record.get("source_task_id"),
-            "reused_from_batch_id": record.get("source_batch_id"),
-            "reused_from_evidence_ref": record.get("source_evidence_ref"),
-            "comparison_method": COMPARE_METHOD,
-            "timestamp_ignored": True,
-            "reuse_reason": "Skill Root 名称相同，且规范化包内容摘要完全一致；时间戳不参与比较。",
-            "review_policy_version": config.ai.policy_version,
-            "reviewed_at": _utc_now(),
-            "reused_from_reviewed_at": approved.get("reviewed_at") or approved_ai.get("reviewed_at"),
-            "evidence_ref": str(evidence.task_root),
-            "failure_reason": "",
-        }
-        evidence.write_json("result-reuse.json", result)
-        evidence.write_json("final-result.json", result)
-        _durable_result(config, source, result)
-        _atomic_json(index_path, {**base_index, "status": REUSE_STATUS, "result": result})
-        return SkillPreparation(task_id, _skill_id(row), snapshot, index_path, None, result, downloaded.task_root)
+            evidence_ref=str(evidence.task_root),
+            review_policy_version=config.ai.policy_version,
+            reviewed_at=_utc_now(),
+        )
+        current.update(
+            {
+                "quality_dimensions": (approved_ai.get("quality_review") or {}).get("dimensions", []),
+                "reuse_status": REUSE_STATUS,
+                "reused_from_skill_id": (record.get("source") or {}).get("skill_id") if isinstance(record.get("source"), Mapping) else None,
+                "reused_from_task_id": record.get("source_task_id"),
+                "reused_from_batch_id": record.get("source_batch_id"),
+                "reused_from_evidence_ref": record.get("source_evidence_ref"),
+                "comparison_method": COMPARE_METHOD,
+                "timestamp_ignored": True,
+                "reuse_reason": "Skill Root 名称相同，且规范化包内容摘要完全一致；时间戳不参与比较。",
+                "reused_from_reviewed_at": approved.get("reviewed_at") or approved_ai.get("reviewed_at"),
+            }
+        )
+        final = _final_result(current)
+        current_path = _durable_current_result(config, source, current)
+        evidence.write_json("result-reuse.json", final)
+        evidence.write_json("final-result.json", final)
+        result_path = _durable_result(config, source, final)
+        _atomic_json(
+            index_path,
+            {
+                **base_index,
+                **phase.to_dict(),
+                "status": REUSE_STATUS,
+                "current_result_path": str(current_path),
+                "result_path": str(result_path),
+                "result": final,
+            },
+        )
+        return SkillPreparation(task_id, _skill_id(row), snapshot, index_path, None, final, downloaded.task_root)
     scans = _run_static_scans(
         active_adapters,
         snapshot=snapshot,
         work_root=downloaded.task_root / "scanner-work",
         evidence=evidence,
     )
+    static_reports = [_scan_summary(scan.to_dict()) for scan in scans]
     if any(not scan.completed or not scan.tool_ok for scan in scans):
         policy = evaluate_policy(scans, None, skill_digest=snapshot.skill_digest)
-        result = {
-            **source,
-            "schema_version": "1.0",
-            "review_status": "INCOMPLETE",
-            "security_decision": policy.security_decision,
-            "quality_decision": "INCOMPLETE",
-            "quality_score": None,
-            "static_reports": [_scan_summary(scan.to_dict()) for scan in scans],
-            **_finding_summary(policy.findings),
-            "failure_reason": "; ".join(policy.reasons),
-            "evidence_ref": str(evidence.task_root),
-        }
-        evidence.write_json("final-result.json", result)
-        _durable_result(config, source, result)
-        _atomic_json(index_path, {**base_index, "status": "INCOMPLETE", "result": result})
-        return SkillPreparation(task_id, _skill_id(row), snapshot, index_path, None, result, downloaded.task_root)
+        phase = ReviewPhaseState(
+            StaticReviewStatus.INCOMPLETE,
+            AIReviewStatus.NOT_REQUIRED,
+            FinalReviewStatus.INCOMPLETE,
+        )
+        current = build_current_result(
+            source,
+            phase=phase,
+            static_reports=static_reports,
+            findings=policy.findings,
+            static_security_decision=policy.security_decision,
+            security_decision=policy.security_decision,
+            quality_decision="INCOMPLETE",
+            evidence_ref=str(evidence.task_root),
+            review_policy_version=config.ai.policy_version,
+            failure_reason="; ".join(policy.reasons),
+        )
+        final = _final_result(current)
+        current_path = _durable_current_result(config, source, current)
+        evidence.write_json("final-result.json", final)
+        result_path = _durable_result(config, source, final)
+        _atomic_json(
+            index_path,
+            {
+                **base_index,
+                **phase.to_dict(),
+                "status": "INCOMPLETE",
+                "current_result_path": str(current_path),
+                "result_path": str(result_path),
+                "result": final,
+            },
+        )
+        return SkillPreparation(task_id, _skill_id(row), snapshot, index_path, None, final, downloaded.task_root)
+
+    static_policy = evaluate_policy(scans, None, skill_digest=snapshot.skill_digest)
+    static_findings = [
+        finding
+        for finding in static_policy.findings
+        if str(finding.get("source_scanner") or "").upper() != "AI_REVIEW"
+    ]
+    interim = static_waiting_for_ai(
+        source,
+        static_reports=static_reports,
+        findings=static_findings,
+        static_security_decision=static_security_decision(static_findings),
+        evidence_ref=str(evidence.task_root),
+        review_policy_version=config.ai.policy_version,
+    )
+    current_path = _durable_current_result(config, source, interim)
+
     assigned = _utc_now()
     handoff = build_ai_review_handoff(
         snapshot=snapshot,
@@ -774,12 +865,19 @@ def prepare_skill(
         name: str(evidence.task_root / "scanners" / name / "normalized-result.json")
         for name in ("cisco", "skillspector")
     }
+    phase = ReviewPhaseState(
+        StaticReviewStatus.COMPLETED,
+        AIReviewStatus.PENDING,
+        FinalReviewStatus.PENDING,
+    )
     _atomic_json(
         index_path,
         {
             **base_index,
+            **phase.to_dict(),
             "status": "WAITING_FOR_AI",
             "handoff_path": str(handoff_ref.path),
+            "current_result_path": str(current_path),
             "static_result_paths": scan_paths,
         },
     )
@@ -831,33 +929,61 @@ def finalize_skill(
         quality_threshold=config.quality.candidate_threshold,
     )
     findings = list(policy.findings)
-    result = {
-        **dict(source),
-        "schema_version": "1.0",
-        "review_status": "COMPLETED",
-        "security_decision": policy.security_decision,
-        "quality_decision": policy.quality_decision,
-        "quality_score": policy.quality_score,
-        "quality_dimensions": review["quality_review"]["dimensions"],
-        "static_reports": [_scan_summary(scan) for scan in scans],
-        "ai_review_summary": {
+    static_reports = [_scan_summary(scan) for scan in scans]
+    prior_current: Mapping[str, Any] = {}
+    current_path_value = index.get("current_result_path") or source.get("current_result_path")
+    if current_path_value:
+        current_path_candidate = Path(str(current_path_value))
+        if current_path_candidate.is_file():
+            value = json.loads(current_path_candidate.read_text(encoding="utf-8"))
+            if isinstance(value, Mapping) and value.get("source_row_id") == source.get("source_row_id"):
+                prior_current = value
+    static_decision = str(prior_current.get("static_security_decision") or "")
+    if not static_decision:
+        static_only_findings = [
+            finding
+            for finding in findings
+            if str(finding.get("source_scanner") or "").upper() != "AI_REVIEW"
+        ]
+        static_decision = static_security_decision(static_only_findings)
+
+    phase = ReviewPhaseState(
+        StaticReviewStatus.COMPLETED,
+        AIReviewStatus.COMPLETED,
+        FinalReviewStatus.COMPLETED,
+    )
+    current = build_current_result(
+        source,
+        phase=phase,
+        static_reports=static_reports,
+        findings=findings,
+        static_security_decision=static_decision,
+        security_decision=policy.security_decision,
+        quality_decision=policy.quality_decision,
+        quality_score=policy.quality_score,
+        ai_review_summary={
             "status": "COMPLETED",
             "security_verdict": (review.get("security_review") or {}).get("verdict"),
             "max_severity": (review.get("security_review") or {}).get("max_severity"),
             "quality_verdict": (review.get("quality_review") or {}).get("verdict"),
         },
-        **_finding_summary(findings),
-        "reuse_status": "",
-        "review_policy_version": config.ai.policy_version,
-        "reviewed_at": review.get("reviewed_at"),
-        "evidence_ref": str(evidence.task_root),
-        "failure_reason": "; ".join(policy.blocking_reasons + policy.incomplete_reasons),
-    }
+        evidence_ref=str(evidence.task_root),
+        review_policy_version=config.ai.policy_version,
+        reviewed_at=review.get("reviewed_at"),
+        failure_reason="; ".join(policy.blocking_reasons + policy.incomplete_reasons),
+    )
+    current.update(
+        {
+            "quality_dimensions": review["quality_review"]["dimensions"],
+            "reuse_status": "",
+        }
+    )
+    final = _final_result(current)
     evidence.write_json("ai/imported-result.json", review)
     evidence.write_json(
         "final-result.json",
         {
-            **result,
+            **final,
             "status": "COMPLETED",
             "candidate_eligible": policy.candidate_eligible,
             "review_fingerprint": index["review_fingerprint"],
@@ -865,7 +991,8 @@ def finalize_skill(
             "ai_review": review,
         },
     )
-    result_path = _durable_result(config, source, result)
+    current_path = _durable_current_result(config, source, current)
+    result_path = _durable_result(config, source, final)
     final_evidence = json.loads((evidence.task_root / "final-result.json").read_text(encoding="utf-8"))
     publish_reusable_result(
         config,
@@ -878,8 +1005,18 @@ def finalize_skill(
         source=source,
         final_result=final_evidence,
     )
-    _atomic_json(index_path, {**index, "status": "COMPLETED", "result_path": str(result_path)})
-    return result
+    _atomic_json(
+        index_path,
+        {
+            **index,
+            **phase.to_dict(),
+            "phase_schema_version": "1.0",
+            "status": "COMPLETED",
+            "current_result_path": str(current_path),
+            "result_path": str(result_path),
+        },
+    )
+    return final
 
 
 RESULT_COLUMNS = (

@@ -59,17 +59,17 @@ class ProjectSetupTests(unittest.TestCase):
             textwrap.dedent(
                 f"""
                 [batch]
-                inventory_csv = "{inventory}"
+                inventory_csv = "{inventory.as_posix()}"
                 batch_id_prefix = "test"
                 included_statuses = ["ACTIVE"]
                 [workspace]
-                root = "{self.root / 'work'}"
-                evidence_root = "{self.root / 'evidence'}"
-                candidate_root = "{self.root / 'candidates'}"
-                manifest_root = "{manifests}"
-                git_download_root = "{self.root / 'downloads'}"
-                skills_root = "{self.root / 'skills'}"
-                results_root = "{self.root / 'results'}"
+                root = "{(self.root / 'work').as_posix()}"
+                evidence_root = "{(self.root / 'evidence').as_posix()}"
+                candidate_root = "{(self.root / 'candidates').as_posix()}"
+                manifest_root = "{manifests.as_posix()}"
+                git_download_root = "{(self.root / 'downloads').as_posix()}"
+                skills_root = "{(self.root / 'skills').as_posix()}"
+                results_root = "{(self.root / 'results').as_posix()}"
                 [gerrit]
                 ssh_url_template = "ssh://{{user}}@{{host}}:{{port}}/{{repo_name}}.git"
                 user = "reader"
@@ -82,16 +82,16 @@ class ProjectSetupTests(unittest.TestCase):
                 candidate_threshold = 70
                 max_score = 100
                 [ai]
-                skill_path = "{ai_skill}"
-                result_schema_path = "{schema}"
+                skill_path = "{ai_skill.as_posix()}"
+                result_schema_path = "{schema.as_posix()}"
                 [scanners.cisco]
                 enabled = true
                 version = "2.0.13"
-                command = ["{cisco}", "scan", "{{skill_root}}", "--format", "json", "--compact", "--output", "{{output_file}}"]
+                command = ["{cisco.as_posix()}", "scan", "{{skill_root}}", "--format", "json", "--compact", "--output", "{{output_file}}"]
                 [scanners.skillspector]
                 enabled = true
                 version = "2.5.1"
-                command = ["{spector}", "scan", "{{skill_root}}", "--no-llm", "--format", "json", "--output", "{{output_file}}"]
+                command = ["{spector.as_posix()}", "scan", "{{skill_root}}", "--no-llm", "--format", "json", "--output", "{{output_file}}"]
                 """
             ),
             encoding="utf-8",
@@ -123,10 +123,8 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn(inventory.as_posix(), original)
         self.assertNotIn((BATCH_REVIEW_DIR.parent / "test").resolve().as_posix(), original)
         self.assertNotIn((BATCH_REVIEW_DIR / "test").resolve().as_posix(), original)
-        self.assertIn(
-            (BATCH_REVIEW_DIR / "skills" / "skill-security-review").resolve().as_posix(),
-            original,
-        )
+        self.assertIn("../.agents/skills/skill-security-review", original)
+        self.assertNotIn("../skills/skill-security-review", original)
         config.write_text("user-owned\n", encoding="utf-8")
         _, created_again = init_project.initialize(
             profile="github", config_path=config, operator_state_path=self.operator
@@ -181,7 +179,7 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("$auto-skill-review", status.next_instruction)
         self.assertEqual(status.ai_queue_path, str((state_dir / "ai-review-queue.json").resolve()))
 
-        # A later completion must be importable even if the first task is pending.
+        # A later completion must remain importable for an in-flight legacy repository batch.
         state["ai_queue_mode"] = "repository_batch_v1"
         state["items"][0]["status"] = "WAITING_FOR_AI"
         ready_path = self.root / "second-result.json"
@@ -258,11 +256,13 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("Do not use Git", content)
         self.assertIn("fresh project Agent", content)
         self.assertIn("skill-security-reviewer", content)
-        self.assertIn("ai-review-queue.json", content)
         self.assertIn("max_parallel", content)
         self.assertIn("Never read target packages", content)
         self.assertIn("--auto --json --ai-parallel 5", content)
-        self.assertIn("fill its slot", content)
+        self.assertIn("dispatch_session", content)
+        self.assertIn("--completed-task-id", content)
+        self.assertIn("completion", content.lower())
+        self.assertIn("Do not inspect queue/state files yourself", content)
 
         codex_skill = BATCH_REVIEW_DIR / ".agents/skills/auto-skill-review/SKILL.md"
         codex_content = codex_skill.read_text(encoding="utf-8")
@@ -270,6 +270,8 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("$skill-security-review", codex_content)
         self.assertIn("skill_security_reviewer", codex_content)
         self.assertIn("cmd.exe /d /c", codex_content)
+        self.assertIn("dispatch_session", codex_content)
+        self.assertIn("--completed-task-id", codex_content)
 
         self.assertTrue(
             (BATCH_REVIEW_DIR / ".codex/agents/skill_security_reviewer.toml").is_file()
@@ -282,20 +284,19 @@ class ProjectSetupTests(unittest.TestCase):
         required = (
             "AGENTS.md",
             "README.md",
+            ".agents/rules/01-workspace-and-input-rules.md",
+            ".agents/rules/02-review-workflow-rules.md",
+            ".agents/rules/03-ai-state-and-recovery-rules.md",
             ".agents/skills/ask-cc/SKILL.md",
             ".agents/skills/auto-skill-review/SKILL.md",
             ".agents/skills/skill-security-review/SKILL.md",
+            ".agents/skills/skill-security-review/references/review-result.schema.json",
             ".codex/agents/skill_security_reviewer.toml",
             ".claude/skills/ask-cc/SKILL.md",
             ".claude/skills/auto-skill-review/SKILL.md",
             ".claude/skills/skill-security-review/SKILL.md",
             ".claude/agents/skill-security-reviewer.md",
-            "skills/skill-security-review/SKILL.md",
             "inventory/skill_summary.csv",
-            "rules/01-workspace-and-input-rules.md",
-            "rules/02-review-workflow-rules.md",
-            "rules/03-ai-state-and-recovery-rules.md",
-            "docs/15-skill-batch-review-script-user-guide.md",
             "init.cmd",
             "init.sh",
             "review.cmd",
@@ -306,6 +307,9 @@ class ProjectSetupTests(unittest.TestCase):
                 path = (BATCH_REVIEW_DIR / relative).resolve()
                 self.assertTrue(path.is_file(), relative)
                 self.assertTrue(path.is_relative_to(BATCH_REVIEW_DIR.resolve()), relative)
+
+        for removed in ("docs", "rules", "skills"):
+            self.assertFalse((BATCH_REVIEW_DIR / removed).exists(), removed)
 
     def test_windows_launchers_force_utf8_for_cli_capture(self):
         for name in ("init.cmd", "review.cmd", "run.cmd", "status.cmd"):

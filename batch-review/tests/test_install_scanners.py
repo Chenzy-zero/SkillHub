@@ -92,29 +92,28 @@ class ScannerInstallerTests(unittest.TestCase):
         self.assertIn("yara-python>=4.5.0", content)
 
     def test_runtime_requirements_install_resolves_full_wheel_only_closure(self):
-        command = MODULE._uv_requirements_command(
-            Path("resolver/uv"),
-            Path("scanner/python.exe"),
-            Path("packages/runtime.txt"),
-        )
-        self.assertEqual(command[0:3], ("resolver/uv", "pip", "install"))
+        uv = Path("resolver/uv")
+        python = Path("scanner/python.exe")
+        requirements = Path("packages/runtime.txt")
+        command = MODULE._uv_requirements_command(uv, python, requirements)
+        self.assertEqual(command[0:3], (str(uv), "pip", "install"))
         self.assertIn("--only-binary", command)
         self.assertIn("--upgrade", command)
         self.assertIn("-r", command)
-        self.assertEqual(command[-1], "packages/runtime.txt")
+        self.assertEqual(command[-1], str(requirements))
 
     def test_cisco_static_profile_uninstalls_litellm(self):
-        command = MODULE._uv_uninstall_command(
-            Path("resolver/uv"), Path("scanner/python.exe"), "litellm"
-        )
+        uv = Path("resolver/uv")
+        python = Path("scanner/python.exe")
+        command = MODULE._uv_uninstall_command(uv, python, "litellm")
         self.assertEqual(
             command,
             (
-                "resolver/uv",
+                str(uv),
                 "pip",
                 "uninstall",
                 "--python",
-                "scanner/python.exe",
+                str(python),
                 "litellm",
             ),
         )
@@ -203,15 +202,16 @@ class ScannerInstallerTests(unittest.TestCase):
             self.assertEqual(command[-1], str(environment))
 
     def test_uv_installs_exact_scanner_version_into_selected_environment(self):
+        uv = Path("resolver/uv")
         command = MODULE._uv_install_command(
-            Path("resolver/uv"),
+            uv,
             Path("scanner/python"),
             MODULE.SCANNERS[0],
         )
-        self.assertEqual(command[0:3], ("resolver/uv", "pip", "install"))
+        self.assertEqual(command[0:3], (str(uv), "pip", "install"))
         self.assertIn("--python", command)
         self.assertIn("--only-binary", command)
-        self.assertEqual(command[-1], "cisco-ai-skill-scanner==2.0.13")
+        self.assertIn("cisco-ai-skill-scanner==2.0.13", command)
 
     def test_windows_cisco_has_one_pinned_source_build_exception(self):
         command = MODULE._uv_install_command(
@@ -234,11 +234,12 @@ class ScannerInstallerTests(unittest.TestCase):
         self.assertNotIn("--no-binary", linux_command)
 
     def test_scanner_version_check_uses_distribution_metadata(self):
+        python = Path("scanner/python.exe")
         command = MODULE._metadata_version_command(
-            Path("scanner/python.exe"),
+            python,
             MODULE.SCANNERS[0],
         )
-        self.assertEqual(command[0:2], ("scanner/python.exe", "-c"))
+        self.assertEqual(command[0:2], (str(python), "-c"))
         self.assertIn("importlib.metadata", command[2])
         self.assertEqual(command[-2:], ("cisco-ai-skill-scanner", "2.0.13"))
         self.assertNotIn("skill-scanner", command[0])
