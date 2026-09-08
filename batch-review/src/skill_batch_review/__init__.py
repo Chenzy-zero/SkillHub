@@ -13,6 +13,11 @@ from .platform_artifacts import install_artifact_platform_compat
 
 install_artifact_platform_compat(_artifact_module)
 
+from . import evidence_index as _evidence_index_module
+from .evidence_index_concurrency import install_evidence_index_concurrency
+
+install_evidence_index_concurrency(_evidence_index_module)
+
 from .evidence_index import IndexedEvidenceStore
 
 _artifact_module.EvidenceStore = IndexedEvidenceStore
