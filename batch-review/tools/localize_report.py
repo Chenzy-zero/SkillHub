@@ -29,6 +29,7 @@ from skill_batch_review.localization_job import (  # noqa: E402
 
 
 _BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+OPERATOR_STATE = BATCH_REVIEW_DIR / ".batch-review" / "operator-state.json"
 RESULT_SCHEMA = (
     BATCH_REVIEW_DIR
     / ".agents"
@@ -39,17 +40,25 @@ RESULT_SCHEMA = (
 )
 
 
+def _add_context_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--batch-id")
+    parser.add_argument(
+        "--current",
+        action="store_true",
+        help="从 .batch-review/operator-state.json 读取当前 config/batch",
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="增量中文化 batch-review 审计报告。")
     sub = parser.add_subparsers(dest="action", required=True)
     prepare = sub.add_parser("prepare", help="冻结当前 pending translation units 为一个可信 job")
-    prepare.add_argument("--config", required=True, type=Path)
-    prepare.add_argument("--batch-id", required=True)
+    _add_context_arguments(prepare)
     prepare.add_argument("--max-units", type=int, default=DEFAULT_MAX_UNITS)
 
     imported = sub.add_parser("import", help="校验 localizer result、合并 Translation Memory 并刷新报告")
-    imported.add_argument("--config", required=True, type=Path)
-    imported.add_argument("--batch-id", required=True)
+    _add_context_arguments(imported)
     imported.add_argument("--job-id", required=True)
     imported.add_argument("--max-units", type=int, default=DEFAULT_MAX_UNITS)
     return parser
@@ -60,6 +69,29 @@ def _batch_id(value: str) -> str:
     if not _BATCH_ID_RE.fullmatch(text):
         raise LocalizationJobError("batch-id must be 1-64 safe filename characters")
     return text
+
+
+def _current_context() -> tuple[Path, str]:
+    if not OPERATOR_STATE.is_file() or OPERATOR_STATE.is_symlink():
+        raise LocalizationJobError("current operator state is unavailable")
+    value = json.loads(OPERATOR_STATE.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise LocalizationJobError("current operator state is invalid")
+    config_path = Path(str(value.get("config_path") or "")).expanduser()
+    batch_id = _batch_id(str(value.get("batch_id") or ""))
+    if not config_path.is_file() or config_path.is_symlink():
+        raise LocalizationJobError("current config path is unavailable")
+    return config_path, batch_id
+
+
+def _context(args: argparse.Namespace) -> tuple[Path, str]:
+    if args.current:
+        if args.config is not None or args.batch_id is not None:
+            raise LocalizationJobError("--current cannot be combined with --config/--batch-id")
+        return _current_context()
+    if args.config is None or args.batch_id is None:
+        raise LocalizationJobError("provide --current or both --config and --batch-id")
+    return args.config, _batch_id(args.batch_id)
 
 
 def _prepare(config_path: Path, batch_id: str, max_units: int) -> dict:
@@ -114,12 +146,14 @@ def _import(config_path: Path, batch_id: str, job_id: str, max_units: int) -> di
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        batch_id = _batch_id(args.batch_id)
+        if args.max_units < 1:
+            raise LocalizationJobError("max-units must be >= 1")
+        config_path, batch_id = _context(args)
         if args.action == "prepare":
-            response = _prepare(args.config, batch_id, args.max_units)
+            response = _prepare(config_path, batch_id, args.max_units)
         else:
-            response = _import(args.config, batch_id, args.job_id, args.max_units)
-    except (OSError, ValueError, RuntimeError, LocalizationJobError) as exc:
+            response = _import(config_path, batch_id, args.job_id, args.max_units)
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError, LocalizationJobError) as exc:
         print(json.dumps({"status": "ERROR", "error": str(exc)}, ensure_ascii=False))
         return 2
     print(json.dumps(response, ensure_ascii=False))
