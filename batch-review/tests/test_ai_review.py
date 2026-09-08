@@ -16,7 +16,7 @@ from skill_batch_review.ai_review import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA = REPO_ROOT / "skills/skill-security-review/references/review-result.schema.json"
+SCHEMA = REPO_ROOT / ".agents/skills/skill-security-review/references/review-result.schema.json"
 DIGEST = "a" * 64
 REVISION = "b" * 40
 
