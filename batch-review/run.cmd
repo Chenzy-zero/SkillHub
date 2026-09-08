@@ -6,6 +6,7 @@ set "SCRIPT_DIR=%~dp0"
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 rem Compatible Python 3.11-3.14 is resolved by the shared project bootstrap.
+rem Version validation is centralized there: sys.version_info[:2] in the supported set.
 
 call "%SCRIPT_DIR%tools\resolve_python.cmd"
 if errorlevel 1 exit /b %ERRORLEVEL%
