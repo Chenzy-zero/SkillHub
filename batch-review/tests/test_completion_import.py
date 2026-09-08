@@ -92,7 +92,7 @@ class CompletionImportTests(unittest.TestCase):
             mock.patch.object(completion_import, "write_live_batch_report") as live,
             mock.patch.object(completion_import.batch_launcher, "_activate_batch_queue") as activate,
         ):
-            with self.assertRaisesRegex(CompletionImportError, "AI_IMPORT_FAILED\[task-one\]"):
+            with self.assertRaisesRegex(CompletionImportError, r"AI_IMPORT_FAILED\[task-one\]"):
                 completion_import.import_completed_task(
                     self.config,
                     batch_id="batch-1",
