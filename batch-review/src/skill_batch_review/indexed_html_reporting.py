@@ -40,7 +40,7 @@ _EXTRA_SCRIPT = r'''(() => {
       anchor.rel = 'noopener noreferrer';
       anchor.textContent = pathCode.textContent || '';
       anchor.style.fontFamily = 'var(--mono)';
-      anchor.style.fontSize = '10px';
+      anchor.style.fontSize = '12px';
       anchor.style.overflowWrap = 'anywhere';
       anchor.title = '打开受控派生/规范化证据';
       pathCode.replaceWith(anchor);
@@ -49,6 +49,39 @@ _EXTRA_SCRIPT = r'''(() => {
   new MutationObserver(enhance).observe(document.body, {subtree:true, childList:true});
   enhance();
 })();'''
+
+
+_TYPOGRAPHY_CSS = r'''
+/* Windows / CJK readability overrides. Keep the report self-contained and
+   prefer locally installed Chinese UI fonts instead of shipping a webfont. */
+:root{
+  --sans:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC","Source Han Sans SC","Segoe UI",Arial,sans-serif;
+}
+body{
+  font:15px/1.65 var(--sans);
+  text-rendering:optimizeLegibility;
+}
+button,input,select{font-family:var(--sans)}
+.batch-meta span,.eyebrow{font-size:11px}
+.filter-group label,.button,.tab{font-weight:600}
+.metric span,.metric small,.panel-head span,.data-head p,.data-head>span,
+.primary-cell small,.subline,.page-foot{font-size:12px}
+.data-table th{font-size:12px;font-weight:600;letter-spacing:.02em}
+.data-table td{font-size:13px;line-height:1.6}
+.badge{font-size:12px;font-weight:700;padding:4px 9px}
+.mono{font-size:12px}
+.trace-step span,.fact span{font-size:12px}
+.trace-step b,.fact b{font-size:13px}
+.finding-card-head code,.detail-block h4,.source-ref,
+.evidence-item span,.evidence-item code,.raw-index{font-size:12px}
+.finding-card p,.evidence-note{font-size:13px}
+.evidence-item strong{font-size:12px}
+@media print{
+  body{font-size:11pt;line-height:1.55}
+  .data-table th{font-size:9pt}
+  .data-table td,.badge{font-size:9pt}
+}
+'''
 
 
 def _navigation_href(
@@ -114,7 +147,8 @@ def write_html_report(
                     artifact["href"] = href
 
     page = (
-        _legacy._PAGE.replace("__BATCH_ID__", _legacy._escape(batch_id))
+        _legacy._PAGE.replace("</style>", _TYPOGRAPHY_CSS + "\n</style>", 1)
+        .replace("__BATCH_ID__", _legacy._escape(batch_id))
         .replace("__POLICY_VERSION__", _legacy._escape(policy_version or "未记录"))
         .replace("__GENERATED_AT__", _legacy._escape(generated_at or "未记录"))
         .replace("__INPUT_SHA__", _legacy._escape(input_csv_sha256 or "未记录"))
