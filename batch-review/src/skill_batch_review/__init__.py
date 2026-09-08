@@ -58,6 +58,13 @@ from .localization_reporting import install_localization_reporting
 
 install_localization_reporting(_live_report_module)
 
+# The job/import API also needs package-level path validation and must preserve
+# each unit's locale when it is merged into Translation Memory.
+from . import localization_job as _localization_job_module
+from .localization_job_safety import install_localization_job_safety
+
+install_localization_job_safety(_localization_job_module)
+
 from .config import (
     BatchConfig,
     ConcurrencyConfig,
