@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .models import AIReviewStatus, FinalReviewStatus, StaticReviewStatus
+from .overall_decision import canonical_security_decision, overall_fields
 
 _SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
 _BLOCK_DECISIONS = {"BLOCK", "BLOCKED", "DO_NOT_INSTALL", "FAIL", "FAILED"}
@@ -153,9 +154,15 @@ def build_current_result(
     elif phase.final_status is FinalReviewStatus.COMPLETED and not security_decision:
         raise ValueError("completed final state requires a security decision")
 
+    decisions = overall_fields(
+        final_status=phase.final_status.value,
+        security_decision=security_decision,
+        quality_decision=quality_decision,
+        candidate_eligible=None,
+    )
     return {
         **dict(source),
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "result_kind": "CURRENT",
         **phase.to_dict(),
         "review_status": (
@@ -165,9 +172,8 @@ def build_current_result(
             if phase.final_status is FinalReviewStatus.INCOMPLETE
             else "IN_PROGRESS"
         ),
-        "static_security_decision": static_security_decision,
-        "security_decision": security_decision,
-        "quality_decision": quality_decision,
+        "static_security_decision": canonical_security_decision(static_security_decision),
+        **decisions,
         "quality_score": quality_score,
         "static_reports": [dict(report) for report in static_reports],
         "ai_review_summary": dict(ai_review_summary or {}),
