@@ -107,8 +107,10 @@ def allocate_dispatch(
     """Reconcile leases and allocate only newly free reviewer slots.
 
     Calling without ``session_id`` starts a new coordinator session and releases
-    any stale in-flight leases from a previous interrupted coordinator.  A
-    completion event must carry the session token returned by the initial call.
+    stale leases from an interrupted coordinator.  Within one live session a
+    lease is released only by the explicit completion event for that task.  The
+    queue may stop listing a task as soon as its expected-result file appears,
+    but that alone is not treated as a completion event.
     """
 
     if max_parallel < 1:
@@ -119,8 +121,7 @@ def allocate_dispatch(
         raise DispatchLeaseError("AI queue contains duplicate task_id values")
 
     prior = _load(state_path)
-    starting_new_session = session_id is None
-    if starting_new_session:
+    if session_id is None:
         session_id = secrets.token_urlsafe(18)
         in_flight: dict[str, dict[str, Any]] = {}
         created_at = _utc_now()
@@ -148,16 +149,6 @@ def allocate_dispatch(
                 f"COMPLETION_NOT_IN_FLIGHT: task {completed!r} is not leased by this session"
             )
         in_flight.pop(completed, None)
-
-    # Queue regeneration is authoritative for work that is still dispatchable.
-    # Tasks finalized or already owning an expected-result file disappear from
-    # the queue and therefore release their lease even before a later event is
-    # observed by the coordinator.
-    in_flight = {
-        task_id: item
-        for task_id, item in in_flight.items()
-        if task_id in by_id
-    }
 
     capacity = max(0, max_parallel - len(in_flight))
     candidates = [item for item in normalized if item["task_id"] not in in_flight]
@@ -188,7 +179,7 @@ def allocate_dispatch(
         max_parallel=max_parallel,
         new_items=tuple(allocated),
         in_flight=tuple(sorted(in_flight)),
-        queued_count=max(0, len(normalized) - len(in_flight)),
+        queued_count=max(0, len(normalized) - sum(task_id in by_id for task_id in in_flight)),
     )
 
 
