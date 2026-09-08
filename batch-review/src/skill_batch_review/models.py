@@ -61,6 +61,33 @@ class SourceSelectionStatus(_StringEnum):
     INVALID = "INVALID"
 
 
+class StaticReviewStatus(_StringEnum):
+    """Lifecycle of deterministic source preparation and static scanners."""
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    INCOMPLETE = "INCOMPLETE"
+
+
+class AIReviewStatus(_StringEnum):
+    """Lifecycle of the isolated AI review for one frozen Skill package."""
+
+    NOT_REQUIRED = "NOT_REQUIRED"
+    PENDING = "PENDING"
+    DISPATCHED = "DISPATCHED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class FinalReviewStatus(_StringEnum):
+    """Lifecycle of the trusted merged result."""
+
+    PENDING = "PENDING"
+    COMPLETED = "COMPLETED"
+    INCOMPLETE = "INCOMPLETE"
+
+
 def _required_text(value: Any, field_name: str) -> str:
     if value is None:
         raise ValueError(f"{field_name} must not be empty")
@@ -160,12 +187,15 @@ class ReviewTargetKey:
 
 
 __all__ = [
+    "AIReviewStatus",
+    "FinalReviewStatus",
     "QualityDecision",
     "ReviewTargetKey",
     "ScanStatus",
     "SecurityDecision",
     "SourceKey",
     "SourceSelectionStatus",
+    "StaticReviewStatus",
     "TaskStatus",
     "normalize_branch",
     "normalize_skill_path",

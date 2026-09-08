@@ -19,12 +19,15 @@ from .config import (
 )
 from .inventory import InventoryDocument, InventoryLoader, InventoryRow, load_inventory_csv
 from .models import (
+    AIReviewStatus,
+    FinalReviewStatus,
     QualityDecision,
     ReviewTargetKey,
     ScanStatus,
     SecurityDecision,
     SourceKey,
     SourceSelectionStatus,
+    StaticReviewStatus,
     TaskStatus,
     normalize_branch,
     normalize_skill_path,
@@ -38,8 +41,10 @@ from .orchestrator import (
 )
 
 __all__ = [
+    "AIReviewStatus",
     "BatchConfig",
     "ConcurrencyConfig",
+    "FinalReviewStatus",
     "GerritConfig",
     "InventoryDocument",
     "InventoryLoader",
@@ -54,6 +59,7 @@ __all__ = [
     "SecurityDecision",
     "SourceKey",
     "SourceSelectionStatus",
+    "StaticReviewStatus",
     "StatusMapping",
     "TaskStatus",
     "WorkspaceConfig",
