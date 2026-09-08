@@ -5,6 +5,7 @@ from skill_batch_review.review_state import (
     ReviewPhaseState,
     build_current_result,
     finding_summary,
+    static_security_decision,
     static_waiting_for_ai,
 )
 
@@ -79,6 +80,36 @@ class ReviewPhaseStateTests(unittest.TestCase):
         self.assertEqual(result["finding_counts"]["INFO"], 1)
         self.assertEqual(result["max_severity"], "CRITICAL")
         self.assertEqual(result["finding_count"], 2)
+
+    def test_static_security_decision_is_scanner_only(self) -> None:
+        self.assertEqual(static_security_decision([]), "PASS")
+        self.assertEqual(
+            static_security_decision([{"severity": "LOW"}]),
+            "PASS",
+        )
+        self.assertEqual(
+            static_security_decision([{"severity": "MEDIUM"}]),
+            "REVIEW_REQUIRED",
+        )
+        self.assertEqual(
+            static_security_decision([{"severity": "HIGH"}]),
+            "REVIEW_REQUIRED",
+        )
+        self.assertEqual(
+            static_security_decision([{"severity": "CRITICAL"}]),
+            "BLOCK",
+        )
+        self.assertEqual(
+            static_security_decision([{"severity": "UNKNOWN"}]),
+            "REVIEW_REQUIRED",
+        )
+        self.assertEqual(
+            static_security_decision(
+                [{"severity": "MEDIUM"}],
+                medium_requires_review=False,
+            ),
+            "PASS",
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover
