@@ -104,11 +104,11 @@ def test_prepare_freezes_bounded_report_safe_job(tmp_path):
         tmp_path,
         "batch-1",
         result_schema_path=SCHEMA,
-        max_units=2,
+        max_units=4,
     )
     assert job is not None
-    assert job.unit_count == 2
-    assert job.remaining_count == pending["pending_count"] - 2
+    assert job.unit_count == 4
+    assert job.remaining_count == pending["pending_count"] - 4
     first_id = job.job_id
 
     payload = json.loads(job.input_path.read_text(encoding="utf-8"))
@@ -129,7 +129,7 @@ def test_prepare_freezes_bounded_report_safe_job(tmp_path):
         tmp_path,
         "batch-1",
         result_schema_path=SCHEMA,
-        max_units=2,
+        max_units=4,
     )
     assert repeated is not None
     assert repeated.job_id == first_id
@@ -144,6 +144,11 @@ def test_invalid_pending_memory_status_refuses_dispatch(tmp_path):
     )
     with pytest.raises(LocalizationJobError, match="translation memory is invalid"):
         prepare_localization_job(tmp_path, "batch-1", result_schema_path=SCHEMA)
+
+
+def test_package_api_rejects_unsafe_batch_id(tmp_path):
+    with pytest.raises(LocalizationJobError, match="batch-id"):
+        prepare_localization_job(tmp_path, "../escape", result_schema_path=SCHEMA)
 
 
 def test_wrong_job_id_and_source_hash_are_rejected_without_memory_pollution(tmp_path):
