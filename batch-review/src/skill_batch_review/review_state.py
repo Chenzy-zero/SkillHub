@@ -100,6 +100,33 @@ def finding_summary(findings: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def static_security_decision(
+    findings: Sequence[Mapping[str, Any]],
+    *,
+    medium_requires_review: bool = True,
+) -> str:
+    """Return a scanner-only security projection without pretending AI is done.
+
+    This deliberately does not call the final policy gate.  ``evaluate_policy``
+    correctly treats a missing AI result as incomplete; an interim report needs
+    a separate answer to the narrower question "what do the completed static
+    scanners say?".  The final ``security_decision`` remains empty until trusted
+    finalization.
+    """
+
+    severities = {
+        str(finding.get("severity") or "UNKNOWN").strip().upper()
+        for finding in findings
+    }
+    if "CRITICAL" in severities:
+        return "BLOCK"
+    if "HIGH" in severities or "UNKNOWN" in severities:
+        return "REVIEW_REQUIRED"
+    if medium_requires_review and "MEDIUM" in severities:
+        return "REVIEW_REQUIRED"
+    return "PASS"
+
+
 def build_current_result(
     source: Mapping[str, Any],
     *,
@@ -187,5 +214,6 @@ __all__ = [
     "ReviewPhaseState",
     "build_current_result",
     "finding_summary",
+    "static_security_decision",
     "static_waiting_for_ai",
 ]
