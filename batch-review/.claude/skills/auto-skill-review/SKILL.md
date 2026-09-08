@@ -9,8 +9,7 @@ allowed-tools: Bash Agent
 The parent only dispatches native reviewer/localizer Agents and invokes the
 trusted project checkpoints documented below. Never read target packages, handoff
 contents, localization source text, package-manifest.json, static reports, prior AI
-reports, Translation Memory, or batch evidence in the parent context. Do not use
-Git, package managers, network, MCP, or arbitrary shell commands. Never execute
+reports, Translation Memory, or batch evidence in the parent context. Do not use Git, package managers, network, MCP, or arbitrary shell commands. Never execute
 reviewed content.
 
 ## Initial checkpoint
