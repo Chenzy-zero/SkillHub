@@ -1,8 +1,8 @@
 """Persistent evidence index maintained at the trusted artifact boundary.
 
-Evidence bytes are hashed once when EvidenceStore writes/copies them.  This module
+Evidence bytes are hashed once when EvidenceStore writes/copies them. This module
 persists those already-computed integrity facts so incremental report refreshes do
-not re-hash historical scanner/AI evidence.  Report readers still validate lexical
+not re-hash historical scanner/AI evidence. Report readers still validate lexical
 paths, symlink boundaries, file existence, size and mtime before exposing an index
 entry; they never trust an index path as a filesystem locator on its own.
 """
@@ -11,16 +11,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from . import artifacts as _base
 
 
 INDEX_NAME = "evidence-index.json"
 _INDEX_SCHEMA = "1.0"
-_HEX_SHA256 = __import__("re").compile(r"^[0-9a-f]{64}$")
+_HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 _METADATA: dict[str, tuple[str, str]] = {
     "final-result.json": ("综合结论", "DERIVED"),
@@ -42,6 +43,29 @@ class EvidenceIndexError(_base.ArtifactError):
 
 def _relative(value: str | os.PathLike[str]) -> str:
     return "/".join(_base._validate_relative_path(value))
+
+
+def _metadata(relative: str) -> tuple[str, str]:
+    """Classify evidence conservatively; unknown files are never clickable."""
+
+    exact = _METADATA.get(relative)
+    if exact is not None:
+        return exact
+    name = Path(relative).name.lower()
+    lowered = relative.lower()
+    if name == "raw-report.json" or name == "imported-result.json":
+        return (Path(relative).parent.name + " 原始输出", "RAW")
+    if name == "normalized-result.json":
+        return (Path(relative).parent.name + " 规范化结果", "NORMALIZED")
+    if name == "final-result.json" or name == "result-reuse.json":
+        return (Path(relative).name, "DERIVED")
+    if name in {"source-metadata.json", "package-manifest.json", "handoff.json"}:
+        return (Path(relative).name, "SOURCE")
+    if "/raw/" in lowered or lowered.endswith("/raw.json"):
+        return (Path(relative).name, "RAW")
+    # Fail closed: unrecognised evidence is visible as a path/integrity record,
+    # but never receives an OPEN navigation capability.
+    return (Path(relative).name, "SOURCE")
 
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> Path:
@@ -106,7 +130,7 @@ def _artifact_record(reference: _base.EvidenceReference, *, task_root: Path, roo
         root_relative = path.relative_to(root.resolve(strict=True)).as_posix()
     except (OSError, RuntimeError, ValueError) as exc:
         raise EvidenceIndexError(f"evidence file escapes configured root: {relative}") from exc
-    label, evidence_type = _METADATA.get(relative, (Path(relative).name, "DERIVED"))
+    label, evidence_type = _metadata(relative)
     digest = str(reference.sha256).lower()
     if not _HEX_SHA256.fullmatch(digest):
         raise EvidenceIndexError(f"invalid SHA-256 for evidence file: {relative}")
@@ -169,9 +193,7 @@ class IndexedEvidenceStore(_base.EvidenceStore):
         *,
         scanner: str | None = None,
     ) -> _base.EvidenceReference:
-        return self._register(
-            super().copy_raw_report(source, relative_path, scanner=scanner)
-        )
+        return self._register(super().copy_raw_report(source, relative_path, scanner=scanner))
 
     copy_report = copy_raw_report
 
@@ -207,9 +229,12 @@ def _index_artifacts(task_root: Path, root: Path) -> list[dict[str, Any]]:
             or str(item.get("path") or "") != path_from_root
         ):
             continue
-        evidence_type = str(item.get("type") or "DERIVED").upper()
+        recorded_type = str(item.get("type") or "SOURCE").upper()
+        _, inferred_type = _metadata(relative)
+        # Never allow a tampered index to upgrade PATH_ONLY evidence to OPEN.
+        evidence_type = recorded_type if recorded_type == inferred_type else inferred_type
         if evidence_type not in {"DERIVED", "NORMALIZED", "RAW", "SOURCE"}:
-            continue
+            evidence_type = "SOURCE"
         values.append(
             {
                 "label": str(item.get("label") or Path(relative).name),
