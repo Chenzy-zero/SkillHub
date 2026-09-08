@@ -83,10 +83,7 @@ class ReviewPhaseStateTests(unittest.TestCase):
 
     def test_static_security_decision_is_scanner_only(self) -> None:
         self.assertEqual(static_security_decision([]), "PASS")
-        self.assertEqual(
-            static_security_decision([{"severity": "LOW"}]),
-            "PASS",
-        )
+        self.assertEqual(static_security_decision([{"severity": "LOW"}]), "PASS")
         self.assertEqual(
             static_security_decision([{"severity": "MEDIUM"}]),
             "REVIEW_REQUIRED",
@@ -110,6 +107,33 @@ class ReviewPhaseStateTests(unittest.TestCase):
             ),
             "PASS",
         )
+
+    def test_scanner_level_decision_can_only_raise_interim_risk(self) -> None:
+        low_finding = [{"severity": "LOW"}]
+        self.assertEqual(
+            static_security_decision(
+                low_finding,
+                static_reports=[{"decision": "REVIEW_REQUIRED"}],
+            ),
+            "REVIEW_REQUIRED",
+        )
+        self.assertEqual(
+            static_security_decision(
+                low_finding,
+                static_reports=[{"decision": "DO_NOT_INSTALL"}],
+            ),
+            "BLOCK",
+        )
+        result = static_waiting_for_ai(
+            {"skill_id": "123"},
+            static_reports=[{"decision": "REVIEW_REQUIRED"}],
+            findings=low_finding,
+            static_security_decision="PASS",
+            evidence_ref="batch/task",
+            review_policy_version="policy-1",
+        )
+        self.assertEqual(result["static_security_decision"], "REVIEW_REQUIRED")
+        self.assertEqual(result["security_decision"], "")
 
 
 if __name__ == "__main__":  # pragma: no cover
