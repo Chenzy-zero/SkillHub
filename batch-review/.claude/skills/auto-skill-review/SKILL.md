@@ -1,15 +1,16 @@
 ---
 name: auto-skill-review
-description: Run a security-review batch with trusted completion-driven scheduling and up to five isolated reviewer Agents. Each completion is imported immediately and frees one dispatch slot.
+description: Run a security-review batch with trusted completion-driven scheduling, isolated reviewers, and incremental Chinese report localization.
 allowed-tools: Bash Agent
 ---
 
 # Automatic Skill Review for Claude Code
 
-The parent only dispatches native reviewer Agents. Never read target packages,
-handoff contents, package-manifest.json, static reports, prior AI reports, or batch
-evidence in the parent context. Do not use Git, package managers, network, MCP, or
-arbitrary shell commands. Never execute reviewed content.
+The parent only dispatches native reviewer/localizer Agents and invokes the
+trusted project checkpoints documented below. Never read target packages, handoff
+contents, localization source text, package-manifest.json, static reports, prior AI
+reports, Translation Memory, or batch evidence in the parent context. Do not use Git, package managers, network, MCP, or arbitrary shell commands. Never execute
+reviewed content.
 
 ## Initial checkpoint
 
@@ -58,14 +59,44 @@ Linux/CentOS/macOS: ./review.sh --auto --json --ai-parallel 5 --completed-task-i
    Do **not** cancel other already-running reviewers and do not refill the failed
    Task's slot. Continue processing completion events from the remaining leased
    reviewers; the failed result stays diagnosable and recoverable.
-8. Continue until the checkpoint returns `VIEW_RESULTS` / `COMPLETE`. Then report
-   only `batch_id` and `result_paths`, without opening reports.
+8. Continue until the checkpoint returns `VIEW_RESULTS` / `COMPLETE`. Do not open
+   the report yet; continue with localization.
 
-If the coordinator itself restarts and no prior live session can be continued,
+## Incremental zh-CN report localization
+
+1. Ask trusted program code for the next immutable report-safe job:
+
+```text
+python tools/localize_report.py prepare --current
+```
+
+2. If `status=COMPLETE`, localization is finished. Report only `batch_id` and the
+   final result paths already returned by the review checkpoint.
+3. If `status=READY`, start one fresh project Agent of type `report-localizer`.
+   It preloads `/report-zh-localizer`. Send only `job_id`, `input_path`,
+   `result_schema_path`, and `expected_result` from `localization_dispatch`.
+   The parent must not read the job input.
+4. When the localizer completes, call:
+
+```text
+python tools/localize_report.py import --current --job-id <JOB_ID>
+```
+
+5. The trusted importer validates Schema/job/key/hash, merges only valid text into
+   Translation Memory, refreshes HTML/CSV/JSON, and returns the next immutable
+   `localization_dispatch` when pending text remains. Dispatch that next job and
+   repeat until `status=COMPLETE`.
+6. A localization failure never changes canonical security/quality/overall
+   decisions. Stop localization with the specific error; the report remains usable
+   with English fallback.
+
+If the coordinator itself restarts and no prior live AI session can be continued,
 start again with the initial checkpoint **without** a session token. The trusted
 script creates a new session and safely recovers orphan result files before
-redispatching still-missing Tasks.
+redispatching still-missing Tasks. Localization may always restart from
+`localize_report.py prepare --current`; Translation Memory prevents already
+translated keys from being re-dispatched.
 
 On unavailable isolation, agent failure, malformed results, unexpected paths, or
 additional authority requirements, stop with the specific issue (use
-`CONTEXT_ISOLATION_UNAVAILABLE` when applicable). Do not skip failed tasks.
+`CONTEXT_ISOLATION_UNAVAILABLE` when applicable). Do not skip failed review tasks.

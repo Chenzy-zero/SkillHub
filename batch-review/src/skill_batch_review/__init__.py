@@ -13,6 +13,11 @@ from .platform_artifacts import install_artifact_platform_compat
 
 install_artifact_platform_compat(_artifact_module)
 
+from . import evidence_index as _evidence_index_module
+from .evidence_index_concurrency import install_evidence_index_concurrency
+
+install_evidence_index_concurrency(_evidence_index_module)
+
 from .evidence_index import IndexedEvidenceStore
 
 _artifact_module.EvidenceStore = IndexedEvidenceStore
@@ -23,10 +28,42 @@ from .indexed_html_reporting import write_html_report as _indexed_write_html_rep
 
 _html_reporting.write_html_report = _indexed_write_html_report
 
+from .bilingual_html_reporting import install_bilingual_html_reporting
+
+install_bilingual_html_reporting(_html_reporting)
+
 from . import config as _config_module
 from .path_compat import install_config_path_compat
 
 install_config_path_compat(_config_module)
+
+# Public/durable security decisions use one machine code. The pure policy module
+# historically emitted BLOCK while models/reporting already used BLOCKED. Its
+# functions resolve this module global at call time, so setting the canonical
+# value here keeps old BLOCK inputs readable while all new outputs become BLOCKED.
+from . import review_policy as _review_policy_module
+
+_review_policy_module.SECURITY_BLOCK = "BLOCKED"
+
+from . import live_report as _live_report_module
+from . import reporting as _reporting_module
+from .overall_reporting import install_reporting_compat
+
+install_reporting_compat(_reporting_module, _live_report_module)
+
+# Localization is a report-only projection. Install it after deterministic
+# overall-decision enrichment and before orchestration/completion modules bind
+# the live-report function. Canonical review/evidence state is never rewritten.
+from .localization_reporting import install_localization_reporting
+
+install_localization_reporting(_live_report_module)
+
+# The job/import API also needs package-level path validation and must preserve
+# each unit's locale when it is merged into Translation Memory.
+from . import localization_job as _localization_job_module
+from .localization_job_safety import install_localization_job_safety
+
+install_localization_job_safety(_localization_job_module)
 
 from .config import (
     BatchConfig,

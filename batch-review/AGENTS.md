@@ -1,8 +1,8 @@
 # Skill 批量安全审查项目
 
 本目录可独立复制和执行。`AGENTS.md` 与 `README.md` 是操作和维护入口；canonical 规则位于
-`.agents/rules/`，canonical AI 审查策略位于 `.agents/skills/skill-security-review/`。
-`.claude/` 与 `.codex/` 只提供客户端适配/隔离 Agent 定义，不作为业务策略的第二来源。
+`.agents/rules/`，canonical AI 审查策略位于 `.agents/skills/skill-security-review/`，报告中文化策略位于
+`.agents/skills/report-zh-localizer/`。`.claude/` 与 `.codex/` 只提供客户端适配/隔离 Agent 定义，不作为业务策略的第二来源。
 
 ## 1. 不可突破的执行边界
 
@@ -12,6 +12,8 @@
 - SubAgent 只能写自己的 `expected_result`，不能写 Batch State、合并结果、生成报告或清理目录。
 - Batch State 只有可信脚本写；配置、CSV、策略、Revision、Digest 不匹配时 fail closed。
 - 不把秘密、原始 scanner/AI evidence 或绝对受限路径嵌入普通报告/父 AI 上下文。
+- Localizer 只能读取可信脚本准备好的 report-safe/redacted translation units；不得读取完整报告、RAW evidence、Skill Package 或 Translation Memory。
+- Translation Memory 只属于报告展示层，不得改变 canonical finding、Policy、安全/质量/最终结论。
 - 不自动 Commit、Push、发布或上架候选内容。
 
 ## 2. 当前标准流程
@@ -28,6 +30,11 @@
 → 立即刷新 current/final result 和报告投影
 → 释放一个 dispatch lease 并补派下一个 Task
 → 全部 Skill resolved 后生成 FINAL 报告
+→ trusted localization job 每批最多 100 个 pending units
+→ 独立 report-localizer 翻译 report-safe text
+→ trusted importer 校验 Schema/job/key/hash 并更新 Translation Memory
+→ 刷新中文优先、英文原文可展开的 HTML
+→ pending=0 后结束
 ```
 
 旧的 `repository_batch_v1` 已启动批次仍按旧协议兼容续跑；新批次使用 `batch_wide_v2`，不得静默切换旧批次协议。
@@ -45,7 +52,7 @@ profile 初始化默认写到 `.batch-review/<profile>/`；生产配置也可把
 | `skills` / `skills_root` | Archive：冻结 Skill Package + `current-result.json`/`review-result.json` | 持久审计/复用数据，不能当临时目录清理 |
 | `restricted-evidence` / `evidence_root` | Evidence：RAW/SOURCE/DERIVED/NORMALIZED evidence + index | 受限持久审计数据；RAW 不进入普通报告 |
 | `private-candidates` / `candidate_root` | Candidate staging | 受控发布候选，不是审计事实；按发布治理策略处理 |
-| `results/<batch-id>` / `results_root` | Reports：人工报告与标准化导出 | 完成批次的人工/审计查看入口；可按组织留存策略归档 |
+| `results/<batch-id>` / `results_root` | Reports：人工报告、标准化导出、Translation Memory/localization jobs | 完成批次的人工/审计查看入口；可按组织留存策略归档 |
 
 **唯一人工报告入口：**
 `results/<batch-id>/skill-security-review-report.html`
@@ -54,12 +61,21 @@ profile 初始化默认写到 `.batch-review/<profile>/`；生产配置也可把
 `details.csv`、`batch-summary.json`、`failures.json`、`candidates.json`、`current-review-results.*` 是 **标准化 report exports**。
 二者都不是第二个人工入口，避免用 `details.csv` 代替台账更新或用 ledger CSV 代替审计工作台。
 
+中文化相关文件位于同一 Batch 的 `results/<batch-id>/`：
+
+- `translation-memory.zh-CN.json`：增量翻译记忆；key 绑定 locale + field + source hash。
+- `localization-pending.zh-CN.json`：当前尚未命中的 report-safe translation units。
+- `localization-jobs/zh-CN/<job-id>/`：不可变 job input、Localizer result、import audit。
+
+这些都是报告展示层资产，不是 canonical 审查事实。
+
 ## 4. 标准入口与规则路由
 
 ```text
 首次初始化：Windows init.cmd；Linux/macOS ./init.sh
 自动审查：Codex CLI $auto-skill-review；Claude Code /auto-skill-review
 只读状态：Codex CLI $ask-cc；Claude Code /ask-cc
+手工续跑中文化：python tools/localize_report.py prepare --current
 ```
 
 | 内容 | Canonical 路径 |
@@ -69,6 +85,8 @@ profile 初始化默认写到 `.batch-review/<profile>/`；生产配置也可把
 | AI Queue、completion、恢复 | `.agents/rules/03-ai-state-and-recovery-rules.md` |
 | AI 安全审查策略 | `.agents/skills/skill-security-review/SKILL.md` |
 | AI 结果 Schema | `.agents/skills/skill-security-review/references/review-result.schema.json` |
+| 报告中文化策略 | `.agents/skills/report-zh-localizer/SKILL.md` |
+| Localizer 结果 Schema | `.agents/skills/report-zh-localizer/references/localization-result.schema.json` |
 | 自动调度 Skill | `.agents/skills/auto-skill-review/SKILL.md`、`.claude/skills/auto-skill-review/SKILL.md` |
 | 配置模板 | `config/` |
 | 台账输入 | `inventory/` |
@@ -85,4 +103,6 @@ profile 初始化默认写到 `.batch-review/<profile>/`；生产配置也可把
 - GitHub 回归由 `.github/workflows/batch-review-regression.yml` 执行 Linux/Windows Python 矩阵。
 - 修改 `.cmd` 时同步检查 `.sh`；修改 AI 协议时同步 `.agents/.claude/.codex` 对应入口与测试。
 - 报告逻辑必须保持：INTERIM 不显示未完成 AI 为最终 PASS；FINAL 仅在全部 selected Skill resolved 后形成。
+- Localization 必须 fail-soft：缺失/失败时 HTML 回退英文；坏 Memory 不覆盖、不影响 Policy。
+- HTML 中文优先显示 `*_zh`，同时保留 canonical 英文原文可展开追溯。
 - Evidence 导航必须保持：RAW/SOURCE path-only；DERIVED/NORMALIZED 才允许经 root/symlink 校验后的受控相对打开。
