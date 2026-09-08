@@ -5,6 +5,20 @@ separate and operator-visible.  No module executes target Skill content or
 automatically commits, pushes, or publishes candidates.
 """
 
+# Install the persistent evidence boundary before orchestration modules bind
+# ``EvidenceStore`` / ``write_html_report`` locally.  The public import surface
+# remains unchanged for existing callers.
+from . import artifacts as _artifact_module
+from .evidence_index import IndexedEvidenceStore
+
+_artifact_module.EvidenceStore = IndexedEvidenceStore
+_artifact_module.RestrictedEvidenceStore = IndexedEvidenceStore
+
+from . import html_reporting as _html_reporting
+from .indexed_html_reporting import write_html_report as _indexed_write_html_report
+
+_html_reporting.write_html_report = _indexed_write_html_report
+
 from .config import (
     BatchConfig,
     ConcurrencyConfig,
