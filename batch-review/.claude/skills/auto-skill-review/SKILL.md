@@ -1,6 +1,6 @@
 ---
 name: auto-skill-review
-description: Run a prepared security-review batch with trusted scripts and up to five isolated reviewer Agents. Scripts finish batch-wide static preparation, select missing AI tasks, import results, and generate reports.
+description: Run a security-review batch with trusted completion-driven scheduling and up to five isolated reviewer Agents. Each completion is imported immediately and frees one dispatch slot.
 allowed-tools: Bash Agent
 ---
 
@@ -11,7 +11,7 @@ handoff contents, package-manifest.json, static reports, prior AI reports, or ba
 evidence in the parent context. Do not use Git, package managers, network, MCP, or
 arbitrary shell commands. Never execute reviewed content.
 
-## Single script checkpoint
+## Initial checkpoint
 
 From this project root, call:
 
@@ -20,40 +20,51 @@ Windows: cmd.exe /d /c "review.cmd --auto --json --ai-parallel 5"
 Linux/CentOS/macOS: ./review.sh --auto --json --ai-parallel 5
 ```
 
-The script performs all deterministic transitions to the next AI boundary or
-completion. For new batches it completes Static Preparation for every repository,
-cleans each repository workspace, writes the first INTERIM report, and only then
-exposes one batch-wide `ai-review-queue.json`. It also handles result-existence
-checks, validation, trusted import, report refresh, and finalization. It returns
-only compact control JSON; logs remain in `log_path`. Do not call status or inspect
-queues separately.
+For a new batch, the trusted script completes Static Preparation for every
+repository, cleans repository workspaces, writes the INTERIM report, and creates
+the batch-wide queue. A fresh checkpoint also recovers result files left by an
+interrupted prior coordinator one-by-one; one malformed orphan does not prevent
+other valid orphan results from being persisted.
 
-The dispatch limit overrides older configuration defaults without rewriting a
-frozen batch. Lower it if the operator requests or the client supports fewer agents.
+The JSON response contains a `dispatch_session` and only the newly leased
+`ai_dispatch.items` (at most `max_parallel`). Preserve the session token as opaque
+control metadata. Do not inspect queue/state files yourself.
 
-## Reviewer dispatch
+## Reviewer dispatch and completion events
 
-1. If `exit_code` is nonzero, stop and report the issue, `next_instruction`, and
-   `log_path`. Do not retry in a loop or silently initialize/install software.
-2. For `next_action=AI_REVIEW`, consume `ai_dispatch.items` in the supplied order.
-   The trusted script has excluded tasks whose result already exists and ordered
-   remaining work largest-first.
-3. Start one fresh project Agent of type `skill-security-reviewer` per item.
-   It preloads `/skill-security-review` and follows the canonical policy. Send
-   only `task_id`, `handoff`, and `expected_result`. Never combine Skills in one
-   context, review inline, or substitute a generic Agent without the review policy.
-4. Keep up to `ai_dispatch.max_parallel` reviewers running (normally 5). Use
-   background Agents when supported and native completion events: as soon as
-   one finishes, fill its slot with the next item. Do not wait for a whole group
-   of five before refilling. Respect actual client limits and report any lower
-   effective concurrency. Do not poll status/files.
-5. Track only task IDs and completion metadata. Once all dispatched reviewers
-   finish, call the same script checkpoint. The trusted script imports every
-   arrived result across the Batch, excludes those tasks from the next queue, and
-   returns only still-missing work. Repeat until `VIEW_RESULTS` or `COMPLETE`.
-   If a task just reported complete but is dispatched again, its result is missing:
-   stop and report that task; do not blindly launch it again.
-6. On completion, report only `batch_id` and `result_paths`, without opening reports.
+1. For every supplied item, start one fresh project Agent of type
+   `skill-security-reviewer`. It preloads `/skill-security-review`. Send only
+   `task_id`, `handoff`, and `expected_result`.
+2. Never combine Skills, review inline, or pass repository/evidence metadata to
+   the parent context. Track only task IDs, the opaque dispatch session, and native
+   completion metadata.
+3. Keep all supplied reviewers running concurrently, up to `max_parallel`.
+4. **As soon as one Reviewer finishes**, do not wait for the others. Immediately
+   call the trusted checkpoint with that one completion event:
+
+```text
+Windows: cmd.exe /d /c "review.cmd --auto --json --ai-parallel 5 --completed-task-id <TASK_ID> --dispatch-session <SESSION>"
+Linux/CentOS/macOS: ./review.sh --auto --json --ai-parallel 5 --completed-task-id <TASK_ID> --dispatch-session <SESSION>
+```
+
+5. The trusted script validates and finalizes only that Task, refreshes the
+   current HTML/CSV/JSON projection, releases exactly one lease, and returns at
+   most one newly leased replacement. Start that replacement immediately while
+   all other existing reviewers continue running.
+6. Reuse the same `dispatch_session` for every completion from that coordinator
+   session. Never synthesize a session or send a completion for a Task that was
+   not leased in that session.
+7. If one completion returns `exit_code != 0`, report that Task and `log_path`.
+   Do **not** cancel other already-running reviewers and do not refill the failed
+   Task's slot. Continue processing completion events from the remaining leased
+   reviewers; the failed result stays diagnosable and recoverable.
+8. Continue until the checkpoint returns `VIEW_RESULTS` / `COMPLETE`. Then report
+   only `batch_id` and `result_paths`, without opening reports.
+
+If the coordinator itself restarts and no prior live session can be continued,
+start again with the initial checkpoint **without** a session token. The trusted
+script creates a new session and safely recovers orphan result files before
+redispatching still-missing Tasks.
 
 On unavailable isolation, agent failure, malformed results, unexpected paths, or
 additional authority requirements, stop with the specific issue (use
