@@ -11,6 +11,7 @@ _SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
 _BLOCK_DECISIONS = {"BLOCK", "BLOCKED", "DO_NOT_INSTALL", "FAIL", "FAILED"}
 _REVIEW_DECISIONS = {"REVIEW", "REVIEW_REQUIRED", "MANUAL_REVIEW"}
 _UNCERTAIN_DECISIONS = {"UNKNOWN", "INCOMPLETE", "ERROR", "TIMEOUT", "MISSING", "INVALID"}
+_DECISION_ORDER = {"PASS": 0, "REVIEW_REQUIRED": 1, "BLOCK": 2}
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +90,7 @@ def static_security_decision(
     """Return a scanner-only projection without pretending the AI stage is done.
 
     Scanner-level decisions are preserved because a tool can require review even
-    when its normalized findings are LOW/INFO.  An uncertain scanner decision is
+    when its normalized findings are LOW/INFO. An uncertain scanner decision is
     conservatively projected as REVIEW_REQUIRED here; true scanner incompleteness
     is handled by the static phase before this helper is called.
     """
@@ -176,15 +177,11 @@ def static_waiting_for_ai(
 ) -> dict[str, Any]:
     """Build the common post-static/pre-AI projection."""
 
-    effective_decision = static_security_decision
-    report_decision = globals()["static_security_decision"](
-        findings,
-        static_reports=static_reports,
+    report_decision = globals_static_security_decision(findings, static_reports)
+    effective_decision = max(
+        (static_security_decision, report_decision),
+        key=lambda value: _DECISION_ORDER.get(value, 1),
     )
-    order = {"PASS": 0, "REVIEW_REQUIRED": 1, "BLOCK": 2}
-    if order.get(report_decision, 1) > order.get(effective_decision, 1):
-        effective_decision = report_decision
-
     return build_current_result(
         source,
         phase=ReviewPhaseState(
@@ -199,6 +196,15 @@ def static_waiting_for_ai(
         review_policy_version=review_policy_version,
         ai_review_summary={"status": AIReviewStatus.PENDING.value},
     )
+
+
+def globals_static_security_decision(
+    findings: Sequence[Mapping[str, Any]],
+    static_reports: Sequence[Mapping[str, Any]],
+) -> str:
+    """Avoid keyword shadowing in ``static_waiting_for_ai`` while keeping its API stable."""
+
+    return static_security_decision(findings, static_reports=static_reports)
 
 
 __all__ = [
