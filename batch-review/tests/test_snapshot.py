@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import os
 import subprocess
 import tarfile
 import tempfile
@@ -46,8 +47,15 @@ class SnapshotTests(unittest.TestCase):
             raise RuntimeError(f"stdout={completed.stdout!r} stderr={completed.stderr!r}")
         return completed.stdout.strip()
 
-    def commit(self, message: str = "snapshot fixture") -> str:
+    def commit(
+        self,
+        message: str = "snapshot fixture",
+        *,
+        executable_paths: tuple[str, ...] = (),
+    ) -> str:
         self.git("add", "-A")
+        for relative_path in executable_paths:
+            self.git("update-index", "--chmod=+x", "--", relative_path)
         self.git("commit", "-qm", message)
         return self.git("rev-parse", "HEAD")
 
@@ -79,7 +87,7 @@ class SnapshotTests(unittest.TestCase):
 
     def test_exports_git_bytes_without_checkout_and_writes_manifest(self) -> None:
         self.make_basic_skill()
-        revision = self.commit()
+        revision = self.commit(executable_paths=("skills/demo/scripts/run.sh",))
 
         # A dirty worktree must not affect a snapshot of the explicit commit.
         (self.repo / "skills" / "demo" / "SKILL.md").write_text(
@@ -98,11 +106,13 @@ class SnapshotTests(unittest.TestCase):
             "# committed skill\n",
         )
         self.assertTrue((destination / ".hidden").exists())
-        self.assertEqual((destination / "scripts" / "run.sh").stat().st_mode & 0o777, 0o755)
+        if os.name != "nt":
+            self.assertEqual((destination / "scripts" / "run.sh").stat().st_mode & 0o777, 0o755)
         self.assertFalse((destination / "safe-link").exists())
         self.assertFalse((destination / "outside-link").exists())
 
         by_path = {entry.relative_path: entry for entry in result.entries}
+        self.assertEqual(by_path["scripts/run.sh"].mode, "100755")
         self.assertEqual(by_path["asset.bin"].file_type, "binary")
         self.assertEqual(by_path["safe-link"].file_type, "symlink")
         self.assertEqual(by_path["safe-link"].symlink_target, "SKILL.md")
@@ -127,7 +137,7 @@ class SnapshotTests(unittest.TestCase):
         script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         script.chmod(0o755)
         self.symlink_or_skip(skill / "safe-link", "SKILL.md")
-        revision = self.commit()
+        revision = self.commit(executable_paths=("skills/demo/run.sh",))
         archive = self.root / "skill.tar"
         self.git(
             "archive",
@@ -197,7 +207,7 @@ class SnapshotTests(unittest.TestCase):
 
     def test_digest_is_sorted_and_only_uses_path_type_mode_and_hash_or_target(self) -> None:
         self.make_basic_skill()
-        revision = self.commit()
+        revision = self.commit(executable_paths=("skills/demo/scripts/run.sh",))
         result = export_skill_snapshot(self.repo, revision, "skills/demo", self.root / "snapshot")
 
         canonical = json.loads(canonical_manifest_json(result.entries).decode("utf-8"))
@@ -300,7 +310,7 @@ class SnapshotTests(unittest.TestCase):
 
     def test_rejects_refs_and_unsafe_skill_paths(self) -> None:
         self.make_basic_skill()
-        revision = self.commit()
+        revision = self.commit(executable_paths=("skills/demo/scripts/run.sh",))
         with self.assertRaises(GitSourceError):
             export_skill_snapshot(self.repo, "HEAD", "skills/demo", self.root / "bad")
         with self.assertRaises((ValueError, UnsafePathError)):
