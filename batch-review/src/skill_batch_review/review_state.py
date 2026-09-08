@@ -81,20 +81,12 @@ def finding_summary(findings: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def static_security_decision(
+def _derive_static_security_decision(
     findings: Sequence[Mapping[str, Any]],
     *,
-    static_reports: Sequence[Mapping[str, Any]] = (),
-    medium_requires_review: bool = True,
+    static_reports: Sequence[Mapping[str, Any]],
+    medium_requires_review: bool,
 ) -> str:
-    """Return a scanner-only projection without pretending the AI stage is done.
-
-    Scanner-level decisions are preserved because a tool can require review even
-    when its normalized findings are LOW/INFO. An uncertain scanner decision is
-    conservatively projected as REVIEW_REQUIRED here; true scanner incompleteness
-    is handled by the static phase before this helper is called.
-    """
-
     decisions = {
         str(report.get("decision") or "").strip().upper()
         for report in static_reports
@@ -116,6 +108,27 @@ def static_security_decision(
     if medium_requires_review and "MEDIUM" in severities:
         return "REVIEW_REQUIRED"
     return "PASS"
+
+
+def static_security_decision(
+    findings: Sequence[Mapping[str, Any]],
+    *,
+    static_reports: Sequence[Mapping[str, Any]] = (),
+    medium_requires_review: bool = True,
+) -> str:
+    """Return a scanner-only projection without pretending the AI stage is done.
+
+    Scanner-level decisions are preserved because a tool can require review even
+    when its normalized findings are LOW/INFO. An uncertain scanner decision is
+    conservatively projected as REVIEW_REQUIRED here; true scanner incompleteness
+    is handled by the static phase before this helper is called.
+    """
+
+    return _derive_static_security_decision(
+        findings,
+        static_reports=static_reports,
+        medium_requires_review=medium_requires_review,
+    )
 
 
 def build_current_result(
@@ -177,7 +190,11 @@ def static_waiting_for_ai(
 ) -> dict[str, Any]:
     """Build the common post-static/pre-AI projection."""
 
-    report_decision = globals_static_security_decision(findings, static_reports)
+    report_decision = _derive_static_security_decision(
+        findings,
+        static_reports=static_reports,
+        medium_requires_review=True,
+    )
     effective_decision = max(
         (static_security_decision, report_decision),
         key=lambda value: _DECISION_ORDER.get(value, 1),
@@ -196,15 +213,6 @@ def static_waiting_for_ai(
         review_policy_version=review_policy_version,
         ai_review_summary={"status": AIReviewStatus.PENDING.value},
     )
-
-
-def globals_static_security_decision(
-    findings: Sequence[Mapping[str, Any]],
-    static_reports: Sequence[Mapping[str, Any]],
-) -> str:
-    """Avoid keyword shadowing in ``static_waiting_for_ai`` while keeping its API stable."""
-
-    return static_security_decision(findings, static_reports=static_reports)
 
 
 __all__ = [
