@@ -21,6 +21,7 @@ if str(SRC_DIR) not in sys.path:
 from skill_batch_review.completion_import import (  # noqa: E402
     CompletionImportError,
     import_completed_task,
+    recover_ready_results,
 )
 from skill_batch_review.config import load_config  # noqa: E402
 from skill_batch_review.dispatch_lease import (  # noqa: E402
@@ -191,8 +192,7 @@ def _queue_items(path: Path) -> tuple[dict[str, Any], list[Mapping[str, Any]]]:
     raw = value.get("items", [])
     if not isinstance(raw, list):
         raise RuntimeError("AI queue items 必须是数组")
-    items = [item for item in raw if isinstance(item, Mapping)]
-    return value, items
+    return value, [item for item in raw if isinstance(item, Mapping)]
 
 
 def _leased_dispatch_response(
@@ -237,7 +237,7 @@ def _leased_dispatch_response(
         return response
 
     # project_status may say ADVANCE when another in-flight result already
-    # exists.  Completion-driven mode must not bulk-import it without that
+    # exists. Completion-driven mode must not bulk-import it without that
     # task's explicit event, so ADVANCE remains an AI scheduling boundary here.
     if action not in {"AI_REVIEW", "ADVANCE"} and not completed_task_id:
         return response
@@ -264,21 +264,27 @@ def _leased_dispatch_response(
     return response
 
 
-def _import_completion_event(task_id: str) -> None:
+def _current_config_batch() -> tuple[Any, str]:
     operator = _operator()
     config_path = Path(str(operator.get("config_path") or ""))
     batch_id = str(operator.get("batch_id") or "").strip()
     if not config_path.is_file() or not batch_id:
-        raise RuntimeError("completion event 缺少当前 config/batch 上下文")
-    result = import_completed_task(
-        load_config(config_path),
-        batch_id=batch_id,
-        task_id=task_id,
-    )
+        raise RuntimeError("当前缺少 config/batch 上下文")
+    return load_config(config_path), batch_id
+
+
+def _import_completion_event(task_id: str) -> None:
+    config, batch_id = _current_config_batch()
+    result = import_completed_task(config, batch_id=batch_id, task_id=task_id)
     print(
         f"AI completion imported: {result.task_id} / {result.status}; "
         f"remaining={result.remaining_ai}"
     )
+
+
+def _recover_orphan_results() -> Mapping[str, Any]:
+    config, batch_id = _current_config_batch()
+    return recover_ready_results(config, batch_id=batch_id).to_dict()
 
 
 def _automation_step(
@@ -286,7 +292,7 @@ def _automation_step(
     completed_task_id: str | None = None,
     dispatch_session: str | None = None,
 ) -> int:
-    """Run deterministic transitions, then allocate only free reviewer slots."""
+    """Run deterministic transitions, recover if new, then fill free slots."""
 
     log_path = BATCH_REVIEW_DIR / ".batch-review" / "automation-last.log"
     try:
@@ -303,6 +309,10 @@ def _automation_step(
                 stderr=log,
                 check=False,
             ).returncode
+
+        recovery: Mapping[str, Any] | None = None
+        if code == 0 and completed_task_id is None and dispatch_session is None:
+            recovery = _recover_orphan_results()
         status = _status()
         response = _leased_dispatch_response(
             status,
@@ -311,6 +321,16 @@ def _automation_step(
             dispatch_session=dispatch_session,
             completed_task_id=completed_task_id,
         )
+        if recovery is not None:
+            response["recovery"] = dict(recovery)
+            failed = recovery.get("failed") if isinstance(recovery, Mapping) else None
+            dispatch = response.get("ai_dispatch")
+            no_active_work = not isinstance(dispatch, Mapping) or (
+                not dispatch.get("items") and not dispatch.get("in_flight_count")
+            )
+            if failed and no_active_work:
+                response["next_action"] = "MANUAL_CHECK"
+                response["summary"] = "存在无法导入的遗留 AI 结果；其他可恢复结果已独立落盘。"
         response["log_path"] = str(log_path)
     except (OSError, ValueError, RuntimeError, KeyError, TypeError, DispatchLeaseError) as exc:
         code = 2
@@ -437,8 +457,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print("它会对当前 Batch 使用隔离 Reviewer，并按 completion event 滚动补位。")
                 return 0
             if action == "ADVANCE":
-                # Legacy/manual compatibility only. Completion-driven auto mode
-                # uses explicit task events and never bulk-imports unseen events.
+                if args.auto:
+                    # A fresh JSON checkpoint will recover orphan ready files
+                    # one by one. Active dispatch sessions import only explicit
+                    # completion events and must never bulk-advance here.
+                    print("检测到 ready AI result；交由 completion/recovery checkpoint 单项导入。")
+                    return 0
                 operator = _operator()
                 code = _run(
                     (
