@@ -28,6 +28,10 @@ from .indexed_html_reporting import write_html_report as _indexed_write_html_rep
 
 _html_reporting.write_html_report = _indexed_write_html_report
 
+from .bilingual_html_reporting import install_bilingual_html_reporting
+
+install_bilingual_html_reporting(_html_reporting)
+
 from . import config as _config_module
 from .path_compat import install_config_path_compat
 
