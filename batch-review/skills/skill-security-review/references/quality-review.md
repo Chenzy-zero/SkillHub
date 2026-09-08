@@ -9,6 +9,11 @@ This score measures the quality visible in the reviewed package. It does not pro
 
 Score five dimensions. Choose one anchor per dimension and explain it in `quality_review.dimensions[].reason`.
 
+Write `name`, `anchor`, `score`, and `reason` for every dimension. `max_score`
+is a policy constant filled by the importer; omit it from the AI output.
+The importer matches dimensions by name, restores canonical order, and rejects
+duplicate/unknown dimensions, supplied incorrect weights, and scores above the limit.
+
 | Dimension | Weight | STRONG | ACCEPTABLE | WEAK | POOR | ABSENT |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `PURPOSE_AND_TRIGGER` | 20 | 20 | 15 | 10 | 5 | 0 |

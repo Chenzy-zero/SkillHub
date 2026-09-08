@@ -7,6 +7,7 @@ workspace; this module validates that result before it can influence a gate.
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -258,12 +259,40 @@ def validate_ai_review_result(
     *,
     schema_path: Path,
     expectation: Optional[AIReviewExpectation] = None,
-) -> None:
-    """Validate JSON Schema plus cross-field safety invariants."""
+) -> dict[str, Any]:
+    """Return a normalized copy, validated against the frozen result schema.
+
+    Only structural, policy-owned values are derived here. Never invent scores,
+    findings, coverage or verdicts. The caller's raw evidence remains unchanged.
+    """
 
     with schema_path.open("r", encoding="utf-8") as handle:
         schema = json.load(handle)
     Draft202012Validator.check_schema(schema)
+    payload = copy.deepcopy(dict(payload))
+    quality = payload.get("quality_review")
+    dimensions = quality.get("dimensions") if isinstance(quality, dict) else None
+    specs = schema["properties"]["quality_review"]["properties"]["dimensions"].get("prefixItems", [])
+    weights = {}
+    for spec in specs:
+        for part in spec.get("allOf", []):
+            properties = part.get("properties", {})
+            if "name" in properties and "max_score" in properties:
+                weights[properties["name"]["const"]] = properties["max_score"]["const"]
+    if isinstance(dimensions, list) and weights:
+        for dimension in dimensions:
+            if isinstance(dimension, dict) and isinstance(dimension.get("name"), str):
+                name = dimension["name"]
+                if name in weights:
+                    dimension.setdefault("max_score", weights[name])
+        names = [d.get("name") if isinstance(d, dict) else None for d in dimensions]
+        if (
+            all(isinstance(name, str) for name in names)
+            and len(names) == len(weights)
+            and set(names) == set(weights)
+        ):
+            by_name = {d["name"]: d for d in dimensions}
+            quality["dimensions"] = [by_name[name] for name in weights]
     validator = Draft202012Validator(schema, format_checker=FormatChecker())
     errors = [
         f"{_json_path(tuple(error.absolute_path))}: {error.message}"
@@ -273,6 +302,7 @@ def validate_ai_review_result(
         errors.extend(_semantic_errors(payload, expectation))
     if errors:
         raise AIReviewValidationError(errors)
+    return payload
 
 
 def load_and_validate_ai_review_result(
@@ -290,8 +320,7 @@ def load_and_validate_ai_review_result(
         raise AIReviewValidationError([f"cannot read JSON result: {exc}"]) from exc
     if not isinstance(payload, dict):
         raise AIReviewValidationError(["$ must be a JSON object"])
-    validate_ai_review_result(payload, schema_path=schema_path, expectation=expectation)
-    return payload
+    return validate_ai_review_result(payload, schema_path=schema_path, expectation=expectation)
 
 
 __all__ = [

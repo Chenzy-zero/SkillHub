@@ -151,12 +151,22 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
         self.assertTrue((config.workspace.skills_root / "id-one/sample/SKILL.md").is_file())
         self.assertFalse((config.workspace.skills_root / "id-one/sample/.git").exists())
         ai_path = self.root / "ai.json"
+        ai_result = valid_ai_result(first.task_id, self.revision, first.snapshot.skill_digest)
+        expected_dimensions = json.loads(json.dumps(ai_result["quality_review"]["dimensions"]))
+        for dimension in ai_result["quality_review"]["dimensions"]:
+            del dimension["max_score"]
         ai_path.write_text(
-            json.dumps(valid_ai_result(first.task_id, self.revision, first.snapshot.skill_digest)),
+            json.dumps(ai_result),
             encoding="utf-8",
         )
         first_result = finalize_skill(config, index_path=first.index_path, ai_result_path=ai_path)
         self.assertEqual(first_result["security_decision"], "PASS")
+        self.assertEqual(first_result["quality_dimensions"], expected_dimensions)
+        self.assertEqual(json.loads(ai_path.read_text(encoding="utf-8")), ai_result)
+        imported = json.loads((Path(first_result["evidence_ref"]) / "ai/imported-result.json").read_text(encoding="utf-8"))
+        self.assertEqual(imported["quality_review"]["dimensions"], expected_dimensions)
+        durable = json.loads((config.workspace.skills_root / "id-one/review-result.json").read_text(encoding="utf-8"))
+        self.assertEqual(durable["quality_dimensions"], expected_dimensions)
         self.assertTrue((config.workspace.skills_root / "id-one/review-result.json").is_file())
         first_csv, _ = write_skill_result_tables(config, inventory, batch_id="batch-1")
         with first_csv.open("r", encoding="utf-8", newline="") as handle:
@@ -174,6 +184,7 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
         )
         self.assertFalse(second.requires_ai)
         self.assertEqual(second.result["reuse_status"], "RESULT_REUSED")
+        self.assertEqual(second.result["quality_dimensions"], expected_dimensions)
         self.assertEqual(second.result["reused_from_skill_id"], "id-one")
         self.assertEqual(second.result["content_id"], first_result["content_id"])
         self.assertEqual(runner.call_count, 2)
@@ -188,6 +199,7 @@ command = ["skillspector", "scan", "{{skill_root}}", "--no-llm", "--format", "js
         self.assertEqual(rows[1]["reuse_status"], "RESULT_REUSED")
         aggregate = json.loads(json_path.read_text(encoding="utf-8"))
         self.assertEqual(aggregate["result_count"], 2)
+        self.assertTrue(all(item["quality_dimensions"] == expected_dimensions for item in aggregate["skills"]))
         self.assertEqual({item["content_id"] for item in aggregate["skills"]}, {first_result["content_id"]})
         html_path = write_skill_html_report(config, inventory, batch_id="batch-1")
         page = html_path.read_text(encoding="utf-8")

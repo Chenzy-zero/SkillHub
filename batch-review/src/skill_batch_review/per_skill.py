@@ -701,6 +701,7 @@ def prepare_skill(
             "security_decision": "PASS",
             "quality_decision": "PASS",
             "quality_score": approved.get("quality_score"),
+            "quality_dimensions": (approved_ai.get("quality_review") or {}).get("dimensions", []),
             "static_reports": [_scan_summary(item) for item in approved_scans if isinstance(item, Mapping)],
             "ai_review_summary": {
                 "status": "RESULT_REUSED",
@@ -837,6 +838,7 @@ def finalize_skill(
         "security_decision": policy.security_decision,
         "quality_decision": policy.quality_decision,
         "quality_score": policy.quality_score,
+        "quality_dimensions": review["quality_review"]["dimensions"],
         "static_reports": [_scan_summary(scan) for scan in scans],
         "ai_review_summary": {
             "status": "COMPLETED",

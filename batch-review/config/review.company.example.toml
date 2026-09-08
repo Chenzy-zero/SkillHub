@@ -75,4 +75,4 @@ max_backoff_seconds = 60
 # 当前编排器逐仓库执行；同一 Skill 的两套静态扫描并行。
 repositories = 1
 skills_per_repository = 1
-ai_reviews = 1
+ai_reviews = 5

@@ -181,6 +181,16 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("$auto-skill-review", status.next_instruction)
         self.assertEqual(status.ai_queue_path, str((state_dir / "ai-review-queue.json").resolve()))
 
+        # A later completion must be importable even if the first task is pending.
+        state["ai_queue_mode"] = "repository_batch_v1"
+        state["items"][0]["status"] = "WAITING_FOR_AI"
+        ready_path = self.root / "second-result.json"
+        ready_path.write_text("{}", encoding="utf-8")
+        state["items"].append({"task_id": "task-2", "status": "WAITING_FOR_AI", "ai_result_path": str(ready_path)})
+        (state_dir / "per-skill-launcher-state.json").write_text(json.dumps(state), encoding="utf-8")
+        status = project_status.inspect_project(operator_state_path=self.operator)
+        self.assertEqual(status.next_action, "ADVANCE")
+
     def test_completed_batch_requests_report_then_returns_html_path(self):
         config, manifests = self._ready_config()
         loaded = project_status.load_config(config)
@@ -246,11 +256,13 @@ class ProjectSetupTests(unittest.TestCase):
         self.assertIn("name: auto-skill-review", content)
         self.assertIn("review.cmd --auto", content)
         self.assertIn("Do not use Git", content)
-        self.assertIn("fresh project subagent", content)
+        self.assertIn("fresh project Agent", content)
         self.assertIn("skill-security-reviewer", content)
         self.assertIn("ai-review-queue.json", content)
         self.assertIn("max_parallel", content)
-        self.assertIn("Do not read `package-manifest.json`", content)
+        self.assertIn("Never read target packages", content)
+        self.assertIn("--auto --json --ai-parallel 5", content)
+        self.assertIn("fill its slot", content)
 
         codex_skill = BATCH_REVIEW_DIR / ".agents/skills/auto-skill-review/SKILL.md"
         codex_content = codex_skill.read_text(encoding="utf-8")

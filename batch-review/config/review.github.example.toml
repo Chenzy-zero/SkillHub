@@ -70,4 +70,4 @@ max_backoff_seconds = 60
 [concurrency]
 repositories = 1
 skills_per_repository = 1
-ai_reviews = 1
+ai_reviews = 5

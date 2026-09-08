@@ -94,11 +94,66 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="由已授权的自动审查 Skill 调用；不重复询问计划、启动和推进确认",
     )
+    parser.add_argument("--json", action="store_true", help="脚本推进到 AI 等待或结束，仅返回精简调度 JSON")
+    parser.add_argument("--ai-parallel", type=int, help="本次 AI 调度并发上限，不改写配置或批次")
     return parser
+
+
+def _dispatch_response(status: dict[str, Any], *, code: int, parallel: int | None) -> dict[str, Any]:
+    """Select pending tasks in code; never send evidence to the coordinator."""
+    response = {key: status.get(key) for key in (
+        "state", "next_action", "batch_id", "summary", "next_instruction", "result_paths", "issues"
+    )}
+    response["exit_code"] = code
+    response["ai_dispatch"] = None
+    if code == 0 and status.get("next_action") == "AI_REVIEW":
+        queue_path = status.get("ai_queue_path")
+        if not queue_path:
+            raise RuntimeError("AI_QUEUE_MISSING: 状态未提供当前仓库 AI 队列")
+        queue = json.loads(Path(queue_path).read_text(encoding="utf-8"))
+        pending = [
+            item for item in queue.get("items", [queue])
+            if not Path(item["expected_result"]).is_file()
+        ]
+        if not pending:
+            raise RuntimeError("AI_QUEUE_EMPTY: 状态要求 AI 审查，但队列没有待审任务；请检查批次状态")
+        pending.sort(key=lambda item: -item.get("review_size_bytes", 0))
+        response["ai_dispatch"] = {
+            "max_parallel": parallel if parallel is not None else queue.get("max_parallel", 1),
+            "scheduling": "rolling_largest_first",
+            "pending_count": len(pending),
+            "items": [{key: item[key] for key in ("task_id", "handoff", "expected_result")} for item in pending],
+        }
+    return response
+
+
+def _automation_step(parallel: int | None) -> int:
+    """Run deterministic transitions to the next checkpoint, logging locally."""
+    log_path = BATCH_REVIEW_DIR / ".batch-review" / "automation-last.log"
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("w", encoding="utf-8") as log:
+            code = subprocess.run(
+                (sys.executable, str(Path(__file__).resolve()), "--auto"),
+                stdout=log, stderr=log, check=False,
+            ).returncode
+        response = _dispatch_response(_status(), code=code, parallel=parallel)
+        response["log_path"] = str(log_path)
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+        code = 2
+        response = {"exit_code": code, "next_action": "STOP", "error": str(exc), "log_path": str(log_path)}
+    print(json.dumps(response, ensure_ascii=False))
+    return code
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.ai_parallel is not None and args.ai_parallel < 1:
+        raise SystemExit("--ai-parallel must be >= 1")
+    if args.json:
+        if not args.auto:
+            raise SystemExit("--json requires --auto")
+        return _automation_step(args.ai_parallel)
     run_authorized = bool(args.auto)
     try:
         while True:
@@ -114,7 +169,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
             if action == "EDIT_CONFIG":
                 print("请只修改上面显示的本机配置文件；保存后再次运行本入口。")
-                return 0
+                return 2 if args.auto else 0
             if action == "INSTALL_SCANNERS":
                 if args.auto:
                     print("自动模式不会静默安装扫描器，请先双击 review.cmd 完成安装确认。")

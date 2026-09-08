@@ -145,7 +145,14 @@ AI 队列并为各 Skill 启动独立 Agent，自动完成
 自动审查 Skill 会按计划逐仓库推进，但不会跳过失败任务，也不会自行扩大并发或无限重试。
 
 静态阶段保持逐 Skill 串行写入结果；同一个 Skill 的 Cisco 与 SkillSpector 并行执行。
-AI 阶段可在当前仓库内并行启动多个独立 Agent，最大数量由 `[concurrency].ai_reviews` 控制。
+AI 阶段在当前仓库内滚动启动独立 Agent，默认 `[concurrency].ai_reviews = 5`。标准自动
+Skill 使用 `review.cmd --auto --json --ai-parallel 5`（Unix 使用 `review.sh`），只覆盖本次
+派发上限，不改写已有冻结配置。实际并发受客户端可用 Agent 数约束；完成一个补一个，脚本
+按包大小优先派发大包，不等待整组结束才补位。状态、筛选、排序和报告均由脚本处理。
+
+质量维度 `max_score` 是固定满分，由导入脚本按可信 Schema 补齐；AI 仍必须给出实得分和
+依据。最终 JSON 保存完整评分字段，原始 AI JSON 不改写。错误满分或实得分、缺失审查内容
+仍阻止导入。详见 `docs/21-windows-ai-client-batch-review-guide.md` 的 6.1 节。
 
 ### 3.5 清理边界
 
@@ -652,7 +659,7 @@ max_backoff_seconds = 60
 [concurrency]
 repositories = 1
 skills_per_repository = 1
-ai_reviews = 1
+ai_reviews = 5
 ```
 
 首轮建议保持仓库并发为 1。当前命令按仓库人工驱动，以上数值不会自动把所有仓库并发跑完。

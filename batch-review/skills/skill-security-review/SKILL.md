@@ -35,6 +35,11 @@ Older handoffs may contain paths to manifests or scanner reports. Ignore those f
 4. Produce independent security findings and the five-dimension static quality score. Findings must be supported by locations in the Skill package, not by scanner output.
 5. Write one JSON object that validates against `result_schema_path` to the queue item's `expected_result`. Add no Markdown or prose to that file.
 
+For each quality dimension, output `name`, `anchor`, `score`, and `reason`.
+Omit `max_score`: the importer fills the fixed weight from the trusted schema.
+Keep reasons concise and evidence-specific. Do not produce extra report drafts
+or narration; inspect every package file and write the final JSON once.
+
 Use the exact exposed model identifier for `reviewer.model` when available; otherwise use the handoff fallback, normally `ai-agent-session`. Do not guess a model name.
 
 ## Decisions

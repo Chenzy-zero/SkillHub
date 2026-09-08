@@ -405,10 +405,16 @@ def inspect_project(*, operator_state_path: Path = OPERATOR_STATE) -> ProjectSta
         )
     if batch_status == "WAITING_FOR_AI":
         ai_path = Path(str(current.get("ai_result_path") or "")) if current else Path()
-        if current and ai_path.is_file():
+        ready_in_queue = batch_state.get("ai_queue_mode") == "repository_batch_v1" and any(
+            item.get("status") == "WAITING_FOR_AI"
+            and item.get("ai_result_path")
+            and Path(str(item["ai_result_path"])).is_file()
+            for item in batch_state.get("items", [])
+        )
+        if ready_in_queue or (current and ai_path.is_file()):
             return ProjectStatus(
                 state="AI_RESULT_READY",
-                summary="当前仓库已有 AI 结果，可以由脚本批量合并并进入下一仓库。",
+                summary="当前仓库已有 AI 结果，可以由脚本导入；全部完成后再进入下一仓库。",
                 next_action="ADVANCE",
                 next_instruction=(
                     "运行 Codex CLI 的 $auto-skill-review 或 Claude Code 的 "

@@ -1,79 +1,54 @@
 ---
 name: auto-skill-review
-description: Run the prepared Skill security-review batch from one Claude Code invocation, using trusted scripts for all deterministic work and isolated Agents for Skill content review.
-allowed-tools: Read Bash Agent
+description: Run a prepared security-review batch with trusted scripts and up to five isolated reviewer Agents. Scripts select tasks, import results, and generate reports.
+allowed-tools: Bash Agent
 ---
 
-# Automatic Skill Review
+# Automatic Skill Review for Claude Code
 
-This is the coordinator for the security-review workflow. It can be invoked
-directly after this project has been initialized, configured, and passed the
-scanner health check; the operator does not need to run `review.cmd` first.
-The parent conversation is only a coordinator. It must not inspect Skill files,
-manifests, static scanner reports, or prior AI reports.
-Do not read `package-manifest.json`, `raw-report.json`, `normalized-result.json`,
-handoff contents, or any existing AI result in the parent conversation.
+The parent only dispatches native reviewer Agents. Never read target packages,
+handoff contents, package-manifest.json, static reports, prior AI reports, or batch
+evidence in the parent context. Do not use Git, package managers, network, MCP, or
+arbitrary shell commands. Never execute reviewed content.
 
-The coordinator may call only the trusted launchers in this project root.
-Those scripts perform CSV validation, repository download, Skill extraction,
-static scanning, state changes, result merging, and cleanup. The coordinator
-does not publish, push, install packages, or execute reviewed content.
+## Single script checkpoint
 
-Do not use Git, package managers, web access, MCP, or arbitrary shell commands
-during this workflow. Bash is limited to the repository's `review` and
-read-only `status` wrappers described below.
+From this project root, call:
 
-## Coordinator loop
+```text
+Windows: cmd.exe /d /c "review.cmd --auto --json --ai-parallel 5"
+Linux/CentOS/macOS: ./review.sh --auto --json --ai-parallel 5
+```
 
-1. From this project root, check status:
+The script performs all deterministic transitions to the next AI boundary or
+completion. It handles download, static scans, ai-review-queue.json, file existence
+checks, validation, import, reports, and cleanup. It returns only compact control
+JSON; logs remain in log_path. Do not call status or inspect queues separately.
+The dispatch limit overrides older configuration defaults without rewriting a
+frozen batch. Lower it if the operator requests or the client supports fewer agents.
 
-   ```text
-   Windows: cmd.exe /d /c "status.cmd --json"
-   Linux/CentOS/macOS: ./status.sh --json
-   ```
+## Reviewer dispatch
 
-2. If the status is `PLAN`, `START`, or `ADVANCE`, call the trusted automatic
-   wrapper and then check status again:
+1. If exit_code is nonzero, stop and report the issue, next_instruction, and
+   log_path. Do not retry in a loop or silently initialize/install software.
+2. For next_action AI_REVIEW, consume ai_dispatch.items in the supplied order.
+   The script has excluded existing results and prioritized larger packages.
+3. Start one fresh project Agent of type `skill-security-reviewer` per item.
+   It preloads `/skill-security-review` and follows the canonical policy. Send
+   only task_id, handoff, and expected_result. Never combine Skills in one
+   context, review inline, or substitute a generic Agent without the review policy.
+4. Keep up to ai_dispatch.max_parallel reviewers running (normally 5). Use
+   background Agents when supported and native completion events: as soon as
+   one finishes, fill its slot with the next item. Do not wait for a whole group
+   of five before refilling. Respect actual client limits and report any lower
+   effective concurrency. Do not poll status/files.
+5. Track only task IDs and completion metadata. Once all dispatched reviewers
+   finish, call the same script checkpoint. The script imports results and
+   advances to the next repository. Repeat until VIEW_RESULTS or COMPLETE.
+   If a task just reported complete but is dispatched again, its result is
+   missing: stop and report that task; do not blindly launch it again.
+6. On completion, report only batch_id and result_paths, without opening reports.
 
-   ```text
-   Windows: cmd.exe /d /c "review.cmd --auto"
-   Linux/CentOS/macOS: ./review.sh --auto
-   ```
-
-   This is an internal script call. Do not ask the operator to close and
-   reopen a window between stages. If the status is `INITIALIZE`, `EDIT_CONFIG`,
-   or `INSTALL_SCANNERS`, stop and report the one required manual setup action;
-   never guess configuration or silently install software.
-
-3. For `AI_REVIEW`, read only the small queue metadata file named by status.
-   Prefer `ai-review-queue.json`; fall back to `ai-review-current.json` for an
-   older single-item queue. Do not read a handoff in the parent conversation.
-   For every queue item whose `expected_result` does not yet exist, start one
-   fresh project subagent of type `skill-security-reviewer`. Send it only that
-   item's `task_id`, `handoff`, and `expected_result`. The project subagent
-   preloads `/skill-security-review`, enforces the read/write boundary, and
-   returns only its completion metadata.
-
-   Queue items are independent. Launch up to the queue's `max_parallel` items
-   at a time (the value comes from `[concurrency].ai_reviews`). If the Agent
-   interface serializes calls, process the same queue in bounded groups; never
-   combine multiple Skills into one context or substitute a generic Agent.
-
-4. After all expected results for the current queue are present, call the
-   automatic wrapper once more. It validates and imports every ready result in
-   the current repository, writes the per-Skill, batch and single-file HTML
-   results, cleans the temporary repository area only after the cleanup gate
-   passes, and prepares the next repository. Check status again and repeat from
-   step 2 or 3.
-
-5. If status requests `REPORT`, call the same automatic wrapper once; it regenerates
-   CSV/JSON/HTML from durable results without downloading or scanning again. For
-   `VIEW_RESULTS` or `COMPLETE`, report only the batch ID, result CSV/JSON/HTML
-   paths, completed count, and non-passing or incomplete count. Do not open
-   reports in the parent context.
-
-If an Agent is unavailable, a result is malformed, a path is unexpected, a
-launcher fails, or additional authority is requested, stop with a concise
-`CONTEXT_ISOLATION_UNAVAILABLE` or launcher error. Do not perform the review
-inline and do not skip a task. The persisted state and restricted evidence
-make the loop resumable.
+On unavailable isolation, agent failure, malformed results, unexpected paths, or
+additional authority requirements, stop with the specific issue (use
+CONTEXT_ISOLATION_UNAVAILABLE when applicable). Do not skip failed tasks.

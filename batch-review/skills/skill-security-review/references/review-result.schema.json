@@ -367,7 +367,7 @@
     "qualityDimension": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "anchor", "score", "max_score", "reason"],
+      "required": ["name", "anchor", "score", "reason"],
       "properties": {
         "name": {
           "enum": [

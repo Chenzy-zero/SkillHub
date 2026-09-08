@@ -253,6 +253,8 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
                 )
             )
             self.assertEqual([item["skill_id"] for item in queue["items"]], ["id-one", "id-two"])
+            self.assertEqual(queue["max_parallel"], 5)
+            self.assertEqual([item["review_size_bytes"] for item in queue["items"]], [7, 7])
             self.assertEqual(
                 queue["items"][0]["skill_triggers"],
                 {
@@ -277,6 +279,12 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
             self.assertEqual(state["status"], "COMPLETE")
 
     def test_batch_advance_imports_all_ready_ai_results(self):
+        self._assert_batch_advance(ready_indices=(1, 2))
+
+    def test_batch_advance_imports_later_result_without_waiting_for_first(self):
+        self._assert_batch_advance(ready_indices=(2,))
+
+    def _assert_batch_advance(self, ready_indices):
         self.inventory.write_text(
             "skill_id,skill_name,repo_name,branch,skill_path,latest_commitid,security_reviewed,status,product_line,user_name,user_email\n"
             f"id-one,one,team/demo,main,skills/one,{'a' * 40},否,active,product,Alice,alice@example.com\n"
@@ -299,9 +307,11 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
                     "status": "WAITING_FOR_AI",
                     "index_path": str(self.root / f"index-{index}.json"),
                     "ai_result_path": str(self.root / f"ai-{index}.json"),
+                    "handoff_path": str(self.root / f"handoff-{index}.json"),
                 }
             )
-            Path(item["ai_result_path"]).write_text("{}\n", encoding="utf-8")
+            if index in ready_indices:
+                Path(item["ai_result_path"]).write_text("{}\n", encoding="utf-8")
 
         table_paths = (self.root / "results.csv", self.root / "results.json")
         with (
@@ -310,10 +320,15 @@ class RunSkillBatchLauncherTests(unittest.TestCase):
         ):
             launcher_module._finish_current(config, state, confirm_cleanup=True)
 
-        self.assertEqual(finalize.call_count, 2)
-        self.assertEqual([item["status"] for item in state["items"]], ["COMPLETE", "COMPLETE"])
-        self.assertIsNone(state["current_task_id"])
-        self.assertEqual(state["status"], "READY")
+        self.assertEqual(finalize.call_count, len(ready_indices))
+        if len(ready_indices) == 2:
+            self.assertEqual([item["status"] for item in state["items"]], ["COMPLETE", "COMPLETE"])
+            self.assertIsNone(state["current_task_id"])
+            self.assertEqual(state["status"], "READY")
+        else:
+            self.assertEqual([item["status"] for item in state["items"]], ["WAITING_FOR_AI", "COMPLETE"])
+            self.assertEqual(state["current_task_id"], "task-1")
+            self.assertEqual(state["status"], "WAITING_FOR_AI")
 
 
 if __name__ == "__main__":

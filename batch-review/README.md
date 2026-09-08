@@ -217,6 +217,11 @@ Cisco 2.0.13 安装完成后会从其专用环境移除未启用的 `litellm`，
 Windows 将 `run.sh` 替换为 `run.cmd`。启动器生成当前仓库的 `ai-review-queue.json` 后，
 由自动审查 Skill 触发多个隔离 Agent；不再要求手动逐个调用单项审查 Skill。
 
+默认最多 5 个 AI Agent，完成一个立即补位，大包优先；实际受客户端可用并发限制。
+自动入口内部只调用 `review.cmd --auto --json --ai-parallel 5`（Unix 使用 `review.sh`），
+由脚本完成状态推进、待审筛选、结果导入与报告，主会话不读取 Skill 或扫描报告。
+评分维度的固定 `max_score` 由脚本补齐，不再要求模型重复填写；实得分和审查依据仍严格校验。
+
 `run.sh` / `run.cmd` 会维护仓库和 Skill 状态，并把结果写入 `skills_root` 与 `results_root`。
 
 ## 5. 仓库级兼容命令

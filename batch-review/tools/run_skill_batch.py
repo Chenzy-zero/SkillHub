@@ -251,6 +251,7 @@ def _activate_waiting(config: ReviewConfig, state: dict[str, Any], item: dict[st
         "branch": item["branch"],
         "handoff": item["handoff_path"],
         "expected_result": item["ai_result_path"],
+        "review_size_bytes": item.get("review_size_bytes", 0),
         "skill_trigger": "/skill-security-review",
         "skill_triggers": {
             "claude_code": "/skill-security-review",
@@ -508,6 +509,7 @@ def _ai_queue_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "branch": item["branch"],
         "handoff": item["handoff_path"],
         "expected_result": item["ai_result_path"],
+        "review_size_bytes": item.get("review_size_bytes", 0),
         "skill_trigger": "/skill-security-review",
         "skill_triggers": {
             "claude_code": "/skill-security-review",
@@ -598,6 +600,7 @@ def _prepare_repository_items(
         if not isinstance(stored, Mapping):
             raise LauncherError(f"Skill 缺少仓库提取快照: {item.get('skill_id')}")
         snapshot = _snapshot_from_item(item)
+        item["review_size_bytes"] = sum(entry.size for entry in snapshot.entries)
         prepared = prepare_skill(
             config,
             batch_id=str(state["batch_id"]),
@@ -805,7 +808,13 @@ def _finish_current_batch(
             state["status"] = "READY"
             _save(config, state)
             return
-        item = waiting[0]
+        item = next(
+            (entry for entry in waiting if Path(str(entry.get("ai_result_path") or "")).is_file()),
+            None,
+        )
+        if item is None:
+            _activate_waiting_queue(config, state, waiting)
+            return
         state["current_task_id"] = item["task_id"]
         ai_path = Path(str(item.get("ai_result_path") or ""))
         if not ai_path.is_file():

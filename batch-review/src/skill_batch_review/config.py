@@ -431,7 +431,7 @@ class RetryConfig:
 class ConcurrencyConfig:
     repositories: int = 1
     skills_per_repository: int = 1
-    ai_reviews: int = 1
+    ai_reviews: int = 5
 
     def __post_init__(self) -> None:
         for name in ("repositories", "skills_per_repository", "ai_reviews"):
@@ -778,7 +778,7 @@ def load_config(path: "str | Path") -> ReviewConfig:
             minimum=1,
         ),
         ai_reviews=_integer(
-            concurrency_data.get("ai_reviews"), "concurrency.ai_reviews", default=1, minimum=1
+            concurrency_data.get("ai_reviews"), "concurrency.ai_reviews", default=5, minimum=1
         ),
     )
 

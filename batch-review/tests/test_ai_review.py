@@ -1,4 +1,5 @@
 import copy
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from skill_batch_review.ai_review import (
     AIReviewSourceMetadata,
     AIReviewValidationError,
     build_ai_review_handoff,
+    load_and_validate_ai_review_result,
     validate_ai_review_result,
 )
 
@@ -82,7 +84,7 @@ def valid_result():
 
 class AIReviewValidationTests(unittest.TestCase):
     def validate(self, payload):
-        validate_ai_review_result(
+        return validate_ai_review_result(
             payload,
             schema_path=SCHEMA,
             expectation=AIReviewExpectation(
@@ -95,6 +97,60 @@ class AIReviewValidationTests(unittest.TestCase):
 
     def test_accepts_complete_consistent_result(self):
         self.validate(valid_result())
+
+    def test_missing_weights_are_filled_and_dimensions_ordered_without_mutation(self):
+        payload = valid_result()
+        for dimension in payload["quality_review"]["dimensions"]:
+            del dimension["max_score"]
+        payload["quality_review"]["dimensions"].reverse()
+        original = copy.deepcopy(payload)
+        result = self.validate(payload)
+        self.assertEqual(result, valid_result())
+        self.assertEqual(payload, original)
+
+    def test_loader_preserves_raw_evidence_and_supports_old_required_weight_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = valid_result()
+            for dimension in payload["quality_review"]["dimensions"]:
+                del dimension["max_score"]
+            raw = json.dumps(payload).encode("utf-8")
+            source = root / "raw.json"
+            source.write_bytes(raw)
+            schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+            schema["$defs"]["qualityDimension"]["required"].append("max_score")
+            old_schema = root / "old-schema.json"
+            old_schema.write_text(json.dumps(schema), encoding="utf-8")
+            result = load_and_validate_ai_review_result(source, schema_path=old_schema)
+            self.assertEqual(result, valid_result())
+            self.assertEqual(source.read_bytes(), raw)
+
+    def test_normalization_does_not_hide_invalid_review_values(self):
+        for invalid in (None, "20", 99):
+            with self.subTest(max_score=invalid):
+                payload = valid_result()
+                payload["quality_review"]["dimensions"][0]["max_score"] = invalid
+                with self.assertRaises(AIReviewValidationError):
+                    self.validate(payload)
+        for change in ("duplicate", "unknown", "overscore", "missing_score", "missing_dimension"):
+            with self.subTest(change=change):
+                payload = valid_result()
+                dimensions = payload["quality_review"]["dimensions"]
+                for dimension in dimensions:
+                    del dimension["max_score"]
+                if change == "duplicate":
+                    dimensions[1]["name"] = dimensions[0]["name"]
+                elif change == "unknown":
+                    dimensions[0]["name"] = "UNKNOWN"
+                elif change == "overscore":
+                    dimensions[0]["score"] = 21
+                    payload["quality_review"]["score"] = 93
+                elif change == "missing_score":
+                    del dimensions[0]["score"]
+                else:
+                    dimensions.pop()
+                with self.assertRaises(AIReviewValidationError):
+                    self.validate(payload)
 
     def test_rejects_unknown_schema_field(self):
         payload = valid_result()

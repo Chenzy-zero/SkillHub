@@ -95,4 +95,4 @@ max_backoff_seconds = 60
 # Start conservatively.  Increase only after checking Gerrit and model quota.
 repositories = 1
 skills_per_repository = 1
-ai_reviews = 1
+ai_reviews = 5
