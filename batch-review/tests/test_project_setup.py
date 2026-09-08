@@ -59,17 +59,17 @@ class ProjectSetupTests(unittest.TestCase):
             textwrap.dedent(
                 f"""
                 [batch]
-                inventory_csv = "{inventory}"
+                inventory_csv = "{inventory.as_posix()}"
                 batch_id_prefix = "test"
                 included_statuses = ["ACTIVE"]
                 [workspace]
-                root = "{self.root / 'work'}"
-                evidence_root = "{self.root / 'evidence'}"
-                candidate_root = "{self.root / 'candidates'}"
-                manifest_root = "{manifests}"
-                git_download_root = "{self.root / 'downloads'}"
-                skills_root = "{self.root / 'skills'}"
-                results_root = "{self.root / 'results'}"
+                root = "{(self.root / 'work').as_posix()}"
+                evidence_root = "{(self.root / 'evidence').as_posix()}"
+                candidate_root = "{(self.root / 'candidates').as_posix()}"
+                manifest_root = "{manifests.as_posix()}"
+                git_download_root = "{(self.root / 'downloads').as_posix()}"
+                skills_root = "{(self.root / 'skills').as_posix()}"
+                results_root = "{(self.root / 'results').as_posix()}"
                 [gerrit]
                 ssh_url_template = "ssh://{{user}}@{{host}}:{{port}}/{{repo_name}}.git"
                 user = "reader"
@@ -82,16 +82,16 @@ class ProjectSetupTests(unittest.TestCase):
                 candidate_threshold = 70
                 max_score = 100
                 [ai]
-                skill_path = "{ai_skill}"
-                result_schema_path = "{schema}"
+                skill_path = "{ai_skill.as_posix()}"
+                result_schema_path = "{schema.as_posix()}"
                 [scanners.cisco]
                 enabled = true
                 version = "2.0.13"
-                command = ["{cisco}", "scan", "{{skill_root}}", "--format", "json", "--compact", "--output", "{{output_file}}"]
+                command = ["{cisco.as_posix()}", "scan", "{{skill_root}}", "--format", "json", "--compact", "--output", "{{output_file}}"]
                 [scanners.skillspector]
                 enabled = true
                 version = "2.5.1"
-                command = ["{spector}", "scan", "{{skill_root}}", "--no-llm", "--format", "json", "--output", "{{output_file}}"]
+                command = ["{spector.as_posix()}", "scan", "{{skill_root}}", "--no-llm", "--format", "json", "--output", "{{output_file}}"]
                 """
             ),
             encoding="utf-8",
