@@ -1,20 +1,20 @@
 """Indexed HTML report adapter.
 
 This adapter reuses the existing self-contained report UI while replacing its
-historical evidence hashing pass with the persistent evidence index.  Only
+historical evidence hashing pass with the persistent evidence index. Only
 DERIVED/NORMALIZED evidence receives a relative file link; RAW/SOURCE remains
-path-only in the offline report.
+path-only in the offline report. Evidence created before indexes existed is
+bootstrapped once, then all later refreshes use the persisted index.
 """
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from . import html_reporting as _legacy
-from .evidence_index import safe_evidence_bundle
+from .evidence_index_migration import safe_evidence_bundle_compat
 
 
 _EXTRA_SCRIPT = r'''(() => {
@@ -56,14 +56,14 @@ def _navigation_href(
     evidence_root: Path,
     artifact: Mapping[str, Any],
 ) -> str | None:
-    if str(artifact.get('navigation') or '').upper() != 'OPEN':
+    if str(artifact.get("navigation") or "").upper() != "OPEN":
         return None
-    relative = str(artifact.get('path') or '')
+    relative = str(artifact.get("path") or "")
     if not relative:
         return None
     try:
         root = evidence_root.expanduser().resolve(strict=True)
-        target = (root / Path(*relative.split('/'))).resolve(strict=True)
+        target = (root / Path(*relative.split("/"))).resolve(strict=True)
         target.relative_to(root)
         if target.is_symlink() or not target.is_file():
             return None
@@ -88,7 +88,7 @@ def write_html_report(
 
     original_bundle = _legacy._safe_evidence_bundle
     try:
-        _legacy._safe_evidence_bundle = safe_evidence_bundle
+        _legacy._safe_evidence_bundle = safe_evidence_bundle_compat
         payload = _legacy.build_html_report_payload(
             records,
             batch_id=batch_id,
@@ -103,25 +103,25 @@ def write_html_report(
 
     output = output.expanduser().resolve()
     if evidence_root is not None:
-        for skill in payload.get('skills', []):
+        for skill in payload.get("skills", []):
             if not isinstance(skill, dict):
                 continue
-            for artifact in skill.get('evidence_artifacts', []):
+            for artifact in skill.get("evidence_artifacts", []):
                 if not isinstance(artifact, dict):
                     continue
                 href = _navigation_href(output, evidence_root, artifact)
                 if href:
-                    artifact['href'] = href
+                    artifact["href"] = href
 
     page = (
-        _legacy._PAGE.replace('__BATCH_ID__', _legacy._escape(batch_id))
-        .replace('__POLICY_VERSION__', _legacy._escape(policy_version or '未记录'))
-        .replace('__GENERATED_AT__', _legacy._escape(generated_at or '未记录'))
-        .replace('__INPUT_SHA__', _legacy._escape(input_csv_sha256 or '未记录'))
-        .replace('__APP_SCRIPT__', _legacy._APP_SCRIPT + '\n' + _EXTRA_SCRIPT)
-        .replace('__REPORT_DATA__', _legacy._script_safe_json(payload))
+        _legacy._PAGE.replace("__BATCH_ID__", _legacy._escape(batch_id))
+        .replace("__POLICY_VERSION__", _legacy._escape(policy_version or "未记录"))
+        .replace("__GENERATED_AT__", _legacy._escape(generated_at or "未记录"))
+        .replace("__INPUT_SHA__", _legacy._escape(input_csv_sha256 or "未记录"))
+        .replace("__APP_SCRIPT__", _legacy._APP_SCRIPT + "\n" + _EXTRA_SCRIPT)
+        .replace("__REPORT_DATA__", _legacy._script_safe_json(payload))
     )
     return _legacy._atomic_write(output, page)
 
 
-__all__ = ['write_html_report']
+__all__ = ["write_html_report"]
