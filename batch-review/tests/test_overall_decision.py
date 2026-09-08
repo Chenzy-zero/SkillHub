@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from skill_batch_review import live_report
 from skill_batch_review.indexed_html_reporting import write_html_report
 from skill_batch_review.models import AIReviewStatus, FinalReviewStatus, StaticReviewStatus
 from skill_batch_review.overall_decision import (
@@ -8,6 +9,7 @@ from skill_batch_review.overall_decision import (
     overall_fields,
 )
 from skill_batch_review.reporting import DETAIL_FIELDS, build_detail_rows
+from skill_batch_review.review_policy import SECURITY_BLOCK, evaluate_policy
 from skill_batch_review.review_state import ReviewPhaseState, build_current_result
 
 
@@ -39,6 +41,42 @@ def test_machine_codes_are_canonical_and_chinese_labels_are_deterministic():
     assert fields["overall_decision"] == "REJECTED"
     assert fields["overall_decision_zh"] == "不通过"
     assert fields["overall_reason_codes"] == ["SECURITY_BLOCKED"]
+
+
+def test_policy_public_block_machine_code_is_blocked():
+    digest = "a" * 64
+    scans = [
+        {
+            "scanner": scanner,
+            "status": "COMPLETED",
+            "decision": "DO_NOT_INSTALL" if scanner == "cisco" else "PASS",
+            "tool_ok": True,
+            "completed": True,
+            "report_complete": True,
+            "skill_digest": digest,
+            "errors": [],
+            "directory_comparison": {"unchanged": True},
+            "findings": [],
+        }
+        for scanner in ("cisco", "skillspector")
+    ]
+    ai = {
+        "review_id": "review-1",
+        "policy_version": "policy-1",
+        "reviewed_at": "2026-09-08T00:00:00Z",
+        "reviewer": {"model": "test"},
+        "subject": {"skill_digest_sha256": digest},
+        "input_coverage": {
+            "package_complete": True,
+            "files_expected": 1,
+            "files_reviewed": 1,
+            "unreadable_or_skipped_files": [],
+        },
+        "security_review": {"verdict": "PASS", "findings": []},
+        "quality_review": {"verdict": "PASS", "score": 90, "findings": []},
+    }
+    assert SECURITY_BLOCK == "BLOCKED"
+    assert evaluate_policy(scans, ai, skill_digest=digest).security_decision == "BLOCKED"
 
 
 def test_current_result_persists_authoritative_overall_state():
@@ -126,3 +164,16 @@ def test_html_uses_overall_decision_as_operator_facing_conclusion(tmp_path):
     assert '"overall_decision_zh":"不通过"' in page
     assert '"security_decision":"PASS"' in page
     assert '"quality_decision":"FAIL"' in page
+
+
+def test_live_report_banner_keeps_cjk_first_font(tmp_path):
+    output = write_html_report([], tmp_path / "report.html", batch_id="batch-live")
+    live_report._annotate_html(
+        output,
+        records=[],
+        status="INTERIM",
+        progress={"selected": 0},
+    )
+    page = output.read_text(encoding="utf-8")
+    assert 'font:600 13px/1.5 "Microsoft YaHei UI","Microsoft YaHei"' in page
+    assert "font:600 13px/1.5 Segoe UI,Microsoft YaHei UI,sans-serif" not in page
