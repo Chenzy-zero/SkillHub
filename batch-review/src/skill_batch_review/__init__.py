@@ -42,6 +42,13 @@ from .overall_reporting import install_reporting_compat
 
 install_reporting_compat(_reporting_module, _live_report_module)
 
+# Localization is a report-only projection. Install it after deterministic
+# overall-decision enrichment and before orchestration/completion modules bind
+# the live-report function. Canonical review/evidence state is never rewritten.
+from .localization_reporting import install_localization_reporting
+
+install_localization_reporting(_live_report_module)
+
 from .config import (
     BatchConfig,
     ConcurrencyConfig,
