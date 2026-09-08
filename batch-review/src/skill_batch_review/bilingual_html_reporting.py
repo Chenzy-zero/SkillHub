@@ -33,7 +33,8 @@ def _adapt_page(page: str) -> str:
         "  const hasLocalizedFinding = finding => ['title','description','evidence_summary','recommendation'].some(field=>String(finding[field+'_zh']||'').trim());\n"
         "  const localizedFindingText = (finding,field,fallback='') => finding[field+'_zh']||finding[field]||fallback;\n"
         "  const originalFindingText = finding => [['标题',finding.title],['问题说明',finding.description],['证据摘录',finding.evidence_summary],['处理建议',finding.recommendation]].filter(item=>item[1]).map(item=>item[0]+': '+item[1]).join('\\n\\n');\n"
-        "  const appendOriginalFinding = (parent,finding) => {if(!hasLocalizedFinding(finding))return;const details=node('details','original-text');const summary=node('summary','','查看英文原文');const original=node('pre','',originalFindingText(finding));add(details,summary,original);parent.appendChild(details);};",
+        "  const originalFindingDetails = finding => {const details=node('details','original-text');add(details,node('summary','','查看英文原文'),node('pre','',originalFindingText(finding)));return details;};\n"
+        "  const appendOriginalFinding = (parent,finding) => {if(hasLocalizedFinding(finding))parent.appendChild(originalFindingDetails(finding));};",
     )
     page = _replace_required(
         page,
@@ -63,13 +64,11 @@ def _adapt_page(page: str) -> str:
     page = _replace_required(
         page,
         "detailBlock('问题说明',finding.description||'未提供'),detailBlock('证据摘录',finding.evidence_summary||finding.description||'未提供'),\n      detailBlock('处理建议',finding.recommendation||'未提供'),",
-        "detailBlock('问题说明',localizedFindingText(finding,'description','未提供')),detailBlock('证据摘录',localizedFindingText(finding,'evidence_summary',localizedFindingText(finding,'description','未提供'))),\n      detailBlock('处理建议',localizedFindingText(finding,'recommendation','未提供')),
-",
-    )
+        "detailBlock('问题说明',localizedFindingText(finding,'description','未提供')),detailBlock('证据摘录',localizedFindingText(finding,'evidence_summary',localizedFindingText(finding,'description','未提供'))),\n      detailBlock('处理建议',localizedFindingText(finding,'recommendation','未提供')),")
     page = _replace_required(
         page,
         "if((finding.source_references||[]).length){",
-        "if(hasLocalizedFinding(finding))card.appendChild(detailBlock('英文原文',originalFindingText(finding)));\n    if((finding.source_references||[]).length){",
+        "if(hasLocalizedFinding(finding))card.appendChild(originalFindingDetails(finding));\n    if((finding.source_references||[]).length){",
     )
     page = _replace_required(
         page,
@@ -80,6 +79,14 @@ def _adapt_page(page: str) -> str:
         page,
         "start_line:finding.start_line,end_line:finding.end_line,title:finding.title,description:finding.description,\n      evidence_summary:finding.evidence_summary,recommendation:finding.recommendation",
         "start_line:finding.start_line,end_line:finding.end_line,title:finding.title,title_zh:finding.title_zh,description:finding.description,description_zh:finding.description_zh,\n      evidence_summary:finding.evidence_summary,evidence_summary_zh:finding.evidence_summary_zh,recommendation:finding.recommendation,recommendation_zh:finding.recommendation_zh",
+    )
+    page = page.replace(
+        "skill.failure_reason||skill.manual_reason||'无'",
+        "skill.failure_reason_zh||skill.manual_reason_zh||skill.failure_reason||skill.manual_reason||'无'",
+    )
+    page = page.replace(
+        "skill.reuse_reason||'是'",
+        "skill.reuse_reason_zh||skill.reuse_reason||'是'",
     )
     return page
 
