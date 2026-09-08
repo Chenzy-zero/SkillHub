@@ -379,7 +379,7 @@ class CommandRunnerTests(unittest.TestCase):
             """
         )
         runner = CommandRunner(max_capture_bytes=128)
-        result = runner.run((str(script),), timeout_seconds=5)
+        result = runner.run((sys.executable, str(script)), timeout_seconds=5)
         self.assertEqual(result.returncode, 0)
         self.assertLessEqual(len(result.stdout.encode("utf-8")), 128)
         self.assertLessEqual(len(result.stderr.encode("utf-8")), 128)
@@ -394,7 +394,7 @@ class CommandRunnerTests(unittest.TestCase):
             """
         )
         runner = CommandRunner(max_capture_bytes=128)
-        result = runner.run((str(script),), timeout_seconds=0.1)
+        result = runner.run((sys.executable, str(script)), timeout_seconds=0.1)
         self.assertTrue(result.timed_out)
         self.assertIsNotNone(result.returncode)
 
