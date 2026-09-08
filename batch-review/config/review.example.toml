@@ -4,71 +4,55 @@
 [batch]
 inventory_csv = "../inventory/skill_summary.csv"
 batch_id_prefix = "skill-review"
-# Only these mapped lifecycle statuses enter the review queue. This list is
-# intentionally explicit because real status values must be confirmed first.
 included_statuses = ["ACTIVE"]
 
 [workspace]
+# Runtime: disposable after trusted cleanup/recovery completes.
 root = "../.batch-review/work"
-evidence_root = "../.batch-review/evidence"
-candidate_root = "../.batch-review/candidates"
-manifest_root = "../.batch-review/manifests"
 git_download_root = "../.batch-review/git_download"
+# State/control plane: batch state, indexes and AI queue. The historical
+# config key remains manifest_root for compatibility.
+manifest_root = "../.batch-review/manifests"
+# Archive + durable results / restricted audit evidence.
 skills_root = "../.batch-review/skills"
+evidence_root = "../.batch-review/restricted-evidence"
+# Controlled publication staging; not the audit evidence store.
+candidate_root = "../.batch-review/private-candidates"
+# Reports: the only human entry is results/<batch-id>/skill-security-review-report.html.
 results_root = "../.batch-review/results"
 clean_after_repository = true
 keep_failed_workspace = false
 
 [gerrit]
-# Supported placeholders: repo_name, branch, user, host, port.
-# The command runner must pass the rendered URL as one argument; do not use a
-# shell string or put credentials in this file.
 ssh_url_template = "ssh://{user}@{host}:{port}/{repo_name}.git"
 user = "git"
 host = "gerrit.example.com"
 port = 29418
-# Leave empty to use the template for every repository, or set an allowlist.
 allowed_repositories = []
 
 [status_mapping]
-# The source CSV keeps its existing status values.  Values on the right are
-# internal labels used by the execution stages.
-# The release/ref-update export currently uses these Chinese lifecycle values.
-# Keep the source values on the left and map them to the internal labels used
-# by the execution stages.  Add or change aliases only after confirming the
-# complete set of values in the input CSV.
 "新增" = "ACTIVE"
 "修改" = "ACTIVE"
 "删除" = "DELETED"
-# Compatibility aliases for the older bundled example CSV.
 "active" = "ACTIVE"
 "inactive" = "INACTIVE"
 
 [quality]
-# A score is independent from the security decision.  A candidate requires
-# both a completed security pass and this quality threshold.
 candidate_threshold = 70
 max_score = 100
 
 [ai]
-# Codex CLI 或 Claude Code 由负责人在公司内网模型环境中执行；批处理程序只准备交接材料并校验结果。
-skill_path = "../skills/skill-security-review"
-result_schema_path = "../skills/skill-security-review/references/review-result.schema.json"
-# 策略版本由上述 Skill 规则内容自动计算；模型由当前 AI 客户端会话记录，无需手填。
+# Canonical policy/Schema. .claude/.codex contain client adapters only.
+skill_path = "../.agents/skills/skill-security-review"
+result_schema_path = "../.agents/skills/skill-security-review/references/review-result.schema.json"
 
 [scanners.cisco]
 enabled = true
 version = "2.0.13"
 timeout_seconds = 600
 command = [
-  "skill-scanner",
-  "scan",
-  "{skill_root}",
-  "--format",
-  "json",
-  "--compact",
-  "--output",
-  "{output_file}",
+  "skill-scanner", "scan", "{skill_root}",
+  "--format", "json", "--compact", "--output", "{output_file}",
 ]
 
 [scanners.skillspector]
@@ -76,14 +60,8 @@ enabled = true
 version = "2.5.1"
 timeout_seconds = 600
 command = [
-  "skillspector",
-  "scan",
-  "{skill_root}",
-  "--no-llm",
-  "--format",
-  "json",
-  "--output",
-  "{output_file}",
+  "skillspector", "scan", "{skill_root}",
+  "--no-llm", "--format", "json", "--output", "{output_file}",
 ]
 
 [retry]
@@ -92,7 +70,6 @@ backoff_seconds = 5
 max_backoff_seconds = 60
 
 [concurrency]
-# Start conservatively.  Increase only after checking Gerrit and model quota.
 repositories = 1
 skills_per_repository = 1
 ai_reviews = 5
