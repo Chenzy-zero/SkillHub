@@ -9,6 +9,10 @@ automatically commits, pushes, or publishes candidates.
 # bind their local imports. Existing callers keep the same public API while new
 # configurations use the actual canonical .agents policy location.
 from . import artifacts as _artifact_module
+from .platform_artifacts import install_artifact_platform_compat
+
+install_artifact_platform_compat(_artifact_module)
+
 from .evidence_index import IndexedEvidenceStore
 
 _artifact_module.EvidenceStore = IndexedEvidenceStore
