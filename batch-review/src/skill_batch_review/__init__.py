@@ -5,9 +5,6 @@ separate and operator-visible. No module executes target Skill content or
 automatically commits, pushes, or publishes candidates.
 """
 
-# Install repository-owned compatibility boundaries before orchestration modules
-# bind their local imports. Existing callers keep the same public API while new
-# configurations use the actual canonical .agents policy location.
 from . import artifacts as _artifact_module
 from .platform_artifacts import install_artifact_platform_compat
 
@@ -37,17 +34,14 @@ from .path_compat import install_config_path_compat
 
 install_config_path_compat(_config_module)
 
-# Public/durable security decisions use one machine code. Historical policy code
-# emitted BLOCK while models/reporting already used BLOCKED.
+# Public/durable security decisions use one machine code. Keep the low-level
+# policy API intact for compatibility; only Batch execution is switched to the
+# automatic score-based approval evaluator below.
 from . import review_policy as _review_policy_module
 
 _review_policy_module.SECURITY_BLOCK = "BLOCKED"
 
-# New reviews use deterministic score-based automatic approval. Capture/install
-# this before orchestration/per-skill modules bind evaluate_policy locally.
 from .approval_policy import evaluate_policy as _automatic_evaluate_policy
-
-_review_policy_module.evaluate_policy = _automatic_evaluate_policy
 
 from . import live_report as _live_report_module
 from . import reporting as _reporting_module
@@ -55,15 +49,10 @@ from .overall_reporting import install_reporting_compat
 
 install_reporting_compat(_reporting_module, _live_report_module)
 
-# Localization is a report-only projection. Install it after deterministic
-# overall-decision enrichment and before orchestration/completion modules bind
-# the live-report function. Canonical review/evidence state is never rewritten.
 from .localization_reporting import install_localization_reporting
 
 install_localization_reporting(_live_report_module)
 
-# The job/import API also needs package-level path validation and must preserve
-# each unit's locale when it is merged into Translation Memory.
 from . import localization_job as _localization_job_module
 from .localization_job_safety import install_localization_job_safety
 
@@ -96,6 +85,7 @@ from .models import (
     normalize_branch,
     normalize_skill_path,
 )
+from . import orchestrator as _orchestrator_module
 from .orchestrator import (
     OrchestrationError,
     cleanup_repository_workspace,
@@ -103,6 +93,13 @@ from .orchestrator import (
     plan_repositories,
     prepare_repository,
 )
+from . import per_skill as _per_skill_module
+
+# Orchestration and per-Skill finalization are the authoritative production
+# paths. Their locally-bound evaluator is replaced without changing the public
+# low-level review_policy module used by existing callers/tests.
+_orchestrator_module.evaluate_policy = _automatic_evaluate_policy
+_per_skill_module.evaluate_policy = _automatic_evaluate_policy
 
 __all__ = [
     "AIReviewStatus",
