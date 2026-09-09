@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import tempfile
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
@@ -24,6 +23,13 @@ spec.loader.exec_module(review_watchdog)
 
 
 class ReviewWatchdogTests(unittest.TestCase):
+    def test_windows_project_python_launcher_reuses_bootstrap(self) -> None:
+        launcher = ROOT / "pytool.cmd"
+        self.assertTrue(launcher.is_file())
+        content = launcher.read_text(encoding="utf-8")
+        self.assertIn("tools\\resolve_python.cmd", content)
+        self.assertIn("SKILL_REVIEW_RESOLVED_PYTHON", content)
+
     def test_five_stale_reviewers_are_detected_together(self) -> None:
         leased_at = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat().replace("+00:00", "Z")
         leases = {
