@@ -18,10 +18,11 @@ def test_overall_decision_matrix():
         ({"final_status": "PENDING", "security_decision": "", "quality_decision": ""}, "PENDING"),
         ({"final_status": "INCOMPLETE", "security_decision": "INCOMPLETE", "quality_decision": "INCOMPLETE"}, "INCOMPLETE"),
         ({"final_status": "COMPLETED", "security_decision": "BLOCK", "quality_decision": "PASS"}, "REJECTED"),
-        ({"final_status": "COMPLETED", "security_decision": "REVIEW_REQUIRED", "quality_decision": "PASS"}, "MANUAL_REVIEW"),
+        ({"final_status": "COMPLETED", "security_decision": "REVIEW_REQUIRED", "quality_decision": "PASS"}, "REJECTED"),
         ({"final_status": "COMPLETED", "security_decision": "PASS", "quality_decision": "FAIL"}, "REJECTED"),
-        ({"final_status": "COMPLETED", "security_decision": "PASS", "quality_decision": "PASS", "candidate_eligible": True}, "APPROVED"),
-        ({"final_status": "COMPLETED", "security_decision": "PASS", "quality_decision": "PASS", "candidate_eligible": False}, "REJECTED"),
+        ({"final_status": "COMPLETED", "security_decision": "PASS", "quality_decision": "PASS", "candidate_eligible": True, "security_score": 88}, "APPROVED"),
+        ({"final_status": "COMPLETED", "security_decision": "PASS", "quality_decision": "PASS", "candidate_eligible": True, "security_score": 59}, "REJECTED"),
+        ({"final_status": "COMPLETED", "security_decision": "PASS", "quality_decision": "PASS", "candidate_eligible": False, "security_score": 88}, "REJECTED"),
     ]
     for values, expected in cases:
         assert derive_overall_decision(**values) == expected
@@ -36,11 +37,11 @@ def test_machine_codes_are_canonical_and_chinese_labels_are_deterministic():
     )
     assert canonical_security_decision("BLOCK") == "BLOCKED"
     assert fields["security_decision"] == "BLOCKED"
-    assert fields["security_decision_zh"] == "安全阻断"
+    assert fields["security_decision_zh"] == "安全评分不通过"
     assert fields["quality_decision_zh"] == "质量通过"
     assert fields["overall_decision"] == "REJECTED"
     assert fields["overall_decision_zh"] == "不通过"
-    assert fields["overall_reason_codes"] == ["SECURITY_BLOCKED"]
+    assert "SECURITY_SCORE_BELOW_THRESHOLD" in fields["overall_reason_codes"]
 
 
 def test_policy_public_block_machine_code_is_blocked():
@@ -79,7 +80,7 @@ def test_policy_public_block_machine_code_is_blocked():
     assert evaluate_policy(scans, ai, skill_digest=digest).security_decision == "BLOCKED"
 
 
-def test_current_result_persists_authoritative_overall_state():
+def test_current_result_persists_authoritative_overall_state_and_score():
     pending = build_current_result(
         {"skill_id": "skill-1"},
         phase=ReviewPhaseState(
@@ -92,6 +93,7 @@ def test_current_result_persists_authoritative_overall_state():
     assert pending["overall_decision"] == "PENDING"
     assert pending["overall_decision_zh"] == "审查中"
     assert pending["candidate_eligible"] is None
+    assert pending["security_score_status"] == "PROVISIONAL"
 
     rejected = build_current_result(
         {"skill_id": "skill-1"},
@@ -107,9 +109,12 @@ def test_current_result_persists_authoritative_overall_state():
     )
     assert rejected["overall_decision"] == "REJECTED"
     assert rejected["overall_decision_zh"] == "不通过"
-    assert rejected["security_decision_zh"] == "安全通过"
+    assert rejected["security_decision_zh"] == "安全评分通过"
     assert rejected["quality_decision_zh"] == "质量不通过"
     assert rejected["candidate_eligible"] is False
+    assert rejected["security_score"] == 100
+    assert rejected["security_risk_deduction"] == 0
+    assert rejected["security_score_status"] == "FINAL"
 
 
 def test_standard_report_rows_export_overall_fields():
@@ -152,6 +157,11 @@ def test_html_uses_overall_decision_as_operator_facing_conclusion(tmp_path):
                 "quality_decision": "FAIL",
                 "quality_score": 60,
                 "candidate_eligible": False,
+                "security_score": 96,
+                "security_risk_deduction": 4,
+                "security_risk_level": "LOW",
+                "security_hard_block": False,
+                "security_deductions": [],
             }
         ],
         tmp_path / "report.html",
@@ -162,8 +172,8 @@ def test_html_uses_overall_decision_as_operator_facing_conclusion(tmp_path):
     assert "{label:'最终结论',render:item=>overallBadge(item)}" in page
     assert '"overall_decision":"REJECTED"' in page
     assert '"overall_decision_zh":"不通过"' in page
-    assert '"security_decision":"PASS"' in page
-    assert '"quality_decision":"FAIL"' in page
+    assert '"security_score":96' in page
+    assert "自动审批与安全扣分规则" in page
 
 
 def test_live_report_banner_keeps_cjk_first_font(tmp_path):
