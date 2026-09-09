@@ -1,17 +1,11 @@
-"""Trusted completion-driven AI result import for batch-wide review.
-
-A reviewer only writes its expected result. This module validates and finalizes
-one explicitly completed task, refreshes durable reports, and leaves every other
-Task untouched. Fresh coordinator sessions can also recover orphan result files
-one-by-one so one malformed result cannot block other valid persisted outputs.
-"""
+"""Trusted completion-driven AI result import for batch-wide review."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from . import batch_launcher
 from .config import ReviewConfig
@@ -53,10 +47,7 @@ class RecoveryResult:
     failed: Mapping[str, str]
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "imported": list(self.imported),
-            "failed": dict(self.failed),
-        }
+        return {"imported": list(self.imported), "failed": dict(self.failed)}
 
 
 def _find_item(state: Mapping[str, Any], task_id: str) -> dict[str, Any]:
@@ -71,14 +62,13 @@ def import_completed_task(
     *,
     batch_id: str,
     task_id: str,
+    ai_result_path: Path | None = None,
 ) -> CompletionImportResult:
-    """Finalize exactly one completion event and refresh the current projection."""
+    """Finalize exactly one completion event from its immutable attempt result."""
 
     state = batch_launcher._load_state(config, batch_id)
     if state.get("ai_queue_mode") != batch_launcher._AI_QUEUE_MODE:
-        raise CompletionImportError(
-            "completion-driven import is only supported for batch_wide_v2 batches"
-        )
+        raise CompletionImportError("completion-driven import is only supported for batch_wide_v2 batches")
     item = _find_item(state, task_id)
     if item.get("status") == "COMPLETE":
         return CompletionImportResult(
@@ -87,34 +77,23 @@ def import_completed_task(
             status="ALREADY_IMPORTED",
             batch_status=str(state.get("status") or "UNKNOWN"),
             remaining_ai=len(batch_launcher._waiting_items(state)),
-            report_html=str(
-                state.get("result_html") or state.get("interim_report_html") or ""
-            )
-            or None,
+            report_html=str(state.get("result_html") or state.get("interim_report_html") or "") or None,
         )
     if item.get("status") != "WAITING_FOR_AI":
-        raise CompletionImportError(
-            f"task {task_id} is not waiting for AI: {item.get('status')!r}"
-        )
-    result_path = Path(str(item.get("ai_result_path") or ""))
-    if not item.get("ai_result_path") or not result_path.is_file():
-        raise CompletionImportError(
-            f"AI_RESULT_MISSING: task {task_id} has no expected result file"
-        )
+        raise CompletionImportError(f"task {task_id} is not waiting for AI: {item.get('status')!r}")
+
+    result_path = ai_result_path or Path(str(item.get("ai_result_path") or ""))
+    if not str(result_path) or not result_path.is_file():
+        raise CompletionImportError(f"AI_RESULT_MISSING: task {task_id} has no expected result file")
     index_path = Path(str(item.get("index_path") or ""))
     if not item.get("index_path"):
         raise CompletionImportError(f"task {task_id} has no trusted index path")
 
     item["last_import_attempt_at"] = _utc_now()
+    item["last_ai_attempt_result"] = str(result_path)
     try:
-        finalize_skill(
-            config,
-            index_path=index_path,
-            ai_result_path=result_path,
-        )
+        finalize_skill(config, index_path=index_path, ai_result_path=result_path)
     except Exception as exc:
-        # Preserve the failed file for diagnosis. The Task stays WAITING and
-        # can be retried after the operator replaces/fixes that exact result.
         item["ai_import_status"] = "FAILED"
         item["last_import_error"] = str(exc)
         batch_launcher._save(config, state)
@@ -140,8 +119,6 @@ def import_completed_task(
         state["current_task_id"] = None
         state["status"] = "READY"
         batch_launcher._save(config, state)
-        # Static preparation is already complete for batch_wide_v2. With no
-        # remaining AI tasks this deterministically promotes the report to FINAL.
         batch_launcher._prepare_next(config, state)
 
     return CompletionImportResult(
@@ -158,35 +135,45 @@ def recover_ready_results(
     config: ReviewConfig,
     *,
     batch_id: str,
+    attempt_candidates: Mapping[str, Sequence[Path]] | None = None,
 ) -> RecoveryResult:
-    """Recover result files left by an interrupted coordinator independently.
-
-    This is used only when starting a fresh dispatch session. Every candidate is
-    finalized through the same single-task path. Failures are recorded per task
-    and do not stop later ready tasks from being persisted.
-    """
+    """Recover durable result files independently, including orphan attempts."""
 
     state = batch_launcher._load_state(config, batch_id)
-    candidates = [
-        str(item.get("task_id"))
-        for item in state.get("items", [])
-        if isinstance(item, Mapping)
-        and item.get("status") == "WAITING_FOR_AI"
-        and item.get("task_id")
-        and item.get("ai_result_path")
-        and Path(str(item["ai_result_path"])).is_file()
-    ]
+    candidate_paths: dict[str, list[Path]] = {}
+    for item in state.get("items", []):
+        if not isinstance(item, Mapping) or item.get("status") != "WAITING_FOR_AI" or not item.get("task_id"):
+            continue
+        task_id = str(item["task_id"])
+        base = item.get("ai_result_path")
+        if base and Path(str(base)).is_file():
+            candidate_paths.setdefault(task_id, []).append(Path(str(base)))
+    if attempt_candidates:
+        for task_id, paths in attempt_candidates.items():
+            for path in paths:
+                if path.is_file():
+                    candidate_paths.setdefault(str(task_id), []).append(path)
+
     imported: list[str] = []
     failed: dict[str, str] = {}
-    for task_id in candidates:
-        try:
-            result = import_completed_task(config, batch_id=batch_id, task_id=task_id)
-        except CompletionImportError as exc:
-            failed[task_id] = str(exc)
-            continue
-        if result.status in {"IMPORTED", "ALREADY_IMPORTED"}:
-            imported.append(task_id)
-    return RecoveryResult(tuple(imported), failed)
+    for task_id, paths in candidate_paths.items():
+        # Newest valid attempt wins only if the task is still pending. Once one
+        # result is imported, later attempts are harmless and remain diagnostic.
+        for path in reversed(paths):
+            try:
+                result = import_completed_task(
+                    config,
+                    batch_id=batch_id,
+                    task_id=task_id,
+                    ai_result_path=path,
+                )
+            except CompletionImportError as exc:
+                failed[f"{task_id}@{path.name}"] = str(exc)
+                continue
+            if result.status in {"IMPORTED", "ALREADY_IMPORTED"}:
+                imported.append(task_id)
+                break
+    return RecoveryResult(tuple(dict.fromkeys(imported)), failed)
 
 
 __all__ = [
