@@ -17,9 +17,9 @@ Linux/CentOS/macOS: python tools/review_pool.py resume --ai-parallel 5
 
 This command advances trusted static preparation when required, recovers valid orphan attempt results, replaces a stuck prior coordinator session, and returns a fresh `dispatch_session` plus newly leased `ai_dispatch.items` up to `max_parallel`. Attempt-specific result paths make redispatch safe even if an old Agent later writes its old result.
 
-Compatibility note: the pool controller wraps the legacy `review.cmd --auto --json --ai-parallel 5` checkpoint. Do not call that legacy AI-pool command directly. The former `--completed-task-id` completion event is replaced by `review_pool.py complete` below.
+During the AI phase, reviewer-pool scheduling, result import, and refill stay inside one trusted Python process. The legacy `review.cmd --auto --json --ai-parallel 5` chain remains only for non-AI compatibility transitions such as plan/static preparation. Do not call the legacy AI-pool command directly. The former `--completed-task-id` event is replaced by `review_pool.py complete`.
 
-`status.cmd` / `./status.sh` shows Reviewer Pool slots, task IDs, attempt numbers, runtime age, stale state, and queue depth.
+`status.cmd` / `./status.sh` shows Reviewer Pool slots, task IDs, attempt numbers, runtime age, stale state, queue depth, and deferred report-projection count.
 
 ## 2. Mandatory full fan-out before waiting
 
@@ -47,7 +47,9 @@ Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py complete --dispatch-sess
 Linux/CentOS/macOS: python tools/review_pool.py complete --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5
 ```
 
-Launch and register every replacement item immediately while the remaining Agents continue.
+The task ID is the trigger. Trusted code validates it, then imports every other in-flight attempt whose result file is already durable. If five Agents finished close together, one completion command can consume all five. Launch and register every returned replacement item immediately while still-running Agents continue.
+
+Full CSV/JSON/HTML projection is not rebuilt after each completion. While AI work remains, per-Skill durable results and the compact queue are authoritative and the report is marked dirty. The full report is rebuilt once when the Batch reaches its normal finalization boundary.
 
 Native failed/cancelled Agent:
 
