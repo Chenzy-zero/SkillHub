@@ -1,10 +1,4 @@
-"""Install authoritative overall-decision fields into legacy report projections.
-
-The reporting module predates ``overall_decision`` and intentionally remains a
-stable redacted exporter. This small compatibility boundary enriches its
-normalized rows and live-report export field lists without changing evidence or
-policy inputs.
-"""
+"""Install authoritative overall-decision and score fields into report projections."""
 
 from __future__ import annotations
 
@@ -22,6 +16,13 @@ _OVERALL_EXPORT_FIELDS = (
     "quality_decision",
     "quality_decision_zh",
     "candidate_eligible",
+    "security_score",
+    "security_risk_deduction",
+    "security_risk_level",
+    "security_hard_block",
+    "security_scoring_rules_version",
+    "security_deductions",
+    "security_score_status",
 )
 
 _READY_CANDIDATE_STATUSES = {
@@ -76,8 +77,6 @@ def _final_status(record: Mapping[str, Any]) -> str:
 
 
 def install_reporting_compat(reporting_module: Any, live_report_module: Any) -> None:
-    """Patch report normalization/export lists once, preserving public APIs."""
-
     if getattr(reporting_module, "_overall_decision_compat_installed", False):
         return
     original_normalized = reporting_module._normalized_record
@@ -85,30 +84,24 @@ def install_reporting_compat(reporting_module: Any, live_report_module: Any) -> 
 
     def normalized_record(record: Mapping[str, Any], *, batch_id: str) -> dict[str, Any]:
         row = dict(original_normalized(record, batch_id=batch_id))
-        existing = str(record.get("overall_decision") or "").strip().upper()
-        if existing:
-            decision_fields = {
-                field: record.get(field)
-                for field in _OVERALL_EXPORT_FIELDS
-                if field in record
-            }
-            # Old/new records may contain only part of the presentation fields;
-            # deterministically fill any missing values from canonical inputs.
-            computed = overall_fields(
-                final_status=_final_status(record),
-                security_decision=row.get("security_decision") or record.get("security_decision"),
-                quality_decision=_quality_decision(record),
-                candidate_eligible=_candidate_eligible(record),
-            )
-            computed.update({key: value for key, value in decision_fields.items() if value not in (None, "")})
-        else:
-            computed = overall_fields(
-                final_status=_final_status(record),
-                security_decision=row.get("security_decision") or record.get("security_decision"),
-                quality_decision=_quality_decision(record),
-                candidate_eligible=_candidate_eligible(record),
-            )
+        decision_fields = {
+            field: record.get(field)
+            for field in _OVERALL_EXPORT_FIELDS
+            if field in record
+        }
+        computed = overall_fields(
+            final_status=_final_status(record),
+            security_decision=row.get("security_decision") or record.get("security_decision"),
+            quality_decision=_quality_decision(record),
+            candidate_eligible=_candidate_eligible(record),
+            security_score=record.get("security_score"),
+            security_hard_block=record.get("security_hard_block") is True,
+        )
+        computed.update({key: value for key, value in decision_fields.items() if value not in (None, "")})
         row.update(computed)
+        for field in _OVERALL_EXPORT_FIELDS:
+            if field in record and field not in row:
+                row[field] = record[field]
         return row
 
     def annotate_html(*args: Any, **kwargs: Any) -> None:
@@ -126,7 +119,6 @@ def install_reporting_compat(reporting_module: Any, live_report_module: Any) -> 
     reporting_module.DETAIL_FIELDS = tuple(
         dict.fromkeys((*reporting_module.DETAIL_FIELDS, *_OVERALL_EXPORT_FIELDS))
     )
-
     live_report_module._PHASE_FIELDS = tuple(
         dict.fromkeys((*live_report_module._PHASE_FIELDS, *_OVERALL_EXPORT_FIELDS))
     )

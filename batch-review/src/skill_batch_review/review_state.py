@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from .models import AIReviewStatus, FinalReviewStatus, StaticReviewStatus
 from .overall_decision import canonical_security_decision, overall_fields
+from .risk_scoring import calculate_security_score, scoring_rules
 
 _SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
 _BLOCK_DECISIONS = {"BLOCK", "BLOCKED", "DO_NOT_INSTALL", "FAIL", "FAILED"}
@@ -97,7 +98,6 @@ def _derive_static_security_decision(
         return "BLOCK"
     if decisions & (_REVIEW_DECISIONS | _UNCERTAIN_DECISIONS):
         return "REVIEW_REQUIRED"
-
     severities = {
         str(finding.get("severity") or "UNKNOWN").strip().upper()
         for finding in findings
@@ -117,14 +117,11 @@ def static_security_decision(
     static_reports: Sequence[Mapping[str, Any]] = (),
     medium_requires_review: bool = True,
 ) -> str:
-    """Return a scanner-only projection without pretending the AI stage is done.
+    """Scanner-only projection for the interim report.
 
-    Scanner-level decisions are preserved because a tool can require review even
-    when its normalized findings are LOW/INFO. An uncertain scanner decision is
-    conservatively projected as REVIEW_REQUIRED here; true scanner incompleteness
-    is handled by the static phase before this helper is called.
+    This is not the final gate. Static decisions remain visible for diagnostics;
+    the completed review uses the combined automatic security score.
     """
-
     return _derive_static_security_decision(
         findings,
         static_reports=static_reports,
@@ -154,15 +151,31 @@ def build_current_result(
     elif phase.final_status is FinalReviewStatus.COMPLETED and not security_decision:
         raise ValueError("completed final state requires a security decision")
 
+    ai_summary = dict(ai_review_summary or {})
+    score = calculate_security_score(
+        findings,
+        ai_security_verdict=ai_summary.get("security_verdict"),
+    )
+    # A trusted policy-level BLOCK can also represent structural rejection that
+    # is not expressible as a finding. Preserve it as a hard block in the durable result.
+    policy_block = canonical_security_decision(security_decision) == "BLOCKED"
+    effective_hard_block = score.hard_block or (
+        phase.final_status is FinalReviewStatus.COMPLETED and policy_block and score.security_score >= 60
+    )
+    effective_score = 0 if effective_hard_block else score.security_score
+    effective_deduction = 100 if effective_hard_block else score.risk_deduction
+
     decisions = overall_fields(
         final_status=phase.final_status.value,
         security_decision=security_decision,
         quality_decision=quality_decision,
         candidate_eligible=None,
+        security_score=effective_score if phase.final_status is FinalReviewStatus.COMPLETED else None,
+        security_hard_block=effective_hard_block,
     )
     return {
         **dict(source),
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "result_kind": "CURRENT",
         **phase.to_dict(),
         "review_status": (
@@ -174,9 +187,19 @@ def build_current_result(
         ),
         "static_security_decision": canonical_security_decision(static_security_decision),
         **decisions,
+        "security_score": effective_score,
+        "security_risk_deduction": effective_deduction,
+        "security_risk_level": score.risk_level if not effective_hard_block else "CRITICAL",
+        "security_hard_block": effective_hard_block,
+        "security_scoring_rules_version": score.rules_version,
+        "security_scoring_rules": scoring_rules(),
+        "security_deductions": [dict(item) for item in score.deductions],
+        "security_score_status": (
+            "FINAL" if phase.final_status is FinalReviewStatus.COMPLETED else "PROVISIONAL"
+        ),
         "quality_score": quality_score,
         "static_reports": [dict(report) for report in static_reports],
-        "ai_review_summary": dict(ai_review_summary or {}),
+        "ai_review_summary": ai_summary,
         **finding_summary(findings),
         "evidence_ref": evidence_ref,
         "review_policy_version": review_policy_version,
@@ -194,8 +217,6 @@ def static_waiting_for_ai(
     evidence_ref: str,
     review_policy_version: str,
 ) -> dict[str, Any]:
-    """Build the common post-static/pre-AI projection."""
-
     report_decision = _derive_static_security_decision(
         findings,
         static_reports=static_reports,
