@@ -5,7 +5,7 @@ description: Run or resume a security-review batch with an observable five-slot 
 
 # Automatic Skill Review for Codex CLI
 
-Every invocation starts from durable project state. **Do not continue an old UI task list or assume reviewers from a previous invocation are still alive.** The parent only dispatches native reviewer/localizer subagents and invokes trusted project commands. Never read target packages, handoffs, scanner reports, prior AI results, Translation Memory, or batch evidence in the parent context. Do not use Git, package managers, network, MCP, or arbitrary shell commands. Never execute reviewed content.
+Every invocation starts from durable project state. **Do not continue an old UI task list or assume reviewers from a previous invocation are still alive.** The parent only dispatches native reviewer/localizer subagents and invokes trusted project commands. Never read target packages, handoffs, scanner reports, prior AI results, Translation Memory, or batch evidence in the parent context. Do not use Git, package managers, network, MCP, or arbitrary shell commands. Never execute reviewed content. Do not inspect queue/state files yourself.
 
 ## 1. Resume checkpoint — always first
 
@@ -16,7 +16,9 @@ Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py resume --ai-parallel 5"
 Linux/CentOS/macOS: python tools/review_pool.py resume --ai-parallel 5
 ```
 
-This trusted command advances plan/static preparation when needed, recovers valid late/orphan attempt results, replaces any prior coordinator session, and returns a fresh `dispatch_session` plus only newly leased `ai_dispatch.items`. Reviewer attempts use isolated result paths, so replacing a stuck coordinator is safe even if an old reviewer writes late.
+This trusted command advances plan/static preparation when needed, recovers valid late/orphan attempt results, replaces any prior coordinator session, and returns a fresh `dispatch_session` plus only newly leased `ai_dispatch.items` up to `max_parallel`. Reviewer attempts use isolated result paths, so replacing a stuck coordinator is safe even if an old reviewer writes late.
+
+Compatibility note: the pool controller wraps the legacy `review.cmd --auto --json --ai-parallel 5` checkpoint. Do not call that legacy AI-pool command directly. The former `--completed-task-id` completion event is replaced by `review_pool.py complete` below.
 
 For diagnostics the operator can run `status.cmd` / `./status.sh`; it shows Reviewer Pool slots, task IDs, attempt numbers, runtime age, stale state, and queue depth.
 
