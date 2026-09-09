@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -36,7 +34,6 @@ from skill_batch_review.dispatch_lease import (  # noqa: E402
     dispatch_snapshot,
     heartbeat_leases,
     load_dispatch_state,
-    mark_launched,
     release_lease,
     result_path_for_task,
 )
@@ -63,9 +60,9 @@ def _parser() -> argparse.ArgumentParser:
     resume = sub.add_parser("resume", help="recover durable results and refill pool")
     resume.add_argument("--ai-parallel", type=int, default=DEFAULT_PARALLEL)
 
-    launched = sub.add_parser("launched", help="mark a leased task as actually launched")
+    launched = sub.add_parser("launched", help="mark one or more leased tasks as actually launched")
     launched.add_argument("--dispatch-session", required=True)
-    launched.add_argument("--task-id", required=True)
+    launched.add_argument("--task-id", action="append", required=True)
 
     heartbeat = sub.add_parser("heartbeat", help="refresh native reviewer liveness")
     heartbeat.add_argument("--dispatch-session", required=True)
@@ -132,11 +129,7 @@ def _project_status() -> dict[str, Any]:
 
 
 def _legacy_checkpoint(parallel: int) -> dict[str, Any]:
-    """Compatibility path for non-AI transitions only.
-
-    This may spawn the historical review_assistant chain, but it is never used by
-    AI completion/refill/retry/tick operations.
-    """
+    """Compatibility path for non-AI transitions only."""
 
     command = [
         sys.executable,
@@ -205,9 +198,6 @@ def _direct_checkpoint(
 
     queue, items = _read_queue(config, batch_id)
     if not items:
-        # A queue-free WAITING state normally means all results were imported and
-        # the normal state machine is about to finish. Let the compatibility path
-        # resolve this unusual boundary once rather than inventing a transition.
         return None
 
     limit = parallel or int(queue.get("max_parallel") or config.concurrency.ai_reviews)
@@ -467,13 +457,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         lease_path = _lease_path(config, batch_id)
 
         if args.command == "launched":
-            mark_launched(
+            tasks = heartbeat_leases(
                 lease_path,
                 batch_id=batch_id,
                 session_id=args.dispatch_session,
-                task_id=args.task_id,
+                task_ids=args.task_id,
             )
-            print(json.dumps({"status": "LAUNCHED", "task_id": args.task_id}, ensure_ascii=False))
+            print(json.dumps({"status": "LAUNCHED", "task_ids": list(tasks)}, ensure_ascii=False))
             return 0
 
         if args.command == "heartbeat":
@@ -487,9 +477,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "complete":
-            # Validate the explicit event, then opportunistically import every
-            # other in-flight result already durable on disk. This turns a burst
-            # of five completions into one Batch State load and one queue update.
             result_path_for_task(
                 lease_path,
                 batch_id=batch_id,
