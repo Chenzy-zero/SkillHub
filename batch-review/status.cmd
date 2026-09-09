@@ -10,5 +10,5 @@ rem Version validation is centralized there: sys.version_info[:2] in the support
 call "%SCRIPT_DIR%tools\resolve_python.cmd"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
-"%SKILL_REVIEW_RESOLVED_PYTHON%" "%SCRIPT_DIR%tools\project_status.py" %*
+"%SKILL_REVIEW_RESOLVED_PYTHON%" "%SCRIPT_DIR%tools\review_pool.py" status %*
 exit /b %ERRORLEVEL%
