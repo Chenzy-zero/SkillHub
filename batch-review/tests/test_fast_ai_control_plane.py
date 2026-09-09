@@ -141,6 +141,31 @@ def test_complete_event_batches_every_ready_inflight_attempt(tmp_path: Path, cap
     assert payload["completion"]["batched_ready_count"] == 5
 
 
+def test_launched_registers_whole_fanout_with_one_state_update(tmp_path: Path, capsys):
+    core = _load_core()
+    config = SimpleNamespace(workspace=SimpleNamespace(manifest_root=tmp_path))
+    tasks = ["task-1", "task-2", "task-3", "task-4", "task-5"]
+
+    with (
+        mock.patch.object(core, "_operator_context", return_value=(config, "batch-1")),
+        mock.patch.object(core, "heartbeat_leases", return_value=tuple(tasks)) as heartbeat,
+    ):
+        argv = ["launched", "--dispatch-session", "session-1"]
+        for task in tasks:
+            argv.extend(("--task-id", task))
+        code = core.main(argv)
+
+    assert code == 0
+    heartbeat.assert_called_once_with(
+        tmp_path / "batch-1" / "ai-dispatch-state.json",
+        batch_id="batch-1",
+        session_id="session-1",
+        task_ids=tasks,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["task_ids"] == tasks
+
+
 def test_pool_wrapper_is_thin_and_core_keeps_legacy_only_for_non_ai_transition():
     wrapper = (ROOT / "tools" / "review_pool.py").read_text(encoding="utf-8")
     core = CORE_PATH.read_text(encoding="utf-8")
