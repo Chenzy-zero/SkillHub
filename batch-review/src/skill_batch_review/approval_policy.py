@@ -14,6 +14,8 @@ from typing import Any, Mapping
 from . import review_policy as legacy
 from .risk_scoring import PASS_THRESHOLD, calculate_security_score
 
+_LEGACY_EVALUATE_POLICY = legacy.evaluate_policy
+
 
 @dataclass(frozen=True, slots=True)
 class ApprovalPolicyResult:
@@ -67,15 +69,12 @@ class ApprovalPolicyResult:
 
 
 def _structural_reject_reasons(reasons: tuple[str, ...]) -> list[str]:
-    markers = (
-        "branch content conflict",
-        "special content",
-    )
+    markers = ("branch content conflict", "special content")
     return [reason for reason in reasons if any(marker in reason for marker in markers)]
 
 
 def evaluate_policy(*args: Any, **kwargs: Any) -> ApprovalPolicyResult:
-    base = legacy.evaluate_policy(*args, **kwargs)
+    base = _LEGACY_EVALUATE_POLICY(*args, **kwargs)
     ai_review = kwargs.get("ai_review")
     if ai_review is None and len(args) >= 2:
         ai_review = args[1]
