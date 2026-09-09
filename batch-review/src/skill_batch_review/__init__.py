@@ -37,13 +37,17 @@ from .path_compat import install_config_path_compat
 
 install_config_path_compat(_config_module)
 
-# Public/durable security decisions use one machine code. The pure policy module
-# historically emitted BLOCK while models/reporting already used BLOCKED. Its
-# functions resolve this module global at call time, so setting the canonical
-# value here keeps old BLOCK inputs readable while all new outputs become BLOCKED.
+# Public/durable security decisions use one machine code. Historical policy code
+# emitted BLOCK while models/reporting already used BLOCKED.
 from . import review_policy as _review_policy_module
 
 _review_policy_module.SECURITY_BLOCK = "BLOCKED"
+
+# New reviews use deterministic score-based automatic approval. Capture/install
+# this before orchestration/per-skill modules bind evaluate_policy locally.
+from .approval_policy import evaluate_policy as _automatic_evaluate_policy
+
+_review_policy_module.evaluate_policy = _automatic_evaluate_policy
 
 from . import live_report as _live_report_module
 from . import reporting as _reporting_module
@@ -134,4 +138,4 @@ __all__ = [
     "prepare_repository",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
