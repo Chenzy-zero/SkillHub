@@ -157,8 +157,6 @@ def recover_ready_results(
     imported: list[str] = []
     failed: dict[str, str] = {}
     for task_id, paths in candidate_paths.items():
-        # Newest valid attempt wins only if the task is still pending. Once one
-        # result is imported, later attempts are harmless and remain diagnostic.
         for path in reversed(paths):
             try:
                 result = import_completed_task(
@@ -168,10 +166,13 @@ def recover_ready_results(
                     ai_result_path=path,
                 )
             except CompletionImportError as exc:
-                failed[f"{task_id}@{path.name}"] = str(exc)
+                # Preserve the historical task-id keyed contract. When several
+                # attempts are invalid the most recent error for that task wins.
+                failed[task_id] = str(exc)
                 continue
             if result.status in {"IMPORTED", "ALREADY_IMPORTED"}:
                 imported.append(task_id)
+                failed.pop(task_id, None)
                 break
     return RecoveryResult(tuple(dict.fromkeys(imported)), failed)
 
