@@ -18,6 +18,7 @@ from typing import Any, Iterable, Mapping
 SCORING_RULES_VERSION = "security-score-v1"
 START_SCORE = 100
 PASS_THRESHOLD = 60
+AI_REVIEW_REQUIRED_DEDUCTION = 45.0
 
 SEVERITY_DEDUCTION = {
     "INFO": 0.0,
@@ -74,6 +75,7 @@ def scoring_rules() -> dict[str, Any]:
         "severity_deduction": dict(SEVERITY_DEDUCTION),
         "confidence_factor": dict(CONFIDENCE_FACTOR),
         "source_factor": dict(SOURCE_FACTOR),
+        "ai_review_required_deduction": AI_REVIEW_REQUIRED_DEDUCTION,
         "repetition_factor": {
             "first": 1.0,
             "second": 0.5,
@@ -172,6 +174,7 @@ def calculate_security_score(
     *,
     ai_security_verdict: Any = None,
 ) -> SecurityScoreResult:
+    verdict = _key(ai_security_verdict)
     security_findings = [
         finding for finding in findings
         if str(finding.get("domain") or "SECURITY").upper() in {"SECURITY", "MIXED"}
@@ -181,7 +184,7 @@ def calculate_security_score(
         grouped.setdefault(_cluster_key(finding), []).append(finding)
 
     provisional: list[dict[str, Any]] = []
-    hard_block = _key(ai_security_verdict) in {"BLOCK", "BLOCKED", "REJECT", "REJECTED"}
+    hard_block = verdict in {"BLOCK", "BLOCKED", "REJECT", "REJECTED"}
 
     for cluster_key, items in grouped.items():
         severity_order = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "UNKNOWN": 2, "HIGH": 3, "CRITICAL": 4}
@@ -255,6 +258,27 @@ def calculate_security_score(
                 }
             )
 
+    if verdict in {"REVIEW", "REVIEW_REQUIRED", "MANUAL_REVIEW"}:
+        deductions.append(
+            {
+                "cluster_id": "risk-ai-verdict-review-required",
+                "category": "AI_REVIEW_VERDICT",
+                "path": "",
+                "severity": "HIGH",
+                "confidence": "HIGH",
+                "sources": ["AI_REVIEW"],
+                "source_class": "AI_ONLY",
+                "confirmation_status": "AI_CONFIRMED",
+                "rule_ids": [],
+                "base_deduction": AI_REVIEW_REQUIRED_DEDUCTION,
+                "confidence_factor": 1.0,
+                "source_factor": 1.0,
+                "repetition_index": 1,
+                "repetition_factor": 1.0,
+                "deduction": AI_REVIEW_REQUIRED_DEDUCTION,
+            }
+        )
+
     deductions.sort(key=lambda item: float(item["deduction"]), reverse=True)
     total = min(100, int(math.ceil(sum(float(item["deduction"]) for item in deductions))))
     if hard_block:
@@ -271,6 +295,7 @@ def calculate_security_score(
 
 
 __all__ = [
+    "AI_REVIEW_REQUIRED_DEDUCTION",
     "PASS_THRESHOLD",
     "SCORING_RULES_VERSION",
     "SecurityScoreResult",
