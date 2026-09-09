@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from skill_batch_review.dispatch_lease import (
@@ -86,9 +87,14 @@ def test_new_coordinator_uses_distinct_attempt_paths(tmp_path: Path):
     assert "attempts" in first_path.parts
     assert "attempts" in second_path.parts
     assert second.new_items[0]["attempt"] == 2
-    persisted = state.read_text(encoding="utf-8")
-    assert str(first_path) in persisted
-    assert "coordinator_replaced" in persisted
+    persisted = json.loads(state.read_text(encoding="utf-8"))
+    orphan_paths = {
+        Path(str(item["expected_result"]))
+        for item in persisted.get("orphan_attempts", [])
+        if isinstance(item, dict) and item.get("expected_result")
+    }
+    assert first_path in orphan_paths
+    assert any(item.get("orphan_reason") == "coordinator_replaced" for item in persisted["orphan_attempts"])
 
 
 def test_auto_review_protocol_requires_resume_and_full_fanout():
