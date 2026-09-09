@@ -67,7 +67,8 @@ If the native subagent runtime reports a reviewer as failed or cancelled, do not
 wait for its lease timeout. Immediately call:
 
 ```text
-python tools/review_watchdog.py fail --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5 --reason "<NATIVE_FAILURE_SUMMARY>"
+Windows: cmd.exe /d /c "pytool.cmd tools\review_watchdog.py fail --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5 --reason \"<NATIVE_FAILURE_SUMMARY>\""
+Linux/CentOS/macOS: python tools/review_watchdog.py fail --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5 --reason "<NATIVE_FAILURE_SUMMARY>"
 ```
 
 The trusted watchdog records that Skill as `AI_REVIEW_AGENT_FAILED`, produces an
@@ -80,7 +81,8 @@ old reviewer may still write late to its fixed expected-result path.
 If no reviewer emits a completion/failure event during a bounded wait cycle, call:
 
 ```text
-python tools/review_watchdog.py tick --dispatch-session <SESSION> --timeout-seconds 1200 --ai-parallel 5
+Windows: cmd.exe /d /c "pytool.cmd tools\review_watchdog.py tick --dispatch-session <SESSION> --timeout-seconds 1200 --ai-parallel 5"
+Linux/CentOS/macOS: python tools/review_watchdog.py tick --dispatch-session <SESSION> --timeout-seconds 1200 --ai-parallel 5
 ```
 
 A tick is lightweight when all leases are younger than the timeout. Once a lease
@@ -102,7 +104,8 @@ cycle exists only so the parent remains responsive and can run watchdog ticks.
 1. Ask trusted program code for the next immutable report-safe job:
 
 ```text
-python tools/localize_report.py prepare --current
+Windows: cmd.exe /d /c "pytool.cmd tools\localize_report.py prepare --current"
+Linux/CentOS/macOS: python tools/localize_report.py prepare --current
 ```
 
 2. If `status=COMPLETE`, localization is finished. Report only `batch_id` and the
@@ -114,7 +117,8 @@ python tools/localize_report.py prepare --current
 4. When the localizer completes, call:
 
 ```text
-python tools/localize_report.py import --current --job-id <JOB_ID>
+Windows: cmd.exe /d /c "pytool.cmd tools\localize_report.py import --current --job-id <JOB_ID>"
+Linux/CentOS/macOS: python tools/localize_report.py import --current --job-id <JOB_ID>
 ```
 
 5. The trusted importer validates Schema/job/key/hash, merges only valid text into
@@ -128,8 +132,8 @@ python tools/localize_report.py import --current --job-id <JOB_ID>
 If the coordinator itself restarts and no prior live AI session can be continued,
 start again with the initial checkpoint **without** a session token. The trusted
 script creates a new session and safely recovers orphan result files before
-redispatching still-missing Tasks. Localization may always restart from
-`localize_report.py prepare --current`; Translation Memory prevents already
+redispatching still-missing Tasks. Localization may always restart from the
+platform-specific prepare command above; Translation Memory prevents already
 translated keys from being re-dispatched.
 
 On unavailable isolation, malformed results, unexpected paths, or additional
