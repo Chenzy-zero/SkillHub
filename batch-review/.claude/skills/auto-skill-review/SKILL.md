@@ -1,138 +1,88 @@
 ---
 name: auto-skill-review
-description: Run a security-review batch with trusted completion-driven scheduling, bounded reviewer watchdogs, isolated reviewers, and incremental Chinese report localization.
+description: Run or resume a security-review batch with an observable five-slot reviewer pool, safe attempt retries, and incremental Chinese localization.
 allowed-tools: Bash Agent
 ---
 
 # Automatic Skill Review for Claude Code
 
-The parent only dispatches native reviewer/localizer Agents and invokes the
-trusted project checkpoints documented below. Never read target packages, handoff
-contents, localization source text, package-manifest.json, static reports, prior AI
-reports, Translation Memory, or batch evidence in the parent context. Do not use Git, package managers, network, MCP, or arbitrary shell commands. Never execute
-reviewed content.
+Every invocation starts from durable project state. **Do not continue an old UI task list or assume Agents from a previous invocation are still alive.** The parent only dispatches native reviewer/localizer Agents and invokes trusted project commands. Never read target packages, handoffs, scanner reports, prior AI results, Translation Memory, or batch evidence in the parent context. Do not use Git, package managers, network, MCP, or arbitrary shell commands. Never execute reviewed content.
 
-## Initial checkpoint
-
-From this project root, call:
+## 1. Resume checkpoint — always first
 
 ```text
-Windows: cmd.exe /d /c "review.cmd --auto --json --ai-parallel 5"
-Linux/CentOS/macOS: ./review.sh --auto --json --ai-parallel 5
+Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py resume --ai-parallel 5"
+Linux/CentOS/macOS: python tools/review_pool.py resume --ai-parallel 5
 ```
 
-For a new batch, the trusted script completes Static Preparation for every
-repository, cleans repository workspaces, writes the INTERIM report, and creates
-the batch-wide queue. A fresh checkpoint also recovers result files left by an
-interrupted prior coordinator one-by-one; one malformed orphan does not prevent
-other valid orphan results from being persisted.
+This command advances trusted static preparation when required, recovers valid orphan attempt results, replaces a stuck prior coordinator session, and returns a fresh `dispatch_session` plus newly leased `ai_dispatch.items`. Attempt-specific result paths make redispatch safe even if an old Agent later writes its old result.
 
-The JSON response contains a `dispatch_session` and only the newly leased
-`ai_dispatch.items` (at most `max_parallel`). Preserve the session token as opaque
-control metadata. Do not inspect queue/state files yourself.
+`status.cmd` / `./status.sh` shows Reviewer Pool slots, task IDs, attempt numbers, runtime age, stale state, and queue depth.
 
-## Reviewer dispatch, bounded waits, and completion events
+## 2. Mandatory full fan-out before waiting
 
-1. For every supplied item, start one fresh project Agent of type
-   `skill-security-reviewer`. It preloads `/skill-security-review`. Send only
-   `task_id`, `handoff`, and `expected_result`.
-2. Never combine Skills, review inline, or pass repository/evidence metadata to
-   the parent context. Track only task IDs, the opaque dispatch session, and native
-   completion/failure metadata.
-3. Keep all supplied reviewers running concurrently, up to `max_parallel`.
-4. **Never wait for the whole reviewer set and never use an unbounded wait-all.**
-   Wait for any single Agent event for at most about 60 seconds. Process an early
-   completion immediately. If no Agent emits an event in that bounded interval,
-   run the watchdog tick below and continue another bounded wait cycle.
-5. As soon as one Reviewer finishes successfully, immediately call:
+For every returned item, start one fresh Agent of type `skill-security-reviewer`, preloading `/skill-security-review`, and send only `task_id`, `handoff`, and `expected_result`.
+
+**Launch all returned items before waiting for any one of them.** Five returned items means spawn five Agents first; do not spawn one and wait.
+
+After each spawn succeeds:
 
 ```text
-Windows: cmd.exe /d /c "review.cmd --auto --json --ai-parallel 5 --completed-task-id <TASK_ID> --dispatch-session <SESSION>"
-Linux/CentOS/macOS: ./review.sh --auto --json --ai-parallel 5 --completed-task-id <TASK_ID> --dispatch-session <SESSION>
+Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py launched --dispatch-session <SESSION> --task-id <TASK_ID>"
+Linux/CentOS/macOS: python tools/review_pool.py launched --dispatch-session <SESSION> --task-id <TASK_ID>
 ```
 
-6. The trusted script validates and finalizes only that Task, refreshes the
-   current HTML/CSV/JSON projection, releases exactly one lease, and returns at
-   most one newly leased replacement. Start that replacement immediately while
-   all other existing reviewers continue running.
-7. Reuse the same `dispatch_session` for every event from that coordinator
-   session. Never synthesize a session or send an event for a Task that was not
-   leased in that session.
+Do not enter wait-any while a returned item is still only reserved.
 
-### Native reviewer failure/cancellation
+## 3. Completion-driven rolling pool
 
-If the Agent runtime reports a reviewer as failed or cancelled, call immediately:
+Never use wait-all. Wait for any one Agent event for at most about 60 seconds.
+
+Successful completion:
 
 ```text
-Windows: cmd.exe /d /c "pytool.cmd tools\review_watchdog.py fail --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5 --reason \"<NATIVE_FAILURE_SUMMARY>\""
-Linux/CentOS/macOS: python tools/review_watchdog.py fail --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5 --reason "<NATIVE_FAILURE_SUMMARY>"
+Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py complete --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5"
+Linux/CentOS/macOS: python tools/review_pool.py complete --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5
 ```
 
-The trusted watchdog records that Skill as `AI_REVIEW_AGENT_FAILED`, produces an
-INCOMPLETE final result for that Skill, releases the lease, refreshes the report,
-and refills the slot. Do not automatically retry the same Task because the old
-Agent may still write late to the fixed expected-result path.
+Launch and register every replacement item immediately while the remaining Agents continue.
 
-### Silent/hung reviewer watchdog
-
-If no reviewer emits an event during one bounded wait cycle, call:
+Native failed/cancelled Agent:
 
 ```text
-Windows: cmd.exe /d /c "pytool.cmd tools\review_watchdog.py tick --dispatch-session <SESSION> --timeout-seconds 1200 --ai-parallel 5"
-Linux/CentOS/macOS: python tools/review_watchdog.py tick --dispatch-session <SESSION> --timeout-seconds 1200 --ai-parallel 5
+Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py retry --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5 --reason \"<SUMMARY>\""
+Linux/CentOS/macOS: python tools/review_pool.py retry --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5 --reason "<SUMMARY>"
 ```
 
-A tick does nothing destructive while leases are younger than the timeout. Once a
-lease exceeds the timeout, only that Skill is recorded as `AI_REVIEW_TIMEOUT` and
-INCOMPLETE, its lease is released, and the free slot is refilled. Healthy Agents
-continue running. If all five Agents hang, all five are failed deterministically
-after the timeout so the Batch can finish instead of waiting forever.
+Attempts use separate result paths. Default maximum is two; retry exhaustion alone becomes AI `INCOMPLETE`.
 
-The normal operational timeout is 1200 seconds (20 minutes). The 60-second parent
-wait cycle is only a polling cadence and does not itself fail a reviewer.
+No Agent event during one bounded wait cycle:
 
-8. Continue completion/failure/watchdog cycles until the trusted checkpoint returns
-   `VIEW_RESULTS` / `COMPLETE`. Do not open the report yet; continue with localization.
+```text
+Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py tick --dispatch-session <SESSION> --timeout-seconds 1200 --ai-parallel 5"
+Linux/CentOS/macOS: python tools/review_pool.py tick --dispatch-session <SESSION> --timeout-seconds 1200 --ai-parallel 5
+```
 
-## Incremental zh-CN report localization
+A stale reviewer is retried safely; it is not terminal until retry exhaustion.
 
-1. Ask trusted program code for the next immutable report-safe job:
+If this invocation itself stalls or is interrupted, the user may invoke `/auto-skill-review` again. The new invocation must restart from `resume`, not from the prior UI's in-memory task list.
+
+Continue until `VIEW_RESULTS` / `COMPLETE`.
+
+## 4. Incremental zh-CN localization
 
 ```text
 Windows: cmd.exe /d /c "pytool.cmd tools\localize_report.py prepare --current"
 Linux/CentOS/macOS: python tools/localize_report.py prepare --current
 ```
 
-2. If `status=COMPLETE`, localization is finished. Report only `batch_id` and the
-   final result paths already returned by the review checkpoint.
-3. If `status=READY`, start one fresh project Agent of type `report-localizer`.
-   It preloads `/report-zh-localizer`. Send only `job_id`, `input_path`,
-   `result_schema_path`, and `expected_result` from `localization_dispatch`.
-   The parent must not read the job input.
-4. When the localizer completes, call:
+If `status=READY`, start one fresh `report-localizer` Agent with only `job_id`, `input_path`, `result_schema_path`, and `expected_result`. Then import:
 
 ```text
 Windows: cmd.exe /d /c "pytool.cmd tools\localize_report.py import --current --job-id <JOB_ID>"
 Linux/CentOS/macOS: python tools/localize_report.py import --current --job-id <JOB_ID>
 ```
 
-5. The trusted importer validates Schema/job/key/hash, merges only valid text into
-   Translation Memory, refreshes HTML/CSV/JSON, and returns the next immutable
-   `localization_dispatch` when pending text remains. Dispatch that next job and
-   repeat until `status=COMPLETE`.
-6. A localization failure never changes canonical security/quality/overall
-   decisions. Stop localization with the specific error; the report remains usable
-   with English fallback.
+Repeat until `COMPLETE`. Localization never changes canonical review decisions.
 
-If the coordinator itself restarts and no prior live AI session can be continued,
-start again with the initial checkpoint **without** a session token. The trusted
-script creates a new session and safely recovers orphan result files before
-redispatching still-missing Tasks. Localization may always restart from the
-platform-specific prepare command above; Translation Memory prevents already
-translated keys from being re-dispatched.
-
-On unavailable isolation, malformed results, unexpected paths, or additional
-authority requirements, stop with the specific issue (use
-`CONTEXT_ISOLATION_UNAVAILABLE` when applicable). Reviewer failures/timeouts must
-be persisted through the trusted watchdog; never silently skip them or reinterpret
-them as PASS.
+On unavailable isolation, malformed results, or unexpected paths, stop with the specific issue. Never reinterpret missing/failed review as PASS.
