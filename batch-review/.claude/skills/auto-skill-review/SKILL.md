@@ -6,7 +6,7 @@ allowed-tools: Bash Agent
 
 # Automatic Skill Review for Claude Code
 
-Every invocation starts from durable project state. **Do not continue an old UI task list or assume Agents from a previous invocation are still alive.** The parent only dispatches native reviewer/localizer Agents and invokes trusted project commands. Never read target packages, handoffs, scanner reports, prior AI results, Translation Memory, or batch evidence in the parent context. Do not use Git, package managers, network, MCP, or arbitrary shell commands. Never execute reviewed content.
+Every invocation starts from durable project state. **Do not continue an old UI task list or assume Agents from a previous invocation are still alive.** The parent only dispatches native reviewer/localizer Agents and invokes trusted project commands. Never read target packages, handoffs, scanner reports, prior AI results, Translation Memory, or batch evidence in the parent context. Do not use Git, package managers, network, MCP, or arbitrary shell commands. Never execute reviewed content. Do not inspect queue/state files yourself.
 
 ## 1. Resume checkpoint — always first
 
@@ -15,13 +15,15 @@ Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py resume --ai-parallel 5"
 Linux/CentOS/macOS: python tools/review_pool.py resume --ai-parallel 5
 ```
 
-This command advances trusted static preparation when required, recovers valid orphan attempt results, replaces a stuck prior coordinator session, and returns a fresh `dispatch_session` plus newly leased `ai_dispatch.items`. Attempt-specific result paths make redispatch safe even if an old Agent later writes its old result.
+This command advances trusted static preparation when required, recovers valid orphan attempt results, replaces a stuck prior coordinator session, and returns a fresh `dispatch_session` plus newly leased `ai_dispatch.items` up to `max_parallel`. Attempt-specific result paths make redispatch safe even if an old Agent later writes its old result.
+
+Compatibility note: the pool controller wraps the legacy `review.cmd --auto --json --ai-parallel 5` checkpoint. Do not call that legacy AI-pool command directly. The former `--completed-task-id` completion event is replaced by `review_pool.py complete` below.
 
 `status.cmd` / `./status.sh` shows Reviewer Pool slots, task IDs, attempt numbers, runtime age, stale state, and queue depth.
 
 ## 2. Mandatory full fan-out before waiting
 
-For every returned item, start one fresh Agent of type `skill-security-reviewer`, preloading `/skill-security-review`, and send only `task_id`, `handoff`, and `expected_result`.
+For every returned item, start one fresh project Agent of type `skill-security-reviewer`, preloading `/skill-security-review`, and send only `task_id`, `handoff`, and `expected_result`.
 
 **Launch all returned items before waiting for any one of them.** Five returned items means spawn five Agents first; do not spawn one and wait.
 
