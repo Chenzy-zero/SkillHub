@@ -18,9 +18,9 @@ Linux/CentOS/macOS: python tools/review_pool.py resume --ai-parallel 5
 
 This trusted command advances plan/static preparation when needed, recovers valid late/orphan attempt results, replaces any prior coordinator session, and returns a fresh `dispatch_session` plus only newly leased `ai_dispatch.items` up to `max_parallel`. Reviewer attempts use isolated result paths, so replacing a stuck coordinator is safe even if an old reviewer writes late.
 
-Compatibility note: the pool controller wraps the legacy `review.cmd --auto --json --ai-parallel 5` checkpoint. Do not call that legacy AI-pool command directly. The former `--completed-task-id` completion event is replaced by `review_pool.py complete` below.
+During the AI phase, reviewer-pool scheduling, ready-result import, and refill run in the same trusted Python process. The historical `review.cmd --auto --json --ai-parallel 5` chain is retained only as a compatibility fallback for non-AI transitions such as plan/static preparation. Do not call that legacy AI-pool command directly. The former `--completed-task-id` completion event is replaced by `review_pool.py complete` below.
 
-For diagnostics the operator can run `status.cmd` / `./status.sh`; it shows Reviewer Pool slots, task IDs, attempt numbers, runtime age, stale state, and queue depth.
+For diagnostics the operator can run `status.cmd` / `./status.sh`; it shows Reviewer Pool slots, task IDs, attempt numbers, runtime age, stale state, queue depth, and whether report projection is intentionally deferred.
 
 ## 2. Mandatory full fan-out before waiting
 
@@ -48,7 +48,9 @@ Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py complete --dispatch-sess
 Linux/CentOS/macOS: python tools/review_pool.py complete --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5
 ```
 
-The trusted importer validates that attempt result, finalizes only that Skill, releases one slot, refreshes reports, and returns replacement `ai_dispatch.items`. Launch every replacement immediately and register `launched` before waiting again.
+Treat the supplied task ID as the completion trigger, not as a request to import only one result. Trusted code first validates that event, then opportunistically imports **every in-flight attempt result already durable on disk** in one Batch State load. A burst where five reviewers have all finished can therefore be consumed by one `complete` command. All successfully imported leases are released together from the coordinator perspective and every returned replacement item must be launched immediately.
+
+While AI work remains, full CSV/JSON/HTML report projection is deliberately deferred; per-Skill durable results and the compact AI queue remain authoritative. `status.cmd` shows the deferred count. The complete report projection is rebuilt once at the normal Batch finalization boundary instead of after every reviewer completion.
 
 On native failed/cancelled reviewer, retry safely instead of failing the Skill immediately:
 
