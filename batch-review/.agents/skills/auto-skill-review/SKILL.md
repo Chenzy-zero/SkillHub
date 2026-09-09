@@ -26,16 +26,16 @@ For diagnostics the operator can run `status.cmd` / `./status.sh`; it shows Revi
 
 For **every** returned `ai_dispatch.items` entry, start one fresh project subagent named `skill_security_reviewer`, following `$skill-security-review`, with only `task_id`, `handoff`, and `expected_result`.
 
-**Do not wait after starting the first reviewer. Launch all returned items first.** If five items are returned, the required sequence is spawn 1, spawn 2, spawn 3, spawn 4, spawn 5, then wait-any.
+**Do not wait after starting the first reviewer. Launch all returned items first.** If five items are returned, the required sequence is spawn 1, spawn 2, spawn 3, spawn 4, spawn 5, then one batch launch-registration command, then wait-any.
 
-Immediately after each native spawn succeeds, register it:
+After all native spawns succeed, register all launched task IDs in **one** command to avoid five extra Python cold starts:
 
 ```text
-Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py launched --dispatch-session <SESSION> --task-id <TASK_ID>"
-Linux/CentOS/macOS: python tools/review_pool.py launched --dispatch-session <SESSION> --task-id <TASK_ID>
+Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py launched --dispatch-session <SESSION> --task-id <TASK1> --task-id <TASK2> --task-id <TASK3> --task-id <TASK4> --task-id <TASK5>"
+Linux/CentOS/macOS: python tools/review_pool.py launched --dispatch-session <SESSION> --task-id <TASK1> --task-id <TASK2> --task-id <TASK3> --task-id <TASK4> --task-id <TASK5>
 ```
 
-Do not enter a wait cycle while any returned item is still only reserved/unlaunched.
+Use exactly the returned task IDs; fewer than five is valid when the queue has fewer new items. Do not enter a wait cycle while any returned item is still reserved/unlaunched.
 
 ## 3. Completion-driven rolling pool
 
@@ -48,7 +48,7 @@ Windows: cmd.exe /d /c "pytool.cmd tools\review_pool.py complete --dispatch-sess
 Linux/CentOS/macOS: python tools/review_pool.py complete --dispatch-session <SESSION> --task-id <TASK_ID> --ai-parallel 5
 ```
 
-Treat the supplied task ID as the completion trigger, not as a request to import only one result. Trusted code first validates that event, then opportunistically imports **every in-flight attempt result already durable on disk** in one Batch State load. A burst where five reviewers have all finished can therefore be consumed by one `complete` command. All successfully imported leases are released together from the coordinator perspective and every returned replacement item must be launched immediately.
+Treat the supplied task ID as the completion trigger, not as a request to import only one result. Trusted code first validates that event, then opportunistically imports **every in-flight attempt result already durable on disk** in one Batch State load. A burst where five reviewers have all finished can therefore be consumed by one `complete` command. All successfully imported leases are released from the coordinator and every returned replacement item must be launched immediately; register the whole replacement burst with one `launched` command before waiting again.
 
 While AI work remains, full CSV/JSON/HTML report projection is deliberately deferred; per-Skill durable results and the compact AI queue remain authoritative. `status.cmd` shows the deferred count. The complete report projection is rebuilt once at the normal Batch finalization boundary instead of after every reviewer completion.
 
